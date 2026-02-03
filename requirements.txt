@@ -1,0 +1,5 @@
+# Core dependencies
+torch>=2.0.0
+transformers>=4.30.0
+pillow>=9.0.0
+pillow-heif>=0.10.0
