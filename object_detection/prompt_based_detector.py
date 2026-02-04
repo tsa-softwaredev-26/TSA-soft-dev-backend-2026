@@ -10,16 +10,12 @@ TODO: Migrate to RTX server for faster inference
     - Process multiple images in single forward pass: processor(images=[img1, img2, ...])
     - Return List[detection_dict] instead of single detection_dict
 """
-
+from typing import Optional, Dict, Any
 import torch
 from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
-import pillow_heif
 from pathlib import Path
+from PIL import Image
 
-from utils import load_image
-
-# Register HEIF/HEIC support (iphone images)
-pillow_heif.register_heif_opener()
 
 
 class GroundingDinoDetector:
@@ -32,11 +28,11 @@ class GroundingDinoDetector:
     
     def __init__(
         self,
-        model_id="IDEA-Research/grounding-dino-tiny",
-        box_threshold=0.4,
-        text_threshold=0.3,
-        device=None
-    ):
+        model_id: str = "IDEA-Research/grounding-dino-tiny",
+        box_threshold: float = 0.4,
+        text_threshold: float = 0.3,
+        device: Optional[str] = None
+    ) -> None:
         """
         Initialize the Grounding DINO detector.
         
@@ -61,23 +57,21 @@ class GroundingDinoDetector:
         else:
             self.device = device
             
-        print(f"Using device: {self.device}")
+        print(f"Using device: {self.device}") # Remove debug print when called from Kotlin
         
         # Load model and processor immediately
-        print(f"Loading Grounding DINO model: {self.model_id}...")
         self.processor = AutoProcessor.from_pretrained(self.model_id)
         self.model = AutoModelForZeroShotObjectDetection.from_pretrained(
             self.model_id
         ).to(self.device)
     
-    def detect(self, image_path, prompt):
+    def detect(self, image, prompt):
         """
         Detect an object in an image using a text prompt.
         
         Args:
-            image_path: Path to the input image
-            prompt: Text description of object to detect (e.g., "cat", "red car")
-            
+            image: PIL Image object
+            prompt: Text description of object to detect (e.g., "camo wallet")            
         Returns:
             Dictionary containing:
                 - 'box': Bounding box coordinates [x1, y1, x2, y2]
@@ -85,9 +79,6 @@ class GroundingDinoDetector:
                 - 'label': Detected label text
             Returns None if no detection above threshold.
         """
-        print(f"Loading image: {image_path}")
-        image = load_image(image_path)
-        
         # Prepare inputs - text_labels must be nested list for batch processing
         text_labels = [[prompt]]
         
@@ -98,7 +89,7 @@ class GroundingDinoDetector:
             return_tensors="pt"
         ).to(self.device)
         
-        # Run inference
+        # Only inference (no training)
         with torch.no_grad():
             outputs = self.model(**inputs)
         
@@ -114,7 +105,6 @@ class GroundingDinoDetector:
         result = results[0]
         
         if len(result["boxes"]) == 0:
-            print(f"No '{prompt}' detected in the image.")
             return None
         
         # Return the highest confidence detection
@@ -126,7 +116,6 @@ class GroundingDinoDetector:
             'label': result["labels"][best_idx]
         }
         
-        print(f"Detected '{detection['label']}' with confidence: {detection['score']:.3f}")
-        print(f"Bounding box: {[round(x, 2) for x in detection['box']]}")
+        
         
         return detection

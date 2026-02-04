@@ -5,13 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "visual-memory"
 version = "0.1.0"
-description = "Visual memory system with object detection for FindIt app"
+description = "Visual memory system with object detection for TSA Software Development app"
 requires-python = ">=3.8"
 dependencies = [
     "torch>=2.0.0",
     "transformers>=4.30.0",
     "pillow>=9.0.0",
     "pillow-heif>=0.10.0",
+    "ultralytics>=8.0.0",
 ]
 
 [project.scripts]
@@ -20,4 +21,4 @@ scan-mode = "scan_mode.main:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["remember_mode*", "scan_mode*", "utils*"]
+include = ["object_detection*", "embed_image*", "utils*", "remember_mode*", "scan_mode*"]

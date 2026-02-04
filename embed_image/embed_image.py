@@ -1,12 +1,17 @@
+"""Image embedding module using DINOv3."""
+from typing import Optional
 import torch
 from torch import nn
 from transformers import AutoImageProcessor, AutoModel
+from PIL import Image
 
 
 class ImageEmbedder:
     
-    def __init__(self, pretrained_model_name="facebook/dinov3-vitl16-pretrain-lvd1689m"):
+    def __init__(self, pretrained_model_name: str = "facebook/dinov3-vitl16-pretrain-lvd1689m") -> None:
         """
+        Initialize image embedder with DINOv3 model.
+        
         Args:
             pretrained_model_name: HuggingFace model identifier (default is DINOv3 ViT-Large)
         """
@@ -17,12 +22,15 @@ class ImageEmbedder:
             device_map="auto"
         )
     
-    def embed(self, image):
+    def embed(self, image: Image.Image) -> torch.Tensor:
         """
         Generate embedding for an image.
+        
+        Args:
+            image: PIL Image object
             
         Returns:
-            Pooled embedding tensor
+            Pooled embedding tensor of shape (1, embedding_dim)
             
         Note:
             TODO: For server version, implement batch processing to embed 

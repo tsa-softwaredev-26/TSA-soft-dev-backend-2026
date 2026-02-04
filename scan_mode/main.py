@@ -20,8 +20,8 @@ TODO NEXT:
 add images of cropped objects to demo_database/ 
 """
 import os
-from image_similarity.embed_image import ImageEmbedder
-from object_detection.detect_objects import YoloeDetector
+from embed_image import ImageEmbedder
+from object_detection import YoloeDetector
 from utils import crop_object, find_closest_match, load_image, load_folder_images
 from pathlib import Path
 CURRENT_DIR = Path(__file__).parent
