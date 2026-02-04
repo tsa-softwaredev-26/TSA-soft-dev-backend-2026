@@ -36,12 +36,6 @@ def crop_object(image: Image.Image, box: List[float]) -> Image.Image:
 def load_image(file_path: str) -> Optional[Image.Image]:
     """
     Load a single image from a given path.
-    
-    Args:
-        file_path: Path to the image file
-        
-    Returns:
-        PIL Image object in RGB mode, or None if loading fails
     """
     path = Path(file_path)
     
