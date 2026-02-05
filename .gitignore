@@ -44,3 +44,18 @@ Thumbs.db
 # Test data
 test/
 demo_images/
+
+# ML / model files
+*.pt
+*.pth
+*.safetensors
+*.onnx
+*.ts
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Model directories
+models/
+weights/
