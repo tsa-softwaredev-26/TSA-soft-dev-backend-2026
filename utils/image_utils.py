@@ -23,7 +23,7 @@ def crop_object(image: Image.Image, box: List[float]) -> Image.Image:
     
     x1, y1, x2, y2 = [int(coord) for coord in box]
     
-    # Clamp coordinates to image bounds
+    # Ensures bbx doesn't go out of bounds
     x1, y1 = max(x1, 0), max(y1, 0)
     x2, y2 = min(x2, image.width), min(y2, image.height)
     
@@ -60,9 +60,6 @@ def load_folder_images(folder_path: str) -> List[Tuple[str, Image.Image]]:
         
     Returns:
         List of tuples: (file_path, PIL Image)
-        
-    Note:
-        Supported formats: .jpg, .jpeg, .png, .heic, .heif
     """
     path = Path(folder_path)
     
@@ -74,14 +71,14 @@ def load_folder_images(folder_path: str) -> List[Tuple[str, Image.Image]]:
         print(f"Warning: '{folder_path}' is not a directory.")
         return []
     
-    # Supported image extensions
-    IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.heic', '.heif', '.bmp', '.gif', '.webp'}
-    
     images = []
     for file_path in path.iterdir():
-        if file_path.is_file() and file_path.suffix.lower() in IMAGE_EXTENSIONS:
+        try:
             img = load_image(str(file_path))
-            if img is not None:
-                images.append((str(file_path), img))
+        except Exception:
+            print(f"Warning: Could not load image '{file_path}'")
+            img = None
+        if img is not None:
+            images.append((str(file_path), img))
     
     return images

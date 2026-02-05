@@ -36,9 +36,8 @@ def find_closest_match(
         Tuple of (best_path, best_similarity) or (None, 0.0) if no match above threshold
         
     Note:
-        TODO: Replace linear search with HNSW index (via hnswlib, FAISS, or Milvus)
-        for fast approximate nearest neighbor search at scale.
-        Current complexity: O(n) where n is database size
+        TODO: Batch similarity computations.
+        Faster search like HNSW would only slightly improve speed since database will never be >5k images
     """
     if not database_embeddings:
         return None, 0.0
