@@ -42,6 +42,7 @@ Thumbs.db
 *.pth
 *.onnx
 *.safetensors
+object_detection/mobileclip2_b.ts
 
 # Model directories
 models/
@@ -50,3 +51,7 @@ checkpoints/
 
 # Depth Pro — cloned locally for testing, installed as package via pip
 depth_demo/ml-depth-pro/
+*.ts # or be specific:
+object_detection/mobileclip2_b.ts
+*.ts # or be specific:
+object_detection/mobileclip2_b.ts
