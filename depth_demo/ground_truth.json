@@ -1,0 +1,22 @@
+{
+  "airpods_1ft_waist.png":  { "horizontal_ft": 1.0, "height_zone": "waist" },
+  "airpods_3ft_waist.png":  { "horizontal_ft": 3.0, "height_zone": "waist" },
+  "airpods_6ft_waist.png":  { "horizontal_ft": 6.0, "height_zone": "waist" },
+  "airpods_1ft_floor.png":  { "horizontal_ft": 1.0, "height_zone": "floor" },
+  "airpods_3ft_floor.png":  { "horizontal_ft": 3.0, "height_zone": "floor" },
+  "airpods_6ft_floor.png":  { "horizontal_ft": 6.0, "height_zone": "floor" },
+
+  "wallet_1ft_waist.png":   { "horizontal_ft": 1.0, "height_zone": "waist" },
+  "wallet_3ft_waist.png":   { "horizontal_ft": 3.0, "height_zone": "waist" },
+  "wallet_6ft_waist.png":   { "horizontal_ft": 6.0, "height_zone": "waist" },
+  "wallet_1ft_floor.png":   { "horizontal_ft": 1.0, "height_zone": "floor" },
+  "wallet_3ft_floor.png":   { "horizontal_ft": 3.0, "height_zone": "floor" },
+  "wallet_6ft_floor.png":   { "horizontal_ft": 6.0, "height_zone": "floor" },
+
+  "mouse_1ft_waist.png":    { "horizontal_ft": 1.0, "height_zone": "waist" },
+  "mouse_3ft_waist.png":    { "horizontal_ft": 3.0, "height_zone": "waist" },
+  "mouse_6ft_waist.png":    { "horizontal_ft": 6.0, "height_zone": "waist" },
+  "mouse_1ft_floor.png":    { "horizontal_ft": 1.0, "height_zone": "floor" },
+  "mouse_3ft_floor.png":    { "horizontal_ft": 3.0, "height_zone": "floor" },
+  "mouse_6ft_floor.png":    { "horizontal_ft": 6.0, "height_zone": "floor" }
+}

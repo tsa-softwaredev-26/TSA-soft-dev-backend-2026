@@ -32,30 +32,21 @@ env/
 *.swo
 .cursor/
 
+# OS
+.DS_Store
+Thumbs.db
+._*
+
 # Model weights
 *.pt
 *.pth
 *.onnx
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Test data
-test/
-demo_images/
-
-# ML / model files
-*.pt
-*.pth
 *.safetensors
-*.onnx
-*.ts
-
-# Python cache
-__pycache__/
-*.pyc
 
 # Model directories
 models/
 weights/
+checkpoints/
+
+# Depth Pro — cloned locally for testing, installed as package via pip
+depth_demo/ml-depth-pro/

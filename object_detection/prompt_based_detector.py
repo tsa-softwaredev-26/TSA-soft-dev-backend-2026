@@ -29,8 +29,8 @@ class GroundingDinoDetector:
     def __init__(
         self,
         model_id: str = "IDEA-Research/grounding-dino-tiny",
-        box_threshold: float = 0.4,
-        text_threshold: float = 0.3,
+        box_threshold: float = 0.2,
+        text_threshold: float = 0.2,
         device: Optional[str] = None
     ) -> None:
         """
@@ -105,6 +105,7 @@ class GroundingDinoDetector:
         result = results[0]
         
         if len(result["boxes"]) == 0:
+            print(results)
             return None
         
         # Return the highest confidence detection

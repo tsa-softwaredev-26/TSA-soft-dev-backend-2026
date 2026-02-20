@@ -1,7 +1,7 @@
 """Image utility functions for loading and processing images."""
 from typing import Optional, List, Tuple
 from pathlib import Path
-from PIL import Image
+from PIL import Image, ImageOps
 
 
 def crop_object(image: Image.Image, box: List[float]) -> Image.Image:
@@ -36,20 +36,28 @@ def crop_object(image: Image.Image, box: List[float]) -> Image.Image:
 def load_image(file_path: str) -> Optional[Image.Image]:
     """
     Load a single image from a given path.
+    Automatically fixes EXIF orientation and converts to RGB.
     """
     path = Path(file_path)
-    
+
     if not path.is_file():
         print(f"Warning: File '{file_path}' does not exist.")
         return None
-    
+
     try:
-        img = Image.open(file_path).convert("RGB")
+        img = Image.open(path)
+
+        # ✅ Fix EXIF rotation (prevents 90/180/270 degree issues)
+        img = ImageOps.exif_transpose(img)
+
+        # Convert to RGB after fixing orientation
+        img = img.convert("RGB")
+
         return img
+
     except Exception as e:
         print(f"Warning: Could not load '{file_path}': {e}")
         return None
-
 
 def load_folder_images(folder_path: str) -> List[Tuple[str, Image.Image]]:
     """
