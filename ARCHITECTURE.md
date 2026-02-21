@@ -14,9 +14,7 @@ Python backend for a visual memory app built for **blind users**. The system nar
 
 **Remember Mode** — User specifies an object by text prompt. System detects + crops it, embeds it, stores it. This is how "significant objects" are registered.
 
-**Scan Mode** — User takes a photo. System detects all objects, embeds each crop, searches the database for matches. Every match = a significant object the user cares about. Returns distance + spatial position for each, narrated aloud.
-
-> Depth estimation is part of Scan Mode, not a separate mode.
+**Scan Mode** — User takes a photo. System detects all objects, embeds each crop, searches the database for matches. Every match = a significant object. Returns narration string per match, including depth from depth estimation.
 
 ---
 
@@ -28,7 +26,7 @@ python setup_weights.py
 ```
 
 `pip install -e .` installs all dependencies including depth-pro from GitHub.
-`setup_weights.py` downloads the Depth Pro checkpoint (~2GB) and creates a symlink at `checkpoints/` so `create_model_and_transforms()` works from any directory without modifying Apple's source.
+`setup_weights.py` downloads the Depth Pro checkpoint (~2GB) and creates a symlink at `checkpoints/` so `create_model_and_transforms()` works from any directory.
 `checkpoints/` is gitignored — every teammate runs this once after cloning.
 
 ---
@@ -41,22 +39,25 @@ VisualMemory/
 │   └── main.py                     # Prompt → detect → crop → embed pipeline
 ├── scan_mode/
 │   └── main.py                     # detect all → embed → match → depth + narration
+├── depth_estimation/               # [NEXT] depth + spatial output module
+│   ├── __init__.py
+│   └── estimator.py                # DepthEstimator class + narration logic
 ├── object_detection/
 │   ├── detect_all_objects.py       # YoloeDetector (prompt-free, all objects)
 │   ├── prompt_based_detector.py    # GroundingDinoDetector (text prompt → best box)
-│   └── yoloe-26l-seg-pf.pt        # Local YOLOE weights
+│   └── yoloe-26l-seg-pf.pt        # Local YOLOE weights (gitignored)
 ├── embed_image/
 │   └── embed_image.py              # DINOv3 ViT-Large embedder
 ├── utils/
 │   ├── image_utils.py              # load_image, load_folder_images, crop_object
 │   └── similarity_utils.py         # cosine_similarity, find_closest_match
-├── depth_demo/                     # [CURRENT] Depth Pro testing — throwaway, will become depth_estimation/
-│   ├── depth_test.py
-│   ├── input_images/
-│   └── ml-depth-pro/               # gitignored, cloned for local testing only
+├── depth_demo/                     # throwaway test suite — delete after integration
+│   ├── depth_test.py               # 18-image test runner
+│   ├── ground_truth.json           # ground truth distances for all test images
+│   ├── test_images/                # 18 test images (gitignored)
+│   └── ml-depth-pro/               # gitignored, local clone for testing
 ├── checkpoints/ → symlink          # gitignored, created by setup_weights.py
-├── setup_weights.py                # one-time setup script
-└── old_depth_demo/                 # old experiments, reference only
+└── setup_weights.py                # one-time setup script
 ```
 
 ---
@@ -75,14 +76,14 @@ VisualMemory/
 - Model: `yoloe-26l-seg-pf.pt` (local, prompt-free)
 - Input: image file path
 - Output: `(List[[x1,y1,x2,y2]], List[float])` or `(None, None)`
-- Returns all detections above threshold (`conf=0.35`, `iou=0.45`)
+- Thresholds: `conf=0.35`, `iou=0.45`
 - Used in: Scan Mode
 
 ### `embed_image/embed_image.py` — `ImageEmbedder`
 - Model: `facebook/dinov3-vitl16-pretrain-lvd1689m`
 - Input: PIL Image
 - Output: `torch.Tensor` shape `(1, embedding_dim)`
-- `device_map="auto"` handles MPS/CUDA automatically
+- `device_map="auto"` handles MPS/CUDA
 - Used in: Both modes
 
 ### `utils/image_utils.py`
@@ -93,13 +94,22 @@ VisualMemory/
 ### `utils/similarity_utils.py`
 - `cosine_similarity(t1, t2)` → scalar tensor
 - `find_closest_match(query, database, threshold)` → `(path, score)` or `(None, 0.0)`
-- Linear search, fine for expected database size (<5k items)
+- Linear search, fine for expected scale
+
+### `depth_estimation/estimator.py` — `DepthEstimator` [TO BUILD]
+- Model: Apple Depth Pro (`apple/ml-depth-pro`)
+- `__init__(focal_length_px=None)` — loads model once, stores f_px
+- `estimate(image: PIL.Image) -> depth_map` — runs Depth Pro, returns tensor (H, W) in meters
+- `get_depth_at_bbox(depth_map, bbox) -> float` — mean depth in inner 50% of bbox
+- `get_clock_position(bbox, img_w, img_h) -> str` — "3 o'clock"
+- `build_narration(label, clock, distance_ft, similarity) -> str` — final narration string
+- All spatial + narration logic lives here, not in utils
 
 ---
 
 ## Mode Pipelines
 
-### Remember Mode
+### Remember Mode (`remember_mode/main.py`)
 ```
 text prompt
     → GroundingDinoDetector.detect(image, prompt)
@@ -110,7 +120,7 @@ text prompt
 
 ### Scan Mode — current
 ```
-database folder → load_folder_images() → ImageEmbedder.embed() each → database_embeddings[]
+database folder → load_folder_images() → embed each → database_embeddings[]
 
 query image
     → YoloeDetector.detect_all()
@@ -118,43 +128,37 @@ query image
     → return all matched objects
 ```
 
-### Scan Mode — target (with depth + narration)
+### Scan Mode — target
 ```
-[same through matching]
-    → run DepthEstimator.estimate(image) once → depth_map
-    → for each matched object:
-        → get_depth_at_bbox(depth_map, box)   → straight-line distance (meters)
-        → get_clock_position(box, w, h)        → "3 o'clock"
-        → get_vertical_zone(box, h)            → "knee level"
-        → get_spatial_offsets(box, w, h, dist) → horizontal + vertical distances via trig
-    → narration string per object:
-        "Wallet at 3 o'clock, 3 feet away, knee level"
-```
+database folder → load_folder_images() → embed each → database_embeddings[]
 
-> Depth map computed once per image, reused for all matched objects.
+query image
+    → YoloeDetector.detect_all()
+    → DepthEstimator.estimate(image) → depth_map   ← once per image
+    → for each detected box:
+        → crop → embed → find_closest_match()
+        → if match:
+            → get_depth_at_bbox(depth_map, box) → distance_ft
+            → get_clock_position(box, w, h)     → clock
+            → build_narration(label, clock, distance_ft, similarity)
+    → print narration per matched object
+```
 
 ---
 
 ## Depth Estimation
 
 ### Model: Apple Depth Pro
-- Outputs metric depth (absolute meters) — no calibration scale factor needed
-- `f_px=None` → model infers focal length from image
-- `f_px=tensor` → use known focal length (more accurate when available)
-- ~2GB checkpoint, downloaded via `setup_weights.py`
+- Metric depth (absolute meters) — no scale factor needed
+- `f_px=None` → model infers focal length
+- `f_px=tensor` → use known value (more accurate, ~26% error vs ~75% inferred at close range)
+- Checkpoint: `checkpoints/depth_pro.pt` via symlink
 
-### Test Results (42cm airpod case, iPhone 15 Plus)
-| Mode | Focal px | Mean depth | Error |
-|------|----------|------------|-------|
-| Inferred | 4290.6 | 0.735m | 75.0% |
-| Calibrated (iPhone 15 Plus) | 3094.0 | 0.530m | 26.2% |
+### Focal Length
+Pass from Android camera API: `f_px = (f_mm / sensor_width_mm) * image_width_px`
+iPhone 15 Plus reference used to demo: `f_mm=6.24`, `sensor_width=8.64mm`.
 
-**Calibrated wins.** iPhone 15 Plus specs: `f_mm=6.24`, `sensor_width=8.64mm`.
-`f_px = (f_mm / sensor_width_mm) * image_width_px`
-
-Still need to test at 1ft, 3ft, 6ft to confirm calibrated consistently beats inferred across distances before committing to it in the pipeline.
-
-### Depth Pro API (official pattern — do not deviate)
+### Official API 
 ```python
 import depth_pro
 
@@ -164,120 +168,89 @@ model.eval()
 image, _, f_px = depth_pro.load_rgb(image_path)
 image = transform(image)
 
-prediction = model.infer(image, f_px=f_px)
-depth = prediction["depth"]            # metric meters, shape (H, W)
-focallength_px = prediction["focallength_px"]
+prediction = model.infer(image, f_px=f_px)   # f_px as torch.float32 tensor
+depth = prediction["depth"]                   # metric meters, shape (H, W)
 ```
 
-### Checkpoint Path (temp, during depth_demo testing)
-```python
-# TODO: DELETE when moving to depth_estimation module — use symlink instead
-config = depth_pro.depth_pro.DEFAULT_MONODEPTH_CONFIG_DICT
-config.checkpoint_uri = Path(__file__).parent / "ml-depth-pro" / "checkpoints" / "depth_pro.pt"
-model, transform = depth_pro.create_model_and_transforms(config=config)
-```
+### Test Results (18 images, iPhone 15 Plus)
+Average error: 27.8%
+Floor shots result in higher error
+Accuracy correlated to how straight the camera is angled
+Error is acceptable. At 3ft = ~10 inches off, at 1ft = ~3 inches off.
 
 ---
 
-## Spatial Output Design
+## Narration Output
 
-### Design Philosophy
-Complex backend, dead simple narration. One number, one direction, one height word.
-The user is processing audio while moving — cognitive load is the enemy.
+### Philosophy
+Mix simplicity in output, inspired by Steve Jobs philosphy.
+User's natural behavior will tilt the phone until they find it with the distance and clock position.
 
-### Camera Assumption
-User holds phone at chest height pointing forward.
-This is a stated design constraint (same as BlindSquare, Google Maps audio nav).
-Makes vertical positioning self-calibrating — no need to know user height.
-Works identically for wheelchair users since position is relative to camera, not ground.
+### Output (to be tuned)
+```
+High confidence (similarity ≥ 0.6):
+    "Wallet at 3 o'clock, 2 feet away."
 
-### Output Components
-All derived from bbox center + Depth Pro straight-line distance:
+Low confidence (similarity 0.4–0.6):
+    "May be a wallet at 3 o'clock, focus to verify."
 
-**1. Straight-line distance** — from Depth Pro, metric meters converted to feet.
+Below threshold (similarity < 0.4):
+    → do not announce
+```
 
-**2. Clock position** — horizontal direction, 12 zones, pure trig on bbox center:
+### Clock Position Logic
 ```python
-angle = math.degrees(math.atan2(nx, -ny)) % 360  # 0 = 12 o'clock, clockwise
-hour = round(angle / 30) % 12 or 12
+angle = math.degrees(math.atan2(nx, -ny)) % 360  # 0=12 o'clock, clockwise
+hour  = round(angle / 30) % 12 or 12
 ```
-
-**3. Vertical zone** — camera-relative height from bbox center y position:
-```
-0–15%  → overhead
-15–35% → high / shelf
-35–50% → chest
-50–65% → waist
-65–80% → knee
-80–100%→ floor
-```
-
-**4. Spatial offsets (raw, for testing)** — derived via trig from straight-line distance + bbox angles:
-```
-horizontal_distance = straight_line * sin(horizontal_angle)
-vertical_distance   = straight_line * sin(vertical_angle)
-```
-
-### Final Narration String
-```
-"Wallet at 3 o'clock, 3 feet away, knee level"
-```
-
-### Example (full internal output for testing)
-```python
-{
-    "label": "wallet",
-    "straight_line_m": 0.91,
-    "straight_line_ft": 3.0,
-    "clock_position": "3 o'clock",
-    "vertical_zone": "knee level",
-    "horizontal_offset_ft": 1.5,   # raw, testing only
-    "vertical_offset_ft": 0.8,     # raw, testing only
-    "narration": "Wallet at 3 o'clock, 3 feet away, knee level"
-}
-```
-
----
-
-## TODO: Depth Integration
-
-### Testing (depth_demo — in progress)
-- [x] `depth_test.py` running, calibrated at 26.2% error at 42cm
-- [ ] Test at 1ft (30cm), 3ft (91cm), 6ft (183cm) — confirm calibrated beats inferred at all distances
-- [ ] Add spatial output: clock position, vertical zone, trig offsets
-- [ ] Print full example output dict + narration string
-
-### Build `depth_estimation/` module (after testing)
-- [ ] `DepthEstimator` class — loads model once, exposes `estimate()` and `get_depth_at_bbox()`
-- [ ] `utils/direction_utils.py` — `get_clock_position()`, `get_vertical_zone()`, `get_spatial_offsets()`
-- [ ] Replace hardcoded checkpoint path with symlink (`checkpoints/` at project root)
-- [ ] Remove `depth_demo/` once module is complete
-
-### Integrate into Scan Mode
-- [ ] `DepthEstimator.estimate(image)` once per query image
-- [ ] Per matched object: depth at bbox + clock position + vertical zone → narration string
-- [ ] Final output dict per object (see example above)
 
 ---
 
 ## Current State
 
+- Depth estimation tested and validated (27.8% avg error, acceptable)
 - All testing local image files only — no live camera, no server
-- Database re-embedded on every run (intentional for simplicity during testing)
+- Database re-embedded on every run — intentional for simplicity during testing
 - Backend called directly as Python script
 - Will be exposed via Flask (teammates), then Android via KMP
+
+---
+
+## TODO
+
+### Next: Build `depth_estimation/` module
+- [ ] Create `depth_estimation/__init__.py`
+- [ ] Create `depth_estimation/estimator.py` — `DepthEstimator` class:
+  - `__init__(focal_length_px=None)` — loads Depth Pro once
+  - `estimate(image: PIL.Image) -> torch.Tensor` — depth map in meters
+  - `get_depth_at_bbox(depth_map, bbox) -> float` — mean depth, inner 50% bbox
+  - `get_clock_position(bbox, img_w, img_h) -> str` — clock position string
+  - `build_narration(label, clock, distance_ft, similarity) -> str` — narration string
+- [ ] Use symlink checkpoint path (not hardcoded `ml-depth-pro/` path from depth_demo)
+- [ ] Add `depth_estimation` to `pyproject.toml` packages
+
+### Then: Integrate into Scan Mode
+- [ ] Import `DepthEstimator` in `scan_mode/main.py`
+- [ ] Init `DepthEstimator` with focal length
+- [ ] Call `estimate()` once per query image
+- [ ] Per matched object: `get_depth_at_bbox()` + `get_clock_position()` + `build_narration()`
+- [ ] Print narration per matched object
+- [ ] Tune confidence thresholds and demo the fully pipeline with a database
+
+### Then: Cleanup
+- [ ] Delete `depth_demo/` once integration is tested
+- [ ] Commit
 
 ---
 
 ## Future Plans (Do Not Implement Yet)
 
 ### IMU Tilt Compensation
-The phone's IMU (accelerometer + gyroscope) reports the exact tilt angle of the device. This could be used to compensate vertical depth calculations when the user points the camera up or down instead of straight ahead — removing the chest-height assumption entirely. This is an Android/iOS concern, not backend. Out of scope for TSA presentation.
+Phone IMU (accelerometer + gyroscope) reports exact tilt angle. Could compensate vertical depth when camera is angled up/down, removing the need for natural scanning. Android/iOS concern, not backend. Out of scope for TSA presentation.
 
 ### Input Enhancement — Remember Mode
-Pass user query through a cheap LLM (Claude Haiku, GPT-4o-mini) to expand vague descriptions before running Grounding DINO.
-- Input: `"remember my airpods"`
-- LLM output: `["white round earbuds", "white round earbud case", "round earbud case"]`
+Pass user query through cheap LLM (Claude Haiku, GPT-4o-mini) to expand vague descriptions before Grounding DINO.
+- `"remember my airpods"` → `["white round earbuds", "white round earbud case", "round earbud case"]`
 - Run detection with each, pick best result.
 
 ### Persistent Embedding Cache
@@ -293,14 +266,12 @@ Cache embeddings to `.npz` — only needed once Flask + Android integration begi
 ## Key Design Decisions
 
 - **DINOv3 for embeddings** — better visual similarity than CLIP, no text alignment needed
-- **YOLOE prompt-free for scan** — broad detection, let similarity handle disambiguation
+- **YOLOE prompt-free for scan** — broad detection, similarity handles disambiguation
 - **Grounding DINO for remember** — handles vague natural language well
-- **Depth Pro** — only monocular model that outputs metric (absolute) depth without calibration
-- **Calibrated focal length over inferred** — 26.2% vs 75% error at close range; pass f_px from camera metadata when available
-- **No phone spec index** — too fragile across Android variants; use camera API directly
+- **Depth Pro** — only monocular model with metric (absolute) depth, no scale factor needed
+- **Calibrated focal length** — 26% error vs 75% inferred; pass f_px from camera API
 - **Clock position** — 12 zones, pure trig, more actionable than left/right for blind users
-- **Camera-relative vertical zones** — works for any user height or wheelchair, no height input needed
-- **Chest-height assumption** — stated design constraint, same as industry standard nav apps
+- **No vertical zone in narration** — user's natural scanning handles it; chest-height assumption broke for floor objects and wheelchair users
 - **Depth map once per image** — reused across all matched objects
-- **Straight-line distance in narration** — most intuitive for a blind user navigating toward an object
-- **HEIC support** via `pillow-heif` in `load_image()`
+- **Straight-line distance** — what Depth Pro actually measures; consistent regardless of camera angle
+- **Narration confidence signal** — "May be a wallet... focus to verify" vs silent drop; actionable not just informational

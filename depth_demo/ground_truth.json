@@ -1,22 +1,127 @@
 {
-  "airpods_1ft_waist.png":  { "horizontal_ft": 1.0, "height_zone": "waist" },
-  "airpods_3ft_waist.png":  { "horizontal_ft": 3.0, "height_zone": "waist" },
-  "airpods_6ft_waist.png":  { "horizontal_ft": 6.0, "height_zone": "waist" },
-  "airpods_1ft_floor.png":  { "horizontal_ft": 1.0, "height_zone": "floor" },
-  "airpods_3ft_floor.png":  { "horizontal_ft": 3.0, "height_zone": "floor" },
-  "airpods_6ft_floor.png":  { "horizontal_ft": 6.0, "height_zone": "floor" },
-
-  "wallet_1ft_waist.png":   { "horizontal_ft": 1.0, "height_zone": "waist" },
-  "wallet_3ft_waist.png":   { "horizontal_ft": 3.0, "height_zone": "waist" },
-  "wallet_6ft_waist.png":   { "horizontal_ft": 6.0, "height_zone": "waist" },
-  "wallet_1ft_floor.png":   { "horizontal_ft": 1.0, "height_zone": "floor" },
-  "wallet_3ft_floor.png":   { "horizontal_ft": 3.0, "height_zone": "floor" },
-  "wallet_6ft_floor.png":   { "horizontal_ft": 6.0, "height_zone": "floor" },
-
-  "mouse_1ft_waist.png":    { "horizontal_ft": 1.0, "height_zone": "waist" },
-  "mouse_3ft_waist.png":    { "horizontal_ft": 3.0, "height_zone": "waist" },
-  "mouse_6ft_waist.png":    { "horizontal_ft": 6.0, "height_zone": "waist" },
-  "mouse_1ft_floor.png":    { "horizontal_ft": 1.0, "height_zone": "floor" },
-  "mouse_3ft_floor.png":    { "horizontal_ft": 3.0, "height_zone": "floor" },
-  "mouse_6ft_floor.png":    { "horizontal_ft": 6.0, "height_zone": "floor" }
+  "objects": {
+    "airpods": {
+      "prompt": "small round earbud case"
+    },
+    "wallet": {
+      "prompt": "wallet"
+    },
+    "mouse": {
+      "prompt": "computer mouse"
+    }
+  },
+  "confidence_threshold": {
+    "high": 0.6,
+    "low": 0.4
+  },
+  "tests": [
+    {
+      "filename": "airpods_1ft_table.jpg",
+      "object": "airpods",
+      "distance_ft": 1.0,
+      "distance_m": 0.305
+    },
+    {
+      "filename": "airpods_3ft_table.jpg",
+      "object": "airpods",
+      "distance_ft": 3.0,
+      "distance_m": 0.914
+    },
+    {
+      "filename": "airpods_6ft_table.jpg",
+      "object": "airpods",
+      "distance_ft": 6.0,
+      "distance_m": 1.829
+    },
+    {
+      "filename": "airpods_1ft_floor.jpg",
+      "object": "airpods",
+      "distance_ft": 1.0,
+      "distance_m": 0.305
+    },
+    {
+      "filename": "airpods_3ft_floor.jpg",
+      "object": "airpods",
+      "distance_ft": 3.0,
+      "distance_m": 0.914
+    },
+    {
+      "filename": "airpods_6ft_floor.jpg",
+      "object": "airpods",
+      "distance_ft": 6.0,
+      "distance_m": 1.829
+    },
+    {
+      "filename": "wallet_1ft_table.jpg",
+      "object": "wallet",
+      "distance_ft": 1.0,
+      "distance_m": 0.305
+    },
+    {
+      "filename": "wallet_3ft_table.jpg",
+      "object": "wallet",
+      "distance_ft": 3.0,
+      "distance_m": 0.914
+    },
+    {
+      "filename": "wallet_6ft_table.jpg",
+      "object": "wallet",
+      "distance_ft": 6.0,
+      "distance_m": 1.829
+    },
+    {
+      "filename": "wallet_1ft_floor.jpg",
+      "object": "wallet",
+      "distance_ft": 1.0,
+      "distance_m": 0.305
+    },
+    {
+      "filename": "wallet_3ft_floor.jpg",
+      "object": "wallet",
+      "distance_ft": 3.0,
+      "distance_m": 0.914
+    },
+    {
+      "filename": "wallet_6ft_floor.jpg",
+      "object": "wallet",
+      "distance_ft": 6.0,
+      "distance_m": 1.829
+    },
+    {
+      "filename": "mouse_1ft_table.jpg",
+      "object": "mouse",
+      "distance_ft": 1.0,
+      "distance_m": 0.305
+    },
+    {
+      "filename": "mouse_3ft_table.jpg",
+      "object": "mouse",
+      "distance_ft": 3.0,
+      "distance_m": 0.914
+    },
+    {
+      "filename": "mouse_6ft_table.jpg",
+      "object": "mouse",
+      "distance_ft": 6.0,
+      "distance_m": 1.829
+    },
+    {
+      "filename": "mouse_1ft_floor.jpg",
+      "object": "mouse",
+      "distance_ft": 1.0,
+      "distance_m": 0.305
+    },
+    {
+      "filename": "mouse_3ft_floor.jpg",
+      "object": "mouse",
+      "distance_ft": 3.0,
+      "distance_m": 0.914
+    },
+    {
+      "filename": "mouse_6ft_floor.jpg",
+      "object": "mouse",
+      "distance_ft": 6.0,
+      "distance_m": 1.829
+    }
+  ]
 }

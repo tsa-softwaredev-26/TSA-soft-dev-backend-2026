@@ -51,6 +51,10 @@ checkpoints/
 
 # Depth Pro — cloned locally for testing, installed as package via pip
 depth_demo/ml-depth-pro/
+
+# Test images — large, not committed
+depth_demo/test_images/
+depth_estimation/test_images/
 *.ts # or be specific:
 object_detection/mobileclip2_b.ts
 *.ts # or be specific:
