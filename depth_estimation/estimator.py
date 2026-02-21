@@ -5,7 +5,6 @@ All spatial logic lives here — nothing depth-related goes in utils.
 Instantiate once per scan session, not per image.
 """
 
-import math
 import torch
 import depth_pro
 from PIL import Image
@@ -41,19 +40,23 @@ class DepthEstimator:
                            max(cx-hw,0):min(cx+hw, depth_map.shape[1])]
         return region.mean().item() * 3.28084  # meters → feet
 
-    def get_clock_position(self, bbox: list, img_w: int, img_h: int) -> str:
+    # Previously used 12-hour clock position (e.g. "3 o'clock") — switched to plain
+    # directions to remove mental translation step for blind users. Could revert if
+    # finer granularity is needed, but 5 zones map directly to body movement.
+    def get_direction(self, bbox: list, img_w: int) -> str:
         cx = (bbox[0] + bbox[2]) / 2
-        cy = (bbox[1] + bbox[3]) / 2
-        nx = (cx / img_w) * 2 - 1
-        ny = (cy / img_h) * 2 - 1
-        angle = math.degrees(math.atan2(nx, -ny)) % 360  # 0 = 12 o'clock, clockwise
-        hour = round(angle / 30) % 12 or 12
-        return f"{hour} o'clock"
+        nx = (cx / img_w) * 2 - 1  # -1=far left, 1=far right
+
+        if nx < -0.5:  return "to your left"
+        if nx < -0.15: return "slightly left"
+        if nx < 0.15:  return "ahead"
+        if nx < 0.5:   return "slightly right"
+        return                "to your right"
 
     def build_narration(
         self,
         label: str,
-        clock: str,
+        direction: str,
         distance_ft: float,
         similarity: float
     ) -> str | None:
@@ -62,7 +65,7 @@ class DepthEstimator:
             return None
 
         if similarity >= CONFIDENCE_HIGH:
-            return f"{label.capitalize()} at {clock}, {distance_ft:.1f} feet away."
+            return f"{label.capitalize()} {direction}, {distance_ft:.1f} feet away."
         else:
             # Mid confidence — announce but flag uncertainty so user can verify
-            return f"May be a {label} at {clock}, focus to verify."
+            return f"May be a {label} {direction}, focus to verify."

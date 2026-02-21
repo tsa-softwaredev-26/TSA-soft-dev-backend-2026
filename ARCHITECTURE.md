@@ -186,22 +186,32 @@ Error is acceptable. At 3ft = ~10 inches off, at 1ft = ~3 inches off.
 Mix simplicity in output, inspired by Steve Jobs philosphy.
 User's natural behavior will tilt the phone until they find it with the distance and clock position.
 
-### Output (to be tuned)
+### Output
 ```
 High confidence (similarity ≥ 0.6):
-    "Wallet at 3 o'clock, 2 feet away."
+    "Wallet ahead, 2 feet away."
+    "Mouse to your left, 3 feet away."
 
 Low confidence (similarity 0.4–0.6):
-    "May be a wallet at 3 o'clock, focus to verify."
+    "May be a wallet slightly right, focus to verify."
 
 Below threshold (similarity < 0.4):
     → do not announce
 ```
 
 ### Clock Position Logic
+Previously used 12-hour clock position (e.g. "3 o'clock"). Switched to 5-zone plain
+directions — removes the mental translation step for blind users. Clock required
+"3 o'clock → that's right → turn right." Directions skip straight to action.
+Could revert to clock if finer granularity becomes necessary.
+
 ```python
-angle = math.degrees(math.atan2(nx, -ny)) % 360  # 0=12 o'clock, clockwise
-hour  = round(angle / 30) % 12 or 12
+# -1=far left, 1=far right (normalized bbox center x)
+if nx < -0.5:  return "to your left"
+if nx < -0.15: return "slightly left"
+if nx < 0.15:  return "ahead"
+if nx < 0.5:   return "slightly right"
+return                "to your right"
 ```
 
 ---
@@ -270,7 +280,7 @@ Cache embeddings to `.npz` — only needed once Flask + Android integration begi
 - **Grounding DINO for remember** — handles vague natural language well
 - **Depth Pro** — only monocular model with metric (absolute) depth, no scale factor needed
 - **Calibrated focal length** — 26% error vs 75% inferred; pass f_px from camera API
-- **Clock position** — 12 zones, pure trig, more actionable than left/right for blind users
+- **5-zone directions over clock position** — "to your left / slightly left / ahead / slightly right / to your right" maps directly to body movement with no mental translation. Clock (12 zones) was more granular but required "3 o'clock → right → turn right." Could revert if granularity becomes necessary.
 - **No vertical zone in narration** — user's natural scanning handles it; chest-height assumption broke for floor objects and wheelchair users
 - **Depth map once per image** — reused across all matched objects
 - **Straight-line distance** — what Depth Pro actually measures; consistent regardless of camera angle
