@@ -1,9 +1,11 @@
 """
 Depth estimation and spatial narration for scan mode.
 
-All spatial logic lives here — nothing depth-related goes in utils.
+All spatial logic lives here 
 Instantiate once per scan session, not per image.
 """
+
+from cProfile import label
 
 import torch
 import depth_pro
@@ -11,7 +13,6 @@ from PIL import Image
 
 
 CONFIDENCE_HIGH = 0.6
-CONFIDENCE_LOW  = 0.4
 
 
 class DepthEstimator:
@@ -60,12 +61,7 @@ class DepthEstimator:
         distance_ft: float,
         similarity: float
     ) -> str | None:
-        # Below low threshold — don't announce, too likely to be a false positive
-        if similarity < CONFIDENCE_LOW:
-            return None
-
         if similarity >= CONFIDENCE_HIGH:
             return f"{label.capitalize()} {direction}, {distance_ft:.1f} feet away."
         else:
-            # Mid confidence — announce but flag uncertainty so user can verify
             return f"May be a {label} {direction}, focus to verify."

@@ -49,6 +49,9 @@ models/
 weights/
 checkpoints/
 
+# Claude dev context — not for teammates
+CLAUDE.md
+
 # Depth Pro — cloned locally for testing, installed as package via pip
 depth_demo/ml-depth-pro/
 

@@ -2,6 +2,7 @@
 from typing import Optional, Tuple, List
 import torch
 import torch.nn as nn
+from pathlib import Path
 
 
 def cosine_similarity(embedding1: torch.Tensor, embedding2: torch.Tensor) -> torch.Tensor:
@@ -19,13 +20,13 @@ def cosine_similarity(embedding1: torch.Tensor, embedding2: torch.Tensor) -> tor
     return cos_sim(embedding1, embedding2)
 
 
-def find_closest_match(
+def find_match(
     query_embedding: torch.Tensor, 
     database_embeddings: List[Tuple[str, torch.Tensor]], 
     threshold: float
 ) -> Tuple[Optional[str], float]:
     """
-    Find the closest matching image in the database using linear search.
+    Find a matching image in the database using linear search.
     
     Args:
         query_embedding: Query embedding tensor of shape (1, dim)
@@ -50,7 +51,10 @@ def find_closest_match(
 
     for db_path, db_embedding in database_embeddings:
         sim = cosine_similarity(query_embedding, db_embedding)
+        sim_val = sim.item()
         if sim > best_similarity:
+            if sim >= threshold:
+                print(f"{Path(db_path).stem}: {sim_val:.3f}")
             best_similarity = sim
             best_path = db_path
 

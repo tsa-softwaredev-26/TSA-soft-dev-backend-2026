@@ -1,47 +1,34 @@
 """
-Main script for visual memory demo.
+Scan Mode — full pipeline: detect all objects, match against database, narrate matches.
 
-This script demonstrates the end-to-end workflow:
-1. Loads and embeds all images from demo_database/
-2. Runs YOLOE detection on the query image (hardcoded path)
-3. Crops detected objects
-4. Embeds each cropped object
-5. Performs linear search through database embeddings using cosine similarity
-6. Prints the closest match or None if no match is found
-
-# GPU SERVER MIGRATION TODO:
-# 1. Add device='cuda' parameter to both YoloeDetector and ImageEmbedder __init__
-# 2. Move models to device in __init__
-# 3. Add embeddings cache (embeddings.npz) to avoid recomputing database on each run
-# 4. Add batch processing for embedding multiple images at once (critical for GPU efficiency)
-# 5. Replace linear search with HNSW index (w/ hnswlib, FAISS, or Milvus) ~ log(N) search time
-
-TODO NEXT:
-add images of cropped objects to demo_database/ 
+GPU SERVER MIGRATION TODO:
+- device='cuda' in YoloeDetector, ImageEmbedder, DepthEstimator
+- Embeddings cache (.npz) to avoid recomputing database each run
+- Batch processing in embedder + detector
+- HNSW index (hnswlib/FAISS) for similarity search
 """
+
 import os
+from pathlib import Path
 from embed_image import ImageEmbedder
 from object_detection import YoloeDetector
-from utils import crop_object, find_closest_match, load_image, load_folder_images
-from pathlib import Path
+from depth_estimation import DepthEstimator
+from utils import crop_object, find_match, load_image, load_folder_images
+
 CURRENT_DIR = Path(__file__).parent
 
-SIMILARITY_THRESHOLD = 0.3  # Tunable threshold for similarity matching (0-1, higher is more similar)
+SIMILARITY_THRESHOLD = 0.3
 
-# Configuration for demo
-DEMO_DB_DIR = CURRENT_DIR / "demo_database"
+DEMO_DB_DIR      = CURRENT_DIR / "demo_database"
 QUERY_IMAGE_PATH = CURRENT_DIR / "input_images" / "cropped_wallet2.png"
+
+# TODO: replace with focal length passed from Android camera API
+# f_px = (focalLengthMm / sensorWidthMm) * imageWidthPx
+# iPhone 15 Plus reference: f_mm=6.24, sensor_width=8.64mm
+FOCAL_LENGTH_PX = 3094.0
 
 
 def embed_database_images(embedder, images):
-    """    
-    Args:
-        embedder: ImageEmbedder instance
-        images: List of (file_path, PIL Image) tuples
-        
-    Returns:
-        List of (file_path, embedding) tuples
-    """
     embeddings = []
     for file_path, img in images:
         embedding = embedder.embed(img)
@@ -50,57 +37,70 @@ def embed_database_images(embedder, images):
 
 
 def main():
-    """Main workflow pipeline."""
     print("Initializing models...")
-    # Initialize models
-    embedder = ImageEmbedder()
-    detector = YoloeDetector()
-    
-    print(f"Loading database images from '{DEMO_DB_DIR}'...")
-    # Load and embed database images
+    embedder  = ImageEmbedder()
+    detector  = YoloeDetector()
+    estimator = DepthEstimator(focal_length_px=FOCAL_LENGTH_PX)
+
+    print(f"Loading database from '{DEMO_DB_DIR}'...")
     database_images = load_folder_images(DEMO_DB_DIR)
-    
     if not database_images:
-        print("Error: No images found in database. Please add images to demo_database/")
+        print("Error: No images in demo_database/")
         return
-    
+
     print(f"Embedding {len(database_images)} database images...")
     database_embeddings = embed_database_images(embedder, database_images)
-    print(f"Database ready with {len(database_embeddings)} embeddings.")
-    
+
     if not os.path.exists(QUERY_IMAGE_PATH):
-        print(f"Error: Query image '{QUERY_IMAGE_PATH}' not found.")
+        print(f"Error: Query image not found at {QUERY_IMAGE_PATH}")
         return
-    
-    print(f"Processing query image: {QUERY_IMAGE_PATH}")
-    
-    boxes, scores = detector.detect_all(QUERY_IMAGE_PATH)
-    print(f"Detected {len(boxes)} objects")
-    
+
+    print(f"Processing query image: {QUERY_IMAGE_PATH}\n")
+    query_image = load_image(str(QUERY_IMAGE_PATH))
+    boxes, scores = detector.detect_all(str(QUERY_IMAGE_PATH))
+
     if not boxes:
-        print("No objects detected in query image.")
+        print("No objects detected.")
         return
-    
-    query_image = load_image(QUERY_IMAGE_PATH)
-    
-    # Process each detected object
-    print("\nProcessing detected objects...")
-    best_path = None
-    best_similarity = -1.0
-    for idx, (box, score) in enumerate(zip(boxes, scores)):
-        cropped = crop_object(query_image, box)
+
+    # Pass 1: find all matches before running depth (depth is expensive)
+    print(f"Detected {len(boxes)} objects. Matching against database...")
+    matches = []
+    for box, score in zip(boxes, scores):
+        cropped   = crop_object(query_image, box)
         embedding = embedder.embed(cropped)
-        match_path, match_similarity = find_closest_match(embedding, database_embeddings, SIMILARITY_THRESHOLD)
+        match_path, similarity = find_match(embedding, database_embeddings, SIMILARITY_THRESHOLD)
+        if match_path:
+            matches.append({"box": box, "label": Path(match_path).stem, "similarity": similarity})
 
-        if match_similarity > best_similarity:
-            best_similarity = match_similarity
-            best_path = match_path
+    if not matches:
+        print("No confident matches found.")
+        return
 
-    if best_path:
-        print(f"\nClosest match: {best_path}")
-        print(f"     Similarity: {best_similarity:.4f}")
+    # Pass 2: run depth once, reuse for all matches
+    print(f"Found {len(matches)} match(es). Running depth estimation...")
+    depth_map = estimator.estimate(query_image)
+
+    print()
+    narrations = []
+    for m in matches:
+        distance_ft = estimator.get_depth_at_bbox(depth_map, m["box"])
+        direction   = estimator.get_direction(m["box"], query_image.width)
+        narration   = estimator.build_narration(m["label"], direction, distance_ft, m["similarity"])
+
+        if narration:
+            narrations.append(narration)
+            print(f"  match={m['label']}  sim={m['similarity']:.3f}  dist={distance_ft:.2f}ft  dir={direction}")
+            print(f"  → {narration}\n")
+
+    if not narrations:
+        print("No confident matches found.")
+    else:
+        print("=" * 50)
+        print("NARRATION OUTPUT:")
+        for n in narrations:
+            print(f"  {n}")
 
 
 if __name__ == "__main__":
-    main() 
-    
+    main()
