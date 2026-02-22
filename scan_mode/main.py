@@ -13,7 +13,7 @@ from pathlib import Path
 from embed_image import ImageEmbedder
 from object_detection import YoloeDetector
 from depth_estimation import DepthEstimator
-from utils import crop_object, find_match, load_image, load_folder_images
+from utils import crop_object, find_match, load_image, load_folder_images, deduplicate_matches
 
 CURRENT_DIR = Path(__file__).parent
 
@@ -40,7 +40,7 @@ def main():
     print("Initializing models...")
     embedder  = ImageEmbedder()
     detector  = YoloeDetector()
-    estimator = DepthEstimator(focal_length_px=FOCAL_LENGTH_PX)
+    estimator = DepthEstimator(focal_length_px=FOCAL_LENGTH_PX)  
 
     print(f"Loading database from '{DEMO_DB_DIR}'...")
     database_images = load_folder_images(DEMO_DB_DIR)
@@ -77,11 +77,26 @@ def main():
         print("No confident matches found.")
         return
 
-    # Pass 2: run depth once, reuse for all matches
+    # Deduplicate matches - remove overlapping boxes that match the same object
+    print(f"Deduplicating {len(matches)} matches...")
+    matches = deduplicate_matches(matches, iou_threshold=0.5)
+    print(f"After deduplication: {len(matches)} unique match(es).")
+
+    if not matches:
+        print("No unique matches after deduplication.")
+        return
+
+    #Pass 2: run depth once, reuse for all matches
     print(f"Found {len(matches)} match(es). Running depth estimation...")
     depth_map = estimator.estimate(query_image)
 
     print()
+    print(f"Found {len(matches)} unique match(es).")
+    print("=" * 50)
+    print("FINAL MATCHES:")
+    for m in matches:
+        print(f"  {m['label']}: similarity={m['similarity']:.3f}, box={m['box']}")
+    
     narrations = []
     for m in matches:
         distance_ft = estimator.get_depth_at_bbox(depth_map, m["box"])

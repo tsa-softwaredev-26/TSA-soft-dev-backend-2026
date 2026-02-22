@@ -208,12 +208,13 @@ return                "to your right"
 ## TODO
 
 ### Run and validate scan_mode end-to-end
-- [ ] `pip install -e .` to register depth_estimation package
-- [ ] Run `python scan_mode/main.py` — success = narration printed per match with distance + direction
+- [ ] Create conf file
+- [ ] Create tests for tuning all thresholds
+- [ ] Improve deduplication by using image similarity between duplicates, or merge database to have only 1 entry per item
 - [ ] Tune confidence thresholds based on live output
 
 ### Cleanup (after confirmed working)
-- [ ] Delete `depth_demo/`
+- [ ] Delete `depth_demo/`+ `old_depth_demo/`
 - [ ] Commit
 
 ---
