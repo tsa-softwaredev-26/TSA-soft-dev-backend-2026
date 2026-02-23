@@ -18,9 +18,8 @@ dependencies = [
 ]
 
 [project.scripts]
-remember-mode = "remember_mode.main:main"
-scan-mode = "scan_mode.main:main"
+remember-mode = "visual_memory.pipelines.remember_mode.main:main"
+scan-mode = "visual_memory.pipelines.scan_mode.main:main"
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["object_detection*", "embed_image*", "utils*", "remember_mode*", "scan_mode*", "depth_estimation*"]
+where = ["src"]

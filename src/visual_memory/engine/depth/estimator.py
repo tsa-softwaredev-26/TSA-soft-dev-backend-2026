@@ -5,7 +5,7 @@ All spatial logic lives here
 Instantiate once per scan session, not per image.
 """
 
-from cProfile import label
+from __future__ import annotations
 
 import torch
 import depth_pro
@@ -39,6 +39,8 @@ class DepthEstimator:
         hw, hh = (x2 - x1) // 4, (y2 - y1) // 4
         region = depth_map[max(cy-hh,0):min(cy+hh, depth_map.shape[0]),
                            max(cx-hw,0):min(cx+hw, depth_map.shape[1])]
+        if region.numel() == 0:
+            return 0.0
         return region.mean().item() * 3.28084  # meters → feet
 
     # Previously used 12-hour clock position (e.g. "3 o'clock") — switched to plain
