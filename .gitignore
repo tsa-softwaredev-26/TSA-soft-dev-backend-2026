@@ -25,6 +25,10 @@ venv/
 ENV/
 env/
 
+# macOS
+.DS_Store
+._*
+
 # IDE
 .vscode/
 .idea/
