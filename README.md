@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Setup to run locally (temporary)
 **Prerequisites:** Python >= 3.8, Hugging Face account 
 
