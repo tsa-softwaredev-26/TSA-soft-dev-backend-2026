@@ -1,14 +1,13 @@
 # VisualMemory — Backend Architecture
 
-> Reference doc for continuous development. Branch: `depth-perception`.
+> Reference doc for continuous development.
 > App context: Navigation aid for blind users. Announces nearby significant objects with distance + direction.
-> Last updated: Feb 2026.
 
 ---
 
 ## Project Overview
 
-Python backend for a visual memory app built for **blind users**. The system narrates the environment by detecting and locating previously-remembered objects in a new scan image.
+Python backend for a visual memory app built for blind users The system narrates the environment by detecting and locating previously-remembered objects in a new scan image.
 
 **Two modes:**
 
@@ -19,7 +18,7 @@ Python backend for a visual memory app built for **blind users**. The system nar
 ---
 
 ## Setup
-
+Request permission for Dinov3 and Grounding Dino on Hugging Face
 ```bash
 pip install -e .
 python setup_weights.py
@@ -31,107 +30,86 @@ python setup_weights.py
 
 ---
 
-## Directory Structure
+## Core Structure:
 
 ```
-VisualMemory/
-├── src/visual_memory/
-│   ├── pipelines/
-│   │   ├── remember_mode/
-│   │   │   └── pipeline.py         # RememberPipeline — detect, embed, database hook
-│   │   └── scan_mode/
-│   │       └── pipeline.py         # ScanPipeline — detect all, match, depth, narration
-│   ├── engine/
-│   │   ├── depth/
-│   │   │   └── estimator.py        # DepthEstimator — Depth Pro wrapper + narration logic
-│   │   ├── embedding/
-│   │   │   └── embed_image.py      # ImageEmbedder — DINOv3 ViT-Large
-│   │   └── object_detection/
-│   │       ├── detect_all.py       # YoloeDetector (prompt-free, all objects)
-│   │       ├── prompt_based.py     # GroundingDinoDetector (text prompt → best box)
-│   │       └── yoloe-26l-seg-pf.pt # Local YOLOE weights (gitignored)
-│   ├── utils/
-│   │   ├── image_utils.py          # load_image, load_folder_images, crop_object
-│   │   └── similarity_utils.py     # cosine_similarity, find_match, deduplicate_matches
-│   ├── api/                        # Empty — reserved for Flask/FastAPI teammate
-│   ├── config/
-│   │   ├── __init__.py             # exports Settings and paths
-│   │   ├── settings.py             # Settings dataclass — all ML tuning params
-│   │   └── paths.py                # Dataset and test image paths (centralized)
-│   └── cli/
-│       ├── run_tests.py                # Integration test runner
-│       ├── test_remember.py            # CLI test for RememberPipeline
-│       ├── test_scan.py                # CLI test for ScanPipeline
-│       ├── test_estimator.py           # CLI test for DepthEstimator
-│       ├── tests/
-│       │   └── probe_detector.py       # Unified GroundingDINO probe (compact/verbose/batch)
-│       ├── demo_database/              # Demo embeddings for local testing
-│       ├── demo_images/                # Sample input images (HEIC)
-│       └── input_images/               # Test images (wallet/airpods/mouse at 1ft/3ft/6ft)
-├── checkpoints/ → symlink          # gitignored, created by setup_weights.py
-├── setup_weights.py
-├── pyproject.toml
-└── requirements.txt
+src/visual_memory/
+├── pipelines/
+│   ├── remember_mode/pipeline.py
+│   └── scan_mode/pipeline.py
+│
+├── engine/
+│   ├── embedding/embed_image.py        # CLIP Vision embedder
+│   ├── object_detection/
+│   │   ├── detect_all.py               # YOLOE
+│   │   └── prompt_based.py             # GroundingDINO
+│   └── depth/estimator.py              # Depth Pro wrapper
+│
+├── utils/
+│   ├── image_utils.py
+│   └── similarity_utils.py
+│
+├── config/settings.py                  # All tunable thresholds
+├── api/                                # Reserved for Flask/FastAPI
+└── cli/                                # Integration test scripts
 ```
-
 ---
 
 ## Module Reference
-
-### `pipelines/remember_mode/pipeline.py` — `RememberPipeline`
+### `pipelines/remember_mode/pipeline.py` - `RememberPipeline`
 - `run(image_path, prompt) -> dict`
 - Returns `{"success": bool, "message": str, "result": {"label", "confidence", "box"} | None}`
 - `add_to_database(embedding, metadata)` — stub, does nothing (awaiting DB implementation)
 
-### `pipelines/scan_mode/pipeline.py` — `ScanPipeline`
+### `pipelines/scan_mode/pipeline.py` - `ScanPipeline`
 - `__init__(database_dir: Path, focal_length_px: float)` — loads models + embeds database on init
 - `run(query_image: PIL.Image) -> dict`
 - Returns `{"matches": [...], "count": int}`
 - Each match: `{"label", "similarity", "distance_ft", "direction", "narration"}`
 - Database is re-embedded on each init (temporary — persistent DB is future work)
 
-### `config/settings.py` — `Settings`
+### `config/settings.py` - `Settings`
 - Single dataclass, all ML tuning params in one place
 - All detector/pipeline defaults are pulled from here — edit here to tune
 - Fields: `grounding_dino_model`, `box_threshold`, `text_threshold`, `yoloe_confidence`, `yoloe_iou`, `embedder_model`, `similarity_threshold`, `dedup_iou_threshold`, `narration_high_confidence`
 
-### `engine/object_detection/prompt_based.py` — `GroundingDinoDetector`
+### `engine/object_detection/prompt_based.py` - `GroundingDinoDetector`
 - Model: `IDEA-Research/grounding-dino-base` (upgraded from tiny Feb 2026)
 - Input: PIL Image + text prompt
 - Output: `{'box': [x1,y1,x2,y2], 'score': float, 'label': str}` or `None`
 - Used in: Remember Mode
 
-### `engine/object_detection/detect_all.py` — `YoloeDetector`
+### `engine/object_detection/detect_all.py` - `YoloeDetector`
 - Model: `yoloe-26l-seg-pf.pt` (local, prompt-free)
 - Input: PIL Image
 - Output: `(List[[x1,y1,x2,y2]], List[float])` or `(None, None)`
 - Thresholds: `conf=0.35`, `iou=0.45`
 - Used in: Scan Mode
 
-### `engine/embedding/embed_image.py` — `ImageEmbedder`
+### `engine/embedding/embed_image.py` - `ImageEmbedder`
 - Model: `facebook/dinov3-vitl16-pretrain-lvd1689m`
 - Input: PIL Image
 - Output: `torch.Tensor` shape `(1, embedding_dim)`
 - Used in: Both modes
 
 ### `utils/image_utils.py`
-- `load_image(path)` → PIL Image (RGB, EXIF-corrected, HEIC-compatible)
-- `load_folder_images(folder)` → `List[(path, PIL Image)]`
-- `crop_object(image, box)` → cropped PIL Image
+- `load_image(path)` - PIL Image (RGB, EXIF-corrected, HEIC-compatible)
+- `load_folder_images(folder)` - `List[(path, PIL Image)]`
+- `crop_object(image, box)` - cropped PIL Image
 
 ### `utils/similarity_utils.py`
-- `cosine_similarity(t1, t2)` → scalar tensor
-- `find_match(query, database, threshold)` → `(path, score)` or `(None, 0.0)`
-- `deduplicate_matches(matches, iou_threshold)` → filtered list
+- `cosine_similarity(t1, t2)` - scalar tensor
+- `find_match(query, database, threshold)` - `(path, score)` or `(None, 0.0)`
+- `deduplicate_matches(matches, iou_threshold)` - filtered list
 - Linear search, fine for expected scale
 
-### `engine/depth/estimator.py` — `DepthEstimator`
+### `engine/depth/estimator.py` - `DepthEstimator`
 - Model: Apple Depth Pro
-- `__init__(focal_length_px=None)` — loads model once
+- `__init__(focal_length_px=None)` - loads model once
 - `estimate(image: PIL.Image) -> torch.Tensor` — depth map in meters
-- `get_depth_at_bbox(depth_map, bbox) -> float` — mean depth in feet, inner 50% of bbox
-- `get_direction(bbox, img_w) -> str` — 5-zone direction string
-- `build_narration(label, direction, distance_ft, similarity) -> str | None` — final output
+- `get_depth_at_bbox(depth_map, bbox) -> float` - mean depth in feet, inner 50% of bbox
+- `get_direction(bbox, img_w) -> str` - 5-zone direction string
+- `build_narration(label, direction, distance_ft, similarity) -> str | None` - final output
 
 ---
 
@@ -170,16 +148,16 @@ run(query_image):
 ## Depth Estimation
 
 ### Model: Apple Depth Pro
-- Metric depth (absolute meters) — no scale factor needed
-- `f_px=None` → model infers (~75% error at close range)
-- `f_px=tensor` → calibrated (~26% error) — always use when available
+- Metric depth (absolute meters) 
+- `f_px=None` -> model infers (~75% error at close range)
+- `f_px=tensor` -> calibrated (~26% error) — always use when available
 - Checkpoint: `checkpoints/depth_pro.pt` via symlink
 
 ### Focal Length
 ```
 f_px = (focalLengthMm / sensorWidthMm) * imageWidthPx
 ```
-Pass from Android camera API. iPhone 15 Plus reference: `f_mm=6.24`, `sensor_width=8.64mm` → `f_px=3094.0`
+Pass from Android camera API. iPhone 15 Plus reference: `f_mm=6.24`, `sensor_width=8.64mm` -> `f_px=3094.0`
 
 ### Test Results (18 images, iPhone 15 Plus)
 - Average error: 27.8% — acceptable for navigation
@@ -244,7 +222,7 @@ to confirm at which distance GroundingDINO reliably detects the target.
 
 ## API Plan 
 
-Both pipelines return plain Python dicts — JSON-serializable, no torch tensors in output.
+Both pipelines return plain Python dicts - JSON-serializable, no torch tensors in output.
 
 ### POST /remember
 **Input:** `image` (file), `prompt` (string), optional: `focal_length_px` (float)
@@ -281,38 +259,27 @@ Both pipelines return plain Python dicts — JSON-serializable, no torch tensors
 }
 ```
 
-**Notes for API layer:**
-- `ScanPipeline.__init__` loads all models — use singleton or app-level initialization, not per-request
-- Accept `multipart/form-data` for image uploads
-- `focal_length_px` should come from Android/IOS camera metadata
-- Database is currently a local folder of cropped PNGs; replace `database_dir` param once DB is implemented
-
----
-
 ## Current State
 
 - Core engine complete and tested (depth, detection, embedding)
 - Both pipelines return structured JSON dicts
-- CLI test scripts functional at `src/visual_memory/cli/`
-- `api/` directory reserved and empty — awaiting API teammate
-- Database is flat folder of images, re-embedded on each `ScanPipeline` init — temporary
-- No server, no live camera — all testing via local image files
+- Test scripts functional at `src/visual_memory/cli/tests`
+- `api/` directory empty, awaiting implementation -
+- Database is flat folder of images, re-embedded on each `ScanPipeline` init - temporary
+- All testing via local image files until connected to frontend
 
 ---
-
 ## TODO
 - [ ] Switch embedder from DINOv3 to CLIP - +0.37 similarity improvement measured in testing; update `Settings.embedder_model` and retune `similarity_threshold` (0.3 -> 0.5–0.6)
 - [ ] Validate end-to-end scan pipeline with real device images
 
 ### Next: Database 
-- [ ] Design schema: `object_id`, `label`, `embedding`, `metadata`, `timestamp`
 - [ ] Implement `RememberPipeline.add_to_database()` 
-- [ ] Replace folder-based `load_folder_images()` + re-embed in `ScanPipeline` with DB query
-- [ ] Expose query interface: `get_all_embeddings() -> List[(id, label, embedding)]`
+- [ ] Replace folder-based `load_folder_images()` + re-embed in `ScanPipeline` with DB query function
+- [ ] Get embeddings for similarity: `get_all_embeddings() -> List[(id, label, embedding)]`
 
 ### Cleanup
 - [ ] Shorten this doc after API + DB phases complete
-
 ---
 
 
