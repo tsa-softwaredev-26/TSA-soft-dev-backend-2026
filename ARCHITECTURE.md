@@ -1,4 +1,4 @@
-# VisualMemory — Backend Architecture
+# VisualMemory Backend Architecture
 
 > Reference doc for continuous development.
 > App context: Navigation aid for blind users. Announces nearby significant objects with distance + direction.
@@ -26,8 +26,6 @@ python setup_weights.py
 
 `pip install -e .` installs all dependencies including depth-pro from GitHub.
 `setup_weights.py` downloads the Depth Pro checkpoint (~2GB) and creates a symlink at `checkpoints/` so `create_model_and_transforms()` works from any directory.
-`checkpoints/` is gitignored — every teammate runs this once after cloning.
-
 ---
 
 ## Core Structure:
@@ -190,10 +188,10 @@ Run from project root.
 
 ```bash
 # Remember Mode
-python -m visual_memory.cli.test_remember <image_path> "<prompt>"
+python -m visual_memory.cli.tests.test_remember <image_path> "<prompt>"
 
 # Scan Mode
-python -m visual_memory.cli.test_scan <image_path> [--db <database_dir>] [--focal <f_px>]
+python -m visual_memory.cli.tests.test_scan <image_path> [--db <database_dir>] [--focal <f_px>]
 
 # Integration test runner
 python -m visual_memory.cli.tests.run_tests
