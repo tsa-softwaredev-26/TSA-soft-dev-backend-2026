@@ -2,31 +2,25 @@
 DepthEstimator manual test — add your own image paths and run.
 
 Run from project root:
-    python depth_estimation/test_estimator.py
+    python -m visual_memory.cli.tests.test_estimator
 """
 
-import sys
-from pathlib import Path
-
-sys.path.append(str(Path(__file__).parent.parent))
-
-from depth_estimation import DepthEstimator
-from object_detection import GroundingDinoDetector
-from utils import load_image
+from visual_memory.engine.depth import DepthEstimator
+from visual_memory.engine.object_detection import GroundingDinoDetector
+from visual_memory.utils import load_image
+from visual_memory.config.paths import INPUT_IMAGES_DIR, FOCAL_LENGTH_PX_IPHONE15
 
 # ── Configure your tests here ────────────────────────────────────────────────
 # (image_path, prompt, ground_truth_ft)
 # ground_truth_ft is the actual measured distance — used to compute error %
 # Set to None if you just want to see the narration without error checking
 
-FOCAL_LENGTH_PX = 3094.0  # iPhone 15 Plus — swap for your device
+FOCAL_LENGTH_PX = FOCAL_LENGTH_PX_IPHONE15
 
-#Example
+# Example test cases using images from INPUT_IMAGES_DIR
 TESTS = [
-    ("depth_estimation/test_images/mouse_1ft_table.jpg",   "computer mouse",         1.0),
-    ("depth_estimation/test_images/mouse_3ft_table.jpg",   "computer mouse",         3.0),
-    ("depth_estimation/test_images/airpods_1ft_table.jpg", "small round earbud case", 1.0),
-    ("depth_estimation/test_images/wallet_1ft_floor.jpg",  "wallet",                 1.0),
+    (INPUT_IMAGES_DIR / "wallet_1ft_table.jpg", "wallet", 1.0),
+    (INPUT_IMAGES_DIR / "wallet_3ft_table.jpg", "wallet", 3.0),
 ]
 # ─────────────────────────────────────────────────────────────────────────────
 

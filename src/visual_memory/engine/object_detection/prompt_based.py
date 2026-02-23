@@ -16,21 +16,24 @@ from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
 from pathlib import Path
 from PIL import Image
 
+from visual_memory.config import Settings
+
+_defaults = Settings()
 
 
 class GroundingDinoDetector:
     """
     Zero-shot object detector using Grounding DINO.
-    
+
     Detects objects in images using natural language prompts and returns
     bounding box coordinates for the highest-confidence detection.
     """
-    
+
     def __init__(
         self,
-        model_id: str = "IDEA-Research/grounding-dino-tiny",
-        box_threshold: float = 0.2, 
-        text_threshold: float = 0.2, 
+        model_id: str = _defaults.grounding_dino_model,
+        box_threshold: float = _defaults.box_threshold,
+        text_threshold: float = _defaults.text_threshold,
         device: Optional[str] = None
     ) -> None:
         """
@@ -56,15 +59,13 @@ class GroundingDinoDetector:
                 self.device = "cpu"
         else:
             self.device = device
-            
-        print(f"Using device: {self.device}") # Remove debug print when called from Kotlin
-        
+                    
         # Load model and processor immediately
         self.processor = AutoProcessor.from_pretrained(self.model_id)
         self.model = AutoModelForZeroShotObjectDetection.from_pretrained(
             self.model_id
         ).to(self.device)
-    
+        self.model.eval() # Prevents training mode behavior
     def detect(self, image, prompt):
         """
         Detect an object in an image using a text prompt.
@@ -81,8 +82,6 @@ class GroundingDinoDetector:
         """
         # Prepare inputs - text_labels must be nested list for batch processing
         text_labels = [[prompt]]
-        
-        print(f"Detecting '{prompt}'...")
         inputs = self.processor(
             images=image, 
             text=text_labels, 
@@ -105,7 +104,6 @@ class GroundingDinoDetector:
         result = results[0]
         
         if len(result["boxes"]) == 0:
-            print(results)
             return None
         
         # Return the highest confidence detection
