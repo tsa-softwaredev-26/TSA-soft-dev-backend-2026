@@ -28,6 +28,8 @@ env/
 # macOS
 .DS_Store
 ._*
+# Environment variables
+.env
 
 # IDE
 .vscode/
@@ -36,30 +38,36 @@ env/
 *.swo
 .cursor/
 
+# OS
+.DS_Store
+Thumbs.db
+._*
+
 # Model weights
 *.pt
 *.pth
 *.onnx
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Test data
-test/
-demo_images/
-
-# ML / model files
-*.pt
-*.pth
 *.safetensors
-*.onnx
-*.ts
-
-# Python cache
-__pycache__/
-*.pyc
+object_detection/mobileclip2_b.ts
 
 # Model directories
 models/
 weights/
+checkpoints/
+
+# Claude dev context
+CLAUDE.md
+
+# Depth Pro — cloned locally for testing, installed as package via pip
+depth_demo/ml-depth-pro/
+
+# Test dir
+similarity_tests/
+
+# Test images — large, not committed
+depth_demo/test_images/
+depth_estimation/test_images/
+*.ts # or be specific:
+object_detection/mobileclip2_b.ts
+*.ts # or be specific:
+object_detection/mobileclip2_b.ts

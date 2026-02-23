@@ -13,7 +13,8 @@ dependencies = [
     "pillow>=9.0.0",
     "pillow-heif>=0.10.0",
     "ultralytics>=8.0.0",
-    "huggingface_hub>=0.16.0" 
+    "huggingface_hub>=0.16.0",
+    "depth-pro @ git+https://github.com/apple/ml-depth-pro.git",
 ]
 
 [project.scripts]
@@ -22,4 +23,4 @@ scan-mode = "scan_mode.main:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["object_detection*", "embed_image*", "utils*", "remember_mode*", "scan_mode*"]
+include = ["object_detection*", "embed_image*", "utils*", "remember_mode*", "scan_mode*", "depth_estimation*"]

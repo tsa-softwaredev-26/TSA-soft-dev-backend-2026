@@ -8,8 +8,8 @@ pillow_heif.register_heif_opener() # For iphone image support
 CURRENT_DIR = Path(__file__).parent
 
 # Configure your test image and prompt
-DEMO_IMAGE_PATH = CURRENT_DIR / "demo_images" / "Wallet.heic"
-PROMPT = "camo wallet"
+DEMO_IMAGE_PATH = CURRENT_DIR / "demo_images" / "depth_image.png"
+PROMPT = "small round earbud case"
 
 def main():
     """
@@ -33,17 +33,20 @@ def main():
         box = detection['box']
         label = detection['label']
         score = detection['score']
-        print("\n✓ Detection successful!")
-        print(f"  Label: {label}")
+        print("\n Detection successful!")
         print(f"  Confidence: {score:.3f}")
         print(f"  Bounding box: {box}")
+        cropped_detection = crop_object(image, box)
+        # ImageEmbedder().embed(cropped_detection)
+        print("Opening cropped detection...")
+        cropped_detection.show()
     else:
-        print("\n✗ No object detected matching the prompt.")
+        print("\n No object detected matching the prompt.")
+        
 
-    cropped_detection = crop_object(image, box)
-    detection_embed = ImageEmbedder().embed(cropped_detection)
 
-    print(detection_embed.shape)
+
+
 if __name__ == "__main__":
     main()
 
