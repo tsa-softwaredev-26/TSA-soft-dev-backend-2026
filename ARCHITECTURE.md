@@ -207,19 +207,45 @@ return                "to your right"
 
 ## TODO
 
+### Test CLIP masking to improve accuracy
+- [] Test CLIP
+- [] If success, implement CLIP in pipeline
+- [] Commit (gitignore tests)
+
 ### Run and validate scan_mode end-to-end
 - [ ] Create conf file
+- [] Commit (gitignore tests)
 - [ ] Create tests for tuning all thresholds
-- [ ] Improve deduplication by using image similarity between duplicates, or merge database to have only 1 entry per item
 - [ ] Tune confidence thresholds based on live output
+- [ ] Commit (gitignore tests)
+- [ ] Improve deduplication by using image similarity between duplicates?
+- [ ] Commit (gitignore tests)
+
 
 ### Cleanup (after confirmed working)
-- [ ] Delete `depth_demo/`+ `old_depth_demo/`
+- [ ] Delete `depth_demo/`+ `old_depth_demo/ 
+- [ ] Delete similarity test dir
+- [ ] Read thru code + refine documentation, update + shorten ARCHITECTURE
 - [ ] Commit
 
 ---
 
 ## Future Plans (Do Not Implement Yet)
+
+### CRITICAL: Switch to CLIP for Embeddings
+**Problem**: DINOv3 gets 0.31 similarity on same wallet from different angles
+**Solution**: CLIP gets 0.68 similarity on same images (+0.37 improvement)
+**Action**: Replace DINOv3 with `openai/clip-vit-large-patch14` in embed_image.py
+**Why**: CLIP is specifically trained for viewpoint invariance, handles angle/lighting changes
+**When**: After depth-perception branch is merged
+**Files to update**: 
+- embed_image/embed_image.py (switch model)
+- May need to retune SIMILARITY_THRESHOLD (likely can raise from 0.3 to 0.5-0.6)
+
+### Bloat prevention
+Duplicate remember entry detection
+Pruning for items not used after n scans
+Telling user there is already an entry named x or that looks like x, proceed? OR merging their embeddings
 
 ### IMU Tilt Compensation
 Phone IMU (accelerometer + gyroscope) reports exact tilt angle. Could compensate depth when camera is angled, removing need for natural scanning. Android/iOS concern, not backend. Out of scope for TSA presentation.
@@ -247,8 +273,6 @@ Cache embeddings to `.npz` — only needed once Flask + Android integration begi
 - **Depth Pro** — only monocular model with metric (absolute) depth, no scale factor needed
 - **Calibrated focal length** — 26% error vs 75% inferred; pass f_px from Android camera API
 - **5-zone directions over clock** — maps directly to body movement, no mental translation; could revert if granularity needed
-- **No vertical zone** — user's natural scanning handles it; chest-height assumption broke for floor objects and wheelchair users
-- **Depth map once per image** — reused across all matched objects
 - **Straight-line distance** — consistent regardless of camera angle
 - **Confidence narration** — "May be a wallet... focus to verify" is actionable, not just informational
-- **HEIC support** via `pillow-heif` in `load_image()`
+- **HEIC support** via `pillow-heif` in `load_image()` for testing purposes

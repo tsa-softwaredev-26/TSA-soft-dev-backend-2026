@@ -25,6 +25,9 @@ venv/
 ENV/
 env/
 
+# Environment variables
+.env
+
 # IDE
 .vscode/
 .idea/
@@ -49,11 +52,14 @@ models/
 weights/
 checkpoints/
 
-# Claude dev context — not for tammates
+# Claude dev context
 CLAUDE.md
 
 # Depth Pro — cloned locally for testing, installed as package via pip
 depth_demo/ml-depth-pro/
+
+# Test dir
+similarity_tests/
 
 # Test images — large, not committed
 depth_demo/test_images/
