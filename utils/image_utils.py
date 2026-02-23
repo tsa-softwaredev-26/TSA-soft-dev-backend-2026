@@ -1,7 +1,7 @@
 """Image utility functions for loading and processing images."""
 from typing import Optional, List, Tuple
 from pathlib import Path
-from PIL import Image
+from PIL import Image, ImageOps
 
 
 def crop_object(image: Image.Image, box: List[float]) -> Image.Image:
@@ -36,49 +36,59 @@ def crop_object(image: Image.Image, box: List[float]) -> Image.Image:
 def load_image(file_path: str) -> Optional[Image.Image]:
     """
     Load a single image from a given path.
+    Automatically fixes EXIF orientation and converts to RGB.
     """
     path = Path(file_path)
-    
+
     if not path.is_file():
         print(f"Warning: File '{file_path}' does not exist.")
         return None
-    
+
     try:
-        img = Image.open(file_path).convert("RGB")
+        img = Image.open(path)
+
+        # Fix EXIF rotation (prevents 90/180/270 degree issues)
+        img = ImageOps.exif_transpose(img)
+        img = img.convert("RGB")
+
         return img
+
     except Exception as e:
         print(f"Warning: Could not load '{file_path}': {e}")
         return None
 
-
 def load_folder_images(folder_path: str) -> List[Tuple[str, Image.Image]]:
     """
-    Load all images from a folder.
-    
-    Args:
-        folder_path: Folder containing images
-        
-    Returns:
-        List of tuples: (file_path, PIL Image)
+    Load all valid images from a folder.
+    Automatically filters macOS metadata files and non-image files.
     """
     path = Path(folder_path)
-    
+
     if not path.exists():
         print(f"Warning: Folder '{folder_path}' not found.")
         return []
-    
+
     if not path.is_dir():
         print(f"Warning: '{folder_path}' is not a directory.")
         return []
-    
+
     images = []
+
     for file_path in path.iterdir():
-        try:
-            img = load_image(str(file_path))
-        except Exception:
-            print(f"Warning: Could not load image '{file_path}'")
-            img = None
+
+        # Skip hidden files and macOS metadata files
+        if file_path.name.startswith("."):
+            continue
+        if file_path.name.startswith("._"):
+            continue
+
+        # Only allow common image extensions
+        if file_path.suffix.lower() not in [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".heic"]:
+            continue
+
+        img = load_image(str(file_path))
+
         if img is not None:
             images.append((str(file_path), img))
-    
+
     return images

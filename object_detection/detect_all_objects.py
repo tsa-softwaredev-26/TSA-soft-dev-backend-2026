@@ -6,14 +6,7 @@ and prompt-free detection modes.
 """
 from typing import Optional, Tuple, List
 from pathlib import Path
-
-try:
-    from ultralytics import YOLOE
-except ImportError:
-    raise ImportError(
-        "ultralytics package is required. Install with: pip install ultralytics>=8.0.0"
-    )
-
+from ultralytics import YOLOE
 from PIL import Image
 
 
@@ -32,7 +25,7 @@ class YoloeDetector:
     def __init__(
         self,
         prompt_free_model_path: str = "object_detection/yoloe-26l-seg-pf.pt",
-        confidence_threshold: float = 0.35, 
+        confidence_threshold: float = 0.5, 
         intersection_threshold: float = 0.45
     ) -> None:
         """
