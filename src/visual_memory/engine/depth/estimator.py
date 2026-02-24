@@ -7,10 +7,17 @@ Instantiate once per scan session, not per image.
 
 from __future__ import annotations
 
+import dataclasses
+from pathlib import Path
+
 import torch
 import depth_pro
+from depth_pro.depth_pro import DEFAULT_MONODEPTH_CONFIG_DICT
 from PIL import Image
 
+# Absolute path to the checkpoint — resolved at import time from this file's location,
+# so it works regardless of the current working directory or platform.
+_CHECKPOINT_PATH = Path(__file__).resolve().parents[4] / "checkpoints" / "depth_pro.pt"
 
 CONFIDENCE_HIGH = 0.6
 
@@ -21,7 +28,8 @@ class DepthEstimator:
         # focal_length_px from Android: (focalLengthMm / sensorWidthMm) * imageWidthPx
         # None = Depth Pro infers (~75% error vs ~26% calibrated at close range)
         self.f_px = torch.tensor(focal_length_px, dtype=torch.float32) if focal_length_px else None
-        self.model, self.transform = depth_pro.create_model_and_transforms()
+        config = dataclasses.replace(DEFAULT_MONODEPTH_CONFIG_DICT, checkpoint_uri=str(_CHECKPOINT_PATH))
+        self.model, self.transform = depth_pro.create_model_and_transforms(config=config)
         self.model.eval()
 
     def estimate(self, image: Image.Image) -> torch.Tensor:
