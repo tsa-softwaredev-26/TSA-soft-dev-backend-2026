@@ -1,35 +1,39 @@
 """
-Run once after `pip install -e .` to set up the depth-pro checkpoint symlink.
+Run once after `pip install -e .` to download the Depth Pro checkpoint.
 
-    python setup.py
+    python setup_weights.py
+
+Downloads depth_pro.pt (~2GB) from HuggingFace into checkpoints/ at the project root.
+Works on Windows, macOS, and Linux — no bash or symlinks required.
 """
-import subprocess
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent
-CHECKPOINT_SRC = PROJECT_ROOT / "depth_demo" / "ml-depth-pro" / "checkpoints"
-CHECKPOINT_LINK = PROJECT_ROOT / "checkpoints"
+CHECKPOINT_DIR = PROJECT_ROOT / "checkpoints"
+CHECKPOINT_FILE = CHECKPOINT_DIR / "depth_pro.pt"
+
 
 def main():
-    # Download depth-pro weights if not already present
-    if not CHECKPOINT_SRC.exists():
-        print("Downloading Depth Pro weights (~2GB)...")
-        script = PROJECT_ROOT / "depth_demo" / "ml-depth-pro" / "get_pretrained_models.sh"
-        if not script.exists():
-            print("ERROR: ml-depth-pro not found. Run `pip install -e .` first.")
-            return
-        subprocess.run(["bash", str(script)], cwd=CHECKPOINT_SRC.parent, check=True)
-    else:
-        print("Checkpoint already exists, skipping download.")
+    if CHECKPOINT_FILE.exists():
+        print(f"Checkpoint already present at {CHECKPOINT_FILE}, skipping download.")
+        return
 
-    # Create symlink at project root so depth-pro finds ./checkpoints/depth_pro.pt
-    if CHECKPOINT_LINK.exists() or CHECKPOINT_LINK.is_symlink():
-        print(f"Symlink already exists at {CHECKPOINT_LINK}, skipping.")
-    else:
-        CHECKPOINT_LINK.symlink_to(CHECKPOINT_SRC)
-        print(f"Symlink created: {CHECKPOINT_LINK} -> {CHECKPOINT_SRC}")
+    CHECKPOINT_DIR.mkdir(exist_ok=True)
 
-    print("\nSetup complete. You can now run depth_test.py from any directory.")
+    print("Downloading Depth Pro weights (~2GB) from HuggingFace...")
+    try:
+        from huggingface_hub import hf_hub_download
+    except ImportError:
+        print("ERROR: huggingface_hub not found. Run `pip install -e .` first.")
+        return
+
+    hf_hub_download(
+        repo_id="apple/DepthPro",
+        filename="depth_pro.pt",
+        local_dir=str(CHECKPOINT_DIR),
+    )
+    print(f"\nSetup complete. Checkpoint saved to {CHECKPOINT_FILE}")
+
 
 if __name__ == "__main__":
     main()

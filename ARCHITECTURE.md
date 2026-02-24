@@ -18,14 +18,18 @@ Python backend for a visual memory app built for blind users The system narrates
 ---
 
 ## Setup
-Request permission for Dinov3 and Grounding Dino on Hugging Face
+Request permission for DINOv2 and Grounding DINO on Hugging Face, then:
 ```bash
 pip install -e .
 python setup_weights.py
 ```
 
 `pip install -e .` installs all dependencies including depth-pro from GitHub.
-`setup_weights.py` downloads the Depth Pro checkpoint (~2GB) and creates a symlink at `checkpoints/` so `create_model_and_transforms()` works from any directory.
+`setup_weights.py` downloads the Depth Pro checkpoint (~2GB) from `apple/DepthPro` on HuggingFace
+directly into `checkpoints/depth_pro.pt` at the project root. Works on Windows, macOS, and Linux.
+
+`DepthEstimator` resolves the checkpoint path at import time using `Path(__file__)`, so it works
+from any working directory without symlinks or environment variables.
 ---
 
 ## Core Structure:
@@ -146,10 +150,10 @@ run(query_image):
 ## Depth Estimation
 
 ### Model: Apple Depth Pro
-- Metric depth (absolute meters) 
+- Metric depth (absolute meters)
 - `f_px=None` -> model infers (~75% error at close range)
 - `f_px=tensor` -> calibrated (~26% error) — always use when available
-- Checkpoint: `checkpoints/depth_pro.pt` via symlink
+- Checkpoint: `checkpoints/depth_pro.pt` — absolute path resolved via `Path(__file__)` in estimator.py
 
 ### Focal Length
 ```
