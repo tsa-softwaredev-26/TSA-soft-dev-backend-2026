@@ -1,0 +1,44 @@
+Using CPU. Note: This module is much faster with a GPU.
+/opt/miniconda3/lib/python3.12/site-packages/torch/utils/data/dataloader.py:692: UserWarning: 'pin_memory' argument is set as true but not supported on MPS now, device pinned memory won't be used.
+  warnings.warn(warn_msg)
+Loading EasyOCR recognizer...
+
+Processing malarkey.jpeg ...
+  EasyOCR (  0 words, conf=0.00): 
+  (no ground truth)
+
+Processing market.jpeg ...
+  EasyOCR ( 11 words, conf=0.80): The brown Sox sumps 0 Ve r the a29 quick dog
+  Ground truth (14 words): The quick brown fox jumps over the lazy dog
+1 + 1 = 2
+  Overlap: 33.3%
+
+Processing pen.jpeg ...
+  EasyOCR (  9 words, conf=0.58): Lhe brown FoxJumps +LEC2 doz the 1cz Over Rlick
+  Ground truth (14 words): The quick brown fox jumps over the lazy dog
+1 + 1 = 2
+  Overlap: 25.0%
+
+Processing pencil.jpeg ...
+  EasyOCR (  5 words, conf=0.69): The brown foxtJunps Eke Quidk
+  Ground truth (14 words): The quick brown fox jumps over the lazy dog
+1 + 1 = 2
+  Overlap: 16.7%
+
+Processing typed.jpeg ...
+  EasyOCR ( 10 words, conf=0.86): The quick brown fox jumps over the 1+1=2 Iazy dog
+  Ground truth (14 words): The quick brown fox jumps over the lazy dog
+1 + 1 = 2
+  Overlap: 58.3%
+
+============================================================
+Image                      Words   Conf    GT  Overlap%
+------------------------------------------------------------
+malarkey.jpeg                  0   0.00   n/a       n/a
+market.jpeg                   11   0.80    14      33.3
+pen.jpeg                       9   0.58    14      25.0
+pencil.jpeg                    5   0.69    14      16.7
+typed.jpeg                    10   0.86    14      58.3
+------------------------------------------------------------
+Average (scored images)                           33.3%
+============================================================
