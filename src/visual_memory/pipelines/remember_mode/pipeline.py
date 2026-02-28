@@ -2,17 +2,22 @@ from __future__ import annotations
 from pathlib import Path
 import pillow_heif
 
-from visual_memory.utils import load_image, crop_object
+from visual_memory.utils import load_image, crop_object, get_logger
 from visual_memory.engine.object_detection import GroundingDinoDetector
-from visual_memory.engine.embedding import ImageEmbedder
+from visual_memory.engine.embedding import ImageEmbedder, TextEmbedder
+from visual_memory.engine.text_recognition import TextRecognizer
 
 pillow_heif.register_heif_opener()
+
+_log = get_logger(__name__)
 
 
 class RememberPipeline:
     def __init__(self):
         self.detector = GroundingDinoDetector()
         self.embedder = ImageEmbedder()
+        self.text_recognizer = TextRecognizer()
+        self.text_embedder = TextEmbedder()
 
         # TODO: replace with real database later
         self.database = None
@@ -58,8 +63,22 @@ class RememberPipeline:
         # Crop detected region
         cropped = crop_object(image, box)
 
-        # Create embedding
+        # Create image embedding
         embedding = self.embedder.embed(cropped)
+
+        # OCR: extract text from the crop
+        ocr_result = self.text_recognizer.recognize(cropped)
+        text_embedding = None
+        if ocr_result["text"]:
+            text_embedding = self.text_embedder.embed(ocr_result["text"])
+
+        _log.info({
+            "event": "remember_ocr",
+            "label": label,
+            "ocr_text_length": len(ocr_result["text"]),
+            "ocr_confidence": round(ocr_result["confidence"], 4),
+            "has_text_embedding": text_embedding is not None,
+        })
 
         # Hook for database storage
         self.add_to_database(
@@ -69,16 +88,22 @@ class RememberPipeline:
                 "location": None,
                 "confidence": float(score),
                 "timestamp": None,
-                "image_path": str(image_path)
+                "image_path": str(image_path),
+                "ocr_text": ocr_result["text"],
+                "text_embedding": text_embedding,
             }
         )
+
+        result = {
+            "label": label,
+            "confidence": float(score),
+            "box": box,
+            "ocr_text": ocr_result["text"],
+            "ocr_confidence": round(ocr_result["confidence"], 4),
+        }
 
         return {
             "success": True,
             "message": "Object detected and embedded successfully.",
-            "result": {
-                "label": label,
-                "confidence": float(score),
-                "box": box
-            }
+            "result": result,
         }
