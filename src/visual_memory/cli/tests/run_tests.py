@@ -7,7 +7,12 @@ Run:
 Tests:
     1. RememberPipeline: wallet_1ft_table.jpg + "small rectangular wallet"
     2. ScanPipeline: wallet_3ft_table.jpg
+<<<<<<< Updated upstream
     3. DepthEstimator: wallet_3ft_table.jpg (ground truth = 3.0 ft)
+=======
+    3. DepthEstimator: weights load only (inference skipped — too slow for CI)
+    4. TextRecognition: magnesium.heic — TextRecognizer + TextEmbedder
+>>>>>>> Stashed changes
 """
 
 from __future__ import annotations
@@ -31,6 +36,7 @@ CHECKPOINT_DIR = PROJECT_ROOT / "checkpoints"
 
 WALLET_1FT = INPUT_DIR / "wallet_1ft_table.jpg"
 WALLET_3FT = INPUT_DIR / "wallet_3ft_table.jpg"
+MAGNESIUM = INPUT_DIR / "magnesium.heic"
 
 FOCAL_PX = 3094.0
 
@@ -130,6 +136,40 @@ else:
     print(f"error:    {err_pct:.1f}%")
 
     _pass("estimator:depth", f"dist={dist_ft:.2f} ft  error={err_pct:.1f}%")
+
+
+# Test 4 — Text Recognition
+_section("[4] text_recognition — magnesium.heic")
+
+from visual_memory.engine.text_recognition import TextRecognizer
+from visual_memory.engine.embedding import TextEmbedder
+
+_mark4 = log_mark()
+try:
+    recognizer = TextRecognizer()
+    text_embedder = TextEmbedder()
+
+    r4_img = load_image(str(MAGNESIUM))
+    ocr = recognizer.recognize(r4_img)
+    print("     ocr:", json.dumps({"text": ocr["text"][:80], "confidence": round(ocr["confidence"], 3), "segments": len(ocr["segments"])}))
+
+    if isinstance(ocr, dict) and "text" in ocr and "confidence" in ocr and "segments" in ocr:
+        _pass("text_recognition:recognizer", f"segments={len(ocr['segments'])}  conf={ocr['confidence']:.3f}")
+    else:
+        _fail("text_recognition:recognizer", "unexpected result structure")
+
+    sample_text = ocr["text"] if ocr["text"] else "test document"
+    emb = text_embedder.embed(sample_text)
+    if emb.shape == (1, 384):
+        _pass("text_recognition:embedder", f"shape={list(emb.shape)}")
+    else:
+        _fail("text_recognition:embedder", f"unexpected shape={list(emb.shape)}")
+
+except Exception as exc:
+    _fail("text_recognition:recognizer", str(exc))
+    _fail("text_recognition:embedder", "skipped due to earlier error")
+
+for _e in tail_logs(since_line=_mark4): print(f"       {json.dumps(_e)}")  # comment to reduce verbosity
 
 
 # Summary

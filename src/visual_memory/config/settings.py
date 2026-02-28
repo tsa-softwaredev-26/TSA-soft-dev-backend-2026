@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -19,5 +19,13 @@ class Settings:
     similarity_threshold: float = 0.3
     dedup_iou_threshold: float = 0.5
 
-    # Narration (scan mode) 
+    # Narration (scan mode)
     narration_high_confidence: float = 0.6
+
+    # OCR (text recognition)
+    ocr_languages: list = field(default_factory=lambda: ["en"])
+    ocr_min_confidence: float = 0.3
+
+    # Text embedding
+    text_embedder_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    text_similarity_threshold: float = 0.3
