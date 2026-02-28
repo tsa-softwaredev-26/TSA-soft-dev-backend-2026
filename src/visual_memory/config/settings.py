@@ -16,13 +16,14 @@ class Settings:
     embedder_model: str = "facebook/dinov3-vitl16-pretrain-lvd1689m"
 
     # Similarity matching (scan mode)
-    similarity_threshold: float = 0.3
+    similarity_threshold: float = 0.2
     dedup_iou_threshold: float = 0.5
 
     # Narration (scan mode)
     narration_high_confidence: float = 0.6
 
     # OCR (text recognition)
+    ocr_backend: str = "easyocr"    # "easyocr" (main venv) or "deepseek" (requires pinned venv)
     ocr_languages: list = field(default_factory=lambda: ["en"])
     ocr_min_confidence: float = 0.3
 
