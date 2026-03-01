@@ -41,6 +41,7 @@ env/
 .cursor/
 
 # Claude Code (local dev instructions — not part of the package)
+.claude/
 CLAUDE.md
 
 # Model weights / checkpoints
