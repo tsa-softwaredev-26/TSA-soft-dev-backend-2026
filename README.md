@@ -4,26 +4,26 @@
 **Request access:**
 - [Grounding DINO model](https://huggingface.co/IDEA-Research/grounding-dino-base)
 
-CLIP (`openai/clip-vit-base-patch32`) and other models download automatically on first use — no manual access request required.
 
 ```bash
-git clone https://github.com/tsa-softwaredev-26/TSA-soft-dev-2026.git
-cd TSA-soft-dev-2026
+git clone https://github.com/tsa-softwaredev-26/TSA-soft-dev-backend-2026.git
+cd TSA-soft-dev-backend-2026
 pip install --upgrade pip
 pip install -e .
 python setup_weights.py
-huggingface-cli login
+hf auth login
 ```
 
 ## Modes
 
-- **Remember Mode** — detect + store an object from a text prompt
-- **Scan Mode** — find all remembered objects in a new image, return distance + relative position
+- **Remember Mode** - detect + store an object from a text prompt
+- **Scan Mode** - find all remembered objects in a new image, return distance + relative position
 
 ## Running tests
 
 ```bash
 # Full integration test (run after any engine/pipeline change)
+# Most models download on first use, expect longer first run
 python -m visual_memory.tests.scripts.run_tests
 
 # Show OCR text vs ground truth
