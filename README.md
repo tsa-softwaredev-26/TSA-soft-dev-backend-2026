@@ -8,11 +8,12 @@
 ```bash
 git clone https://github.com/tsa-softwaredev-26/TSA-soft-dev-backend-2026.git
 cd TSA-soft-dev-backend-2026
-pip install --upgrade pip
+python -m venv venv
+source venv/bin/activate
+python -m pip install --upgrade pip
 pip install -e .
-python setup_weights.py
 hf auth login
-```
+python setup_weights.py
 
 ## Modes
 
