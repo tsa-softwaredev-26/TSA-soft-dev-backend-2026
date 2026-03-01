@@ -1,5 +1,5 @@
 """
-CLI test for TextRecognizer and TextEmbedder.
+CLI test for TextRecognizer and CLIPEmbedder (text embedding).
 
 Usage:
     python -m visual_memory.tests.scripts.test_text_recognition [image_path]
@@ -16,7 +16,7 @@ import pillow_heif
 pillow_heif.register_heif_opener()
 
 from visual_memory.engine.text_recognition import TextRecognizer
-from visual_memory.engine.embedding import TextEmbedder
+from visual_memory.engine.embedding import CLIPEmbedder
 from visual_memory.utils import load_image
 
 
@@ -50,23 +50,23 @@ def run_text_recognition_tests(image_path: Path) -> dict:
         results["errors"].append(f"TextRecognizer: {e}")
         return results
 
-    # Test 2: TextEmbedder (uses a fixed string to avoid dependency on OCR output)
+    # Test 2: CLIPEmbedder text embedding
     try:
-        embedder = TextEmbedder()
+        embedder = CLIPEmbedder()
         sample_text = ocr["text"] if ocr["text"] else "test document"
-        embedding = embedder.embed(sample_text)
+        embedding = embedder.embed_text(sample_text)
         assert embedding.shape[0] == 1, f"Expected batch dim 1, got {embedding.shape[0]}"
-        assert embedding.shape[1] == 384, f"Expected 384-dim embedding, got {embedding.shape[1]}"
+        assert embedding.shape[1] == 512, f"Expected 512-dim embedding, got {embedding.shape[1]}"
         results["embedder_ok"] = True
         results["embedding_shape"] = list(embedding.shape)
     except Exception as e:
-        results["errors"].append(f"TextEmbedder: {e}")
+        results["errors"].append(f"CLIPEmbedder: {e}")
 
     return results
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Test TextRecognizer and TextEmbedder.")
+    parser = argparse.ArgumentParser(description="Test TextRecognizer and CLIPEmbedder.")
     parser.add_argument("image_path", nargs="?", default=str(DEFAULT_IMAGE), help="Path to image.")
     return parser.parse_args()
 

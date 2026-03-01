@@ -16,7 +16,6 @@ dependencies = [
     "huggingface_hub>=0.26.0",
     "depth-pro @ git+https://github.com/apple/ml-depth-pro.git",
     "paddleocr>=3.2.0",
-    "sentence-transformers>=3.0.0",
     "einops",
     "addict",
     "easydict",

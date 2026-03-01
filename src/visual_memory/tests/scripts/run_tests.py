@@ -9,7 +9,7 @@ Tests:
     1. RememberPipeline: wallet_1ft_table.jpg + "small rectangular wallet"
     2. ScanPipeline: wallet_3ft_table.jpg
     3. DepthEstimator: weights load only (inference skipped — too slow for CI)
-    4. TextRecognition: magnesium.heic — TextRecognizer + TextEmbedder
+    4. TextRecognition: magnesium.heic — TextRecognizer + CLIPEmbedder
 """
 
 from __future__ import annotations
@@ -172,10 +172,10 @@ _section("[4] text_recognition + embedding — magnesium.heic")
 _mark4 = log_mark()
 try:
     from visual_memory.engine.text_recognition import TextRecognizer
-    from visual_memory.engine.embedding import TextEmbedder
+    from visual_memory.engine.embedding import CLIPEmbedder
 
     recognizer = TextRecognizer()
-    text_embedder = TextEmbedder()
+    embedder = CLIPEmbedder()
 
     r4_img = load_image(str(MAGNESIUM))
     ocr = recognizer.recognize(r4_img)
@@ -195,8 +195,9 @@ try:
             _show_text_diff(ocr["text"], gt)
 
     sample_text = ocr["text"] if ocr["text"] else "test document"
-    emb = text_embedder.embed(sample_text)
-    if emb.shape == (1, 384):
+    emb = embedder.embed_text(sample_text)
+    # TODO: remove shape check comment once CLIP is stable
+    if emb.shape == (1, 512):
         _pass("text_recognition:embedder", f"shape={list(emb.shape)}")
     else:
         _fail("text_recognition:embedder", f"unexpected shape={list(emb.shape)}")
