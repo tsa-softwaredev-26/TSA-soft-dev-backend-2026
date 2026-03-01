@@ -19,7 +19,7 @@ Python backend for a visual memory app built for blind users. The system narrate
 
 ## Setup
 
-Request permission for DINOv2 and Grounding DINO on Hugging Face, then:
+Request permission for Grounding DINO on Hugging Face, then:
 
 ```bash
 pip install -e .
@@ -30,6 +30,7 @@ huggingface-cli login
 `pip install -e .` installs all dependencies including depth-pro from GitHub.
 `setup_weights.py` downloads the Depth Pro checkpoint (~2GB) and YOLOE weights into the project root.
 `DepthEstimator` resolves the checkpoint path at import time using `Path(__file__)`.
+CLIP (`openai/clip-vit-base-patch32`, ~600MB) is downloaded automatically on first use via `transformers`.
 
 ---
 
@@ -43,8 +44,7 @@ src/visual_memory/
 │
 ├── engine/
 │   ├── embedding/
-│   │   ├── embed_image.py              # ImageEmbedder (DINOv3)
-│   │   ├── embed_text.py              # TextEmbedder (sentence-transformers)
+│   │   ├── embed_image.py              # CLIPEmbedder (image + text, shared space)
 │   │   └── embed_combined.py          # make_combined_embedding()
 │   ├── text_recognition/
 │   │   ├── base.py                    # BaseTextRecognizer ABC
@@ -86,7 +86,7 @@ src/visual_memory/
 
 ### `config/settings.py` - `Settings`
 - Single dataclass, all ML tuning params in one place
-- Fields: `grounding_dino_model`, `box_threshold`, `text_threshold`, `yoloe_confidence`, `yoloe_iou`, `embedder_model`, `similarity_threshold`, `dedup_iou_threshold`, `narration_high_confidence`, `ocr_backend`, `text_embedder_model`, `text_similarity_threshold`
+- Fields: `grounding_dino_model`, `box_threshold`, `text_threshold`, `yoloe_confidence`, `yoloe_iou`, `embedder_model`, `similarity_threshold`, `dedup_iou_threshold`, `narration_high_confidence`, `ocr_backend`, `text_similarity_threshold`
 
 ### `engine/object_detection/prompt_based.py` - `GroundingDinoDetector`
 - Model: `IDEA-Research/grounding-dino-base`
@@ -100,20 +100,15 @@ src/visual_memory/
 - Output: `(List[[x1,y1,x2,y2]], List[float])` or `(None, None)`
 - Used in: Scan Mode
 
-### `engine/embedding/embed_image.py` - `ImageEmbedder`
-- Model: `facebook/dinov3-vitl16-pretrain-lvd1689m`
-- Input: PIL Image
-- Output: `torch.Tensor` shape `(1, embedding_dim)`
-- Used in: Both modes
-
-### `engine/embedding/embed_text.py` - `TextEmbedder`
-- Model: `sentence-transformers/all-MiniLM-L6-v2`
-- Input: str
-- Output: `torch.Tensor` shape `(1, 384)`
-- Used in: Both modes (when OCR text is available)
+### `engine/embedding/embed_image.py` - `CLIPEmbedder`
+- Model: `openai/clip-vit-base-patch32` (~600MB, auto-downloaded via `transformers`)
+- `embed(image: PIL.Image) -> torch.Tensor` shape `(1, 512)` — L2-normalized image embedding
+- `embed_text(text: str) -> torch.Tensor` shape `(1, 512)` — L2-normalized text embedding
+- Both outputs live in the same CLIP shared embedding space
+- Used in: Both modes (image via `embed()`, OCR text via `embed_text()`)
 
 ### `engine/embedding/embed_combined.py` - `make_combined_embedding`
-- Concatenates normalized image + text embeddings
+- Concatenates normalized image + text embeddings → `(1, 1024)` combined vector
 - Non-document objects pass a zero text vector — image similarity dominates unchanged
 - Used in: Both pipelines
 
@@ -152,10 +147,11 @@ image_path + text prompt
     → load_image()
     → GroundingDinoDetector.detect(image, prompt)
     → crop_object(image, box)
-    → TextRecognizer.recognize(crop)    → text embedding
-    → ImageEmbedder.embed(crop)         → image embedding
-    → make_combined_embedding()
-    → add_to_database()          ← stub, awaiting DB integration
+    → TextRecognizer.recognize(crop)        → OCR text
+    → CLIPEmbedder.embed(crop)             → image embedding (512-dim)
+    → CLIPEmbedder.embed_text(ocr_text)    → text embedding (512-dim, same space)
+    → make_combined_embedding()            → combined (1024-dim)
+    → add_to_database()                    ← stub, awaiting DB integration
     → return {"success": bool, "result": {...}}
 ```
 
@@ -292,13 +288,16 @@ Both pipelines return plain Python dicts — JSON-serializable, no torch tensors
 - `api/` directory empty, awaiting implementation
 - Database is flat folder of images, re-embedded on each `ScanPipeline` init — temporary
 - OCR backend: PaddleOCR-VL-1.5 (`settings.ocr_backend = "paddle"`)
+- Embedder: CLIP ViT-B/32 (`settings.embedder_model = "openai/clip-vit-base-patch32"`, 512-dim shared image+text space)
 
 ---
 
 ## TODO
 
 ### Engine / Architecture
-- [ ] Switch embedder from DINOv3 to CLIP — +0.37 similarity improvement measured; update `Settings.embedder_model` and retune `similarity_threshold`
+- [x] Switch embedder from DINOv3 to CLIP — done (March 2026); `Settings.embedder_model = "openai/clip-vit-base-patch32"`; combined embedding now 1024-dim (512+512)
+- [ ] Run `benchmark_embedder.py` and record similarity data in Known Benchmark Data section; retune `similarity_threshold` if scan:match fails after switch
+- [ ] Add text chunking for documents longer than 77 CLIP tokens (currently truncated silently — fine for product labels, may be an issue for longer docs post-server migration)
 - [ ] Implement `RememberPipeline.add_to_database()` — store combined embedding + metadata in SQLite
 - [ ] Replace folder-based `load_folder_images()` + re-embed in `ScanPipeline` with DB query
 - [ ] Add API layer (`api/` is empty) — POST /remember and POST /scan endpoints
@@ -321,7 +320,7 @@ Both pipelines return plain Python dicts — JSON-serializable, no torch tensors
 
 ## Design Decisions
 
-- **DINOv3 for embeddings** — CLIP switch planned. CLIP captures semantic identity better across lighting, orientation, and distance variation. Downside: makes visually distinct versions of the same object more similar, but not an issue for this app's scope.
+- **CLIP over DINOv3 + sentence-transformers (March 2026)** — Replaced `facebook/dinov3-vitl16-pretrain-lvd1689m` (1024-dim, vision-only) + `sentence-transformers/all-MiniLM-L6-v2` (384-dim, text-only) with a single `openai/clip-vit-base-patch32` (512-dim, shared image+text space). Benefits: (1) One model replaces two — eliminates `sentence-transformers` dependency and RAM overhead of loading two separate models (~1.3GB → ~600MB total). (2) Semantically stable image embeddings across distance, lighting, and viewing angle. (3) Image and text share the same embedding space — concatenation in `make_combined_embedding` is now fully coherent (both slots are in the same CLIP space). Combined embedding shrinks from 1408-dim to 1024-dim. Benchmark data: run `python -m visual_memory.tests.scripts.benchmark_embedder` and record results here.
 - **YOLOE prompt-free for scan** — Broad detection; similarity threshold handles bloat.
 - **Grounding DINO for remember** — Handles vague natural language; much stronger than prompted YOLOE for this use case.
 - **Depth Pro** — Only monocular model with metric (absolute) depth; no scale factor needed.
