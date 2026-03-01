@@ -199,9 +199,9 @@ Pass from Android camera API. iPhone 15 Plus reference: `f_mm=6.24`, `sensor_wid
 ## Narration Output
 
 ```
-High confidence (similarity ≥ 0.6):   "Wallet ahead, 2 feet away."
-Low confidence (similarity 0.4–0.6):  "May be a wallet slightly right, focus to verify."
-Below threshold (< 0.4):              → not announced
+High confidence (similarity ≥ 0.6):             "Wallet ahead, 2 feet away."
+Below high confidence (similarity_threshold–0.6): "May be a wallet slightly right, focus to verify."
+Below similarity_threshold (default 0.2):         → not announced (no match returned)
 ```
 
 ### Direction Logic (5-zone)
@@ -220,7 +220,15 @@ return                "to your right"
 Run from project root (`python -m visual_memory.tests.scripts.<name>`).
 
 ```bash
-# Integration test runner — run after any engine/pipeline change
+# Lightweight device check — runs in ~2-3 min, skips Depth Pro load
+# Use this for routine verification; run_tests.py loads all models including
+# Depth Pro (~2GB) which can cause memory pressure on laptops.
+python -m visual_memory.tests.scripts.test_devices
+
+# OCR benchmark — extract text from text_demo/ images, check accuracy
+python -m visual_memory.tests.scripts.test_ocr_benchmark
+
+# Integration test runner — loads ALL models including Depth Pro (~15 min, memory-heavy)
 python -m visual_memory.tests.scripts.run_tests
 VERBOSE=1 python -m visual_memory.tests.scripts.run_tests   # show OCR text diff
 
@@ -281,13 +289,63 @@ Both pipelines return plain Python dicts — JSON-serializable, no torch tensors
 
 6ft detection out of range for GDINO-base (FP > FN, no safe threshold). Use 1ft/3ft images.
 
+### CLIP similarity data (March 2026)
+
+Run via `python -m visual_memory.tests.scripts.benchmark_embedder`. Device: MPS (Apple M-series).
+
+**Section A — Intra-class vs inter-class (CLIP image embeddings, full images)**
+
+| Embedder | Intra-class sim | Inter-class sim | Discrimination ratio |
+|----------|-----------------|-----------------|----------------------|
+| CLIP     | 0.7688          | 0.8003          | 0.961                |
+
+Note: Ratio < 1.0 because all 9 input images share similar context (objects on table, same lighting).
+CLIP ViT-B/32 embeds context as well as object identity; intra/inter gap is small for in-context sets.
+
+**Section A — Scan match test (cropped_wallet.png reference vs full wallet images)**
+
+| Image                   | CLIP sim |
+|-------------------------|----------|
+| wallet_1ft_table.jpg    | 0.7315   |
+| wallet_3ft_table.jpg    | 0.6138   |
+| wallet_6ft_table.jpg    | 0.6230   |
+
+Scores well above `similarity_threshold=0.2` at all distances. Threshold kept at **0.2**.
+
+**Section B — CLIP text↔image cross-modal alignment (text_demo images)**
+
+| img \ text   | marker     | pen        | pencil     | typed      |
+|---|---|---|---|---|
+| marker       | 0.2456 *   | 0.2456     | 0.2456     | 0.2456     |
+| pen          | 0.2232     | 0.2232 *   | 0.2232     | 0.2232     |
+| pencil       | 0.2142     | 0.2142     | 0.2142 *   | 0.2142     |
+| typed        | 0.2245     | 0.2245     | 0.2245     | 0.2245 *   |
+
+- Avg matched (diagonal): 0.2269 — avg mismatched: 0.2269 — gap: 0.0000
+- Zero cross-modal gap expected: all 4 test images have near-identical text ("The quick brown fox…")
+- `text_similarity_threshold=0.3` is above the 0.2269 matched sim → lower to 0.2 if text matching enabled
+
+**Section C — Combined embedding similarity (image + GT text, 1024-dim)**
+
+| | marker | pen | pencil | typed | random_printed_notes | malarkey |
+|---|---|---|---|---|---|---|
+| marker | 1.0000 | 0.9524 | 0.9503 | 0.9170 | 0.5046 | 0.5578 |
+| pen | 0.9524 | 1.0000 | 0.9822 | 0.9131 | 0.4575 | 0.5916 |
+| pencil | 0.9503 | 0.9822 | 1.0000 | 0.9050 | 0.4597 | 0.5755 |
+| typed | 0.9170 | 0.9131 | 0.9050 | 1.0000 | 0.5325 | 0.5116 |
+| random_printed_notes | 0.5046 | 0.4575 | 0.4597 | 0.5325 | 1.0000 | 0.5811 |
+| malarkey | 0.5578 | 0.5916 | 0.5755 | 0.5116 | 0.5811 | 1.0000 |
+
+- Off-diagonal range: 0.4575 – 0.9822 — mean: 0.6928
+- marker/pen/pencil/typed cluster high (same text) — random_printed_notes and malarkey separate cleanly
+
 ---
 
 ## Current State
 
 - Core engine complete and tested (depth, detection, embedding, OCR)
 - Both pipelines produce structured JSON dicts including combined image+text embeddings
-- **All 5 integration tests pass** (`run_tests.py`: remember:detect, scan:match, estimator:load, text_recognition:recognizer, text_recognition:embedder)
+- `test_devices.py` 4/4 pass with CLIP switch (March 2026): GroundingDINO (mps), YOLOE (cpu), CLIPEmbedder (mps), PaddleOCR (cpu)
 - `api/` directory empty, awaiting implementation
 - Database is flat folder of images, re-embedded on each `ScanPipeline` init — temporary
 - OCR backend: PaddleOCR-VL-1.5 (`settings.ocr_backend = "paddle"`)
@@ -300,7 +358,7 @@ Both pipelines return plain Python dicts — JSON-serializable, no torch tensors
 ### Engine / Architecture
 - [x] Switch embedder from DINOv3 to CLIP — done (March 2026); `Settings.embedder_model = "openai/clip-vit-base-patch32"`; combined embedding now 1024-dim (512+512)
 - [x] Fix DepthEstimator device — was defaulting to CPU (depth_pro default); now auto-detects MPS/CUDA/CPU and passes device explicitly to `create_model_and_transforms`
-- [ ] Run `benchmark_embedder.py` and record similarity data in Known Benchmark Data section; retune `similarity_threshold` if scan:match fails after switch
+- [x] Run `benchmark_embedder.py` and record similarity data in Known Benchmark Data section — done (March 2026); `similarity_threshold=0.2` kept; wallet scores 0.61–0.73 at all distances
 - [ ] Add text chunking for documents longer than 77 CLIP tokens (currently truncated silently — fine for product labels, may be an issue for longer docs post-server migration)
 - [ ] Dependency injection for shared model instances — `RememberPipeline` and `ScanPipeline` each instantiate their own CLIP, PaddleOCR, and (in scan) DepthEstimator. Refactor constructors to accept pre-built instances so the caller can share them (e.g. `ScanPipeline(embedder=shared_clip, recognizer=shared_ocr)`). **Post-server migration:** keep and expand — on the Flask server, models should be singletons loaded once at startup and injected into request handlers, not re-instantiated per request. The DI pattern is the same; the scope changes from "test runner" to "app lifetime".
 - [ ] Implement `RememberPipeline.add_to_database()` — store combined embedding + metadata in SQLite

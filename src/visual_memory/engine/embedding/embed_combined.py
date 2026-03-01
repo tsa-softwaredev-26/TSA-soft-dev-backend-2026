@@ -2,7 +2,7 @@
 import torch
 import torch.nn.functional as F
 
-_TEXT_DIM = 512  # CLIP ViT-B/32 output dimension (was 384 for MiniLM)
+_TEXT_DIM = 512  # CLIP text encoder output dimension (paired with DINOv3 1024-dim image embeddings)
 
 
 def make_combined_embedding(

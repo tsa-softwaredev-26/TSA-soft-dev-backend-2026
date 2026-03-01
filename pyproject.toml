@@ -9,7 +9,7 @@ description = "Visual memory system with object detection for TSA Software Devel
 requires-python = ">=3.8"
 dependencies = [
     "torch>=2.0.0",
-    "transformers>=4.30.0",
+    "transformers>=4.56.0",
     "pillow>=9.0.0",
     "pillow-heif>=0.10.0",
     "ultralytics>=8.0.0",
