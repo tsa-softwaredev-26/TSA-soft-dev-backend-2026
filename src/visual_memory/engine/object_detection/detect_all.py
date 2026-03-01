@@ -50,6 +50,9 @@ class YoloeDetector:
                 f"Please ensure the model file is in the correct location."
             )
         
+        # ultralytics auto-selects device: CUDA (Linux GPU server) → MPS (macOS) → CPU.
+        # No explicit device arg needed — YOLOE() handles it internally.
+        # TODO (server migration): remove MPS branch in ultralytics by pinning device="cuda".
         self.prompt_free_model = YOLOE(prompt_free_model_path)
         self.confidence_threshold = confidence_threshold
         self.intersection_threshold = intersection_threshold

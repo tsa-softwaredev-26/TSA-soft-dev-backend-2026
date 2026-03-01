@@ -4,11 +4,9 @@ Grounding DINO object detection module.
 This module provides a class-based interface to the Grounding DINO zero-shot
 object detection model for detecting objects from images using natural language prompts.
 
-TODO: Migrate to RTX server for faster inference
-    - Change device to "cuda" by default
-    - Add batch processing by modifying detect() to accept List[image_path] and List[prompt]
-    - Process multiple images in single forward pass: processor(images=[img1, img2, ...])
-    - Return List[detection_dict] instead of single detection_dict
+Device selection auto-maps: CUDA (Linux GPU server) → MPS (macOS) → CPU (fallback).
+TODO (server migration): add batch processing — detect() should accept List[image] + List[prompt]
+    and process in a single forward pass for GPU throughput.
 """
 from typing import Optional, Dict, Any
 import torch
@@ -49,7 +47,8 @@ class GroundingDinoDetector:
         self.box_threshold = box_threshold
         self.text_threshold = text_threshold
         
-        # Auto-detect best available device if not specified
+        # Auto-detect best available device: CUDA (Linux GPU server) → MPS (macOS) → CPU.
+        # TODO (server migration): remove MPS branch; server uses CUDA only.
         if device is None:
             if torch.cuda.is_available():
                 self.device = "cuda"

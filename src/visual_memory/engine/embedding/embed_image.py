@@ -56,9 +56,13 @@ class CLIPEmbedder:
             TODO: For server version, implement batch processing to embed
             multiple images at once for efficiency.
         """
-        inputs = self.processor(images=image, return_tensors="pt").to(self.device)
+        # Use vision_model + visual_projection directly.
+        # transformers >=5.x changed get_image_features() to return a ModelOutput
+        # object instead of a plain tensor, so we call the sub-models explicitly.
+        pixel_values = self.processor(images=image, return_tensors="pt")["pixel_values"].to(self.device)
         with torch.inference_mode():
-            features = self.model.get_image_features(**inputs)
+            vision_out = self.model.vision_model(pixel_values=pixel_values)
+            features   = self.model.visual_projection(vision_out.pooler_output)
         return F.normalize(features, dim=-1).detach().cpu()
 
     def embed_text(self, text: str) -> torch.Tensor:
@@ -77,11 +81,12 @@ class CLIPEmbedder:
 
         TODO: Add chunking for long documents once migrated to server.
         """
-        inputs = self.processor(
-            text=[text], return_tensors="pt", padding=True, truncation=True
-        ).to(self.device)
+        enc = self.processor(text=[text], return_tensors="pt", padding=True, truncation=True)
+        input_ids      = enc["input_ids"].to(self.device)
+        attention_mask = enc["attention_mask"].to(self.device)
         with torch.inference_mode():
-            features = self.model.get_text_features(**inputs)
+            text_out = self.model.text_model(input_ids=input_ids, attention_mask=attention_mask)
+            features = self.model.text_projection(text_out.pooler_output)
         result = F.normalize(features, dim=-1).detach().cpu()
 
         _log.info({

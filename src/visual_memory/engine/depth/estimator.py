@@ -28,16 +28,29 @@ class DepthEstimator:
         # focal_length_px from Android: (focalLengthMm / sensorWidthMm) * imageWidthPx
         # None = Depth Pro infers (~75% error vs ~26% calibrated at close range)
         self.f_px = torch.tensor(focal_length_px, dtype=torch.float32) if focal_length_px else None
+
+        # Auto-detect device — MPS (macOS GPU) first, then CUDA, then CPU.
+        # depth_pro.create_model_and_transforms defaults to CPU if not passed explicitly,
+        # which causes 10-30x slowdown vs GPU. Always pass device explicitly.
+        # TODO (server migration): remove MPS branch; server uses CUDA only.
+        if torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+        elif torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        else:
+            self.device = torch.device("cpu")
+
         config = dataclasses.replace(DEFAULT_MONODEPTH_CONFIG_DICT, checkpoint_uri=str(_CHECKPOINT_PATH))
-        self.model, self.transform = depth_pro.create_model_and_transforms(config=config)
+        self.model, self.transform = depth_pro.create_model_and_transforms(config=config, device=self.device)
         self.model.eval()
 
     def estimate(self, image: Image.Image) -> torch.Tensor:
         # Call once per query image — reuse depth_map for all matched objects
         # depth_pro.load_rgb expects a file path, so we use transform directly on the PIL image
-        image_tensor = self.transform(image)
+        image_tensor = self.transform(image).to(self.device)
+        f_px = self.f_px.to(self.device) if self.f_px is not None else None
         with torch.no_grad():
-            prediction = self.model.infer(image_tensor, f_px=self.f_px)
+            prediction = self.model.infer(image_tensor, f_px=f_px)
         return prediction["depth"]  # (H, W) metric meters
 
     def get_depth_at_bbox(self, depth_map: torch.Tensor, bbox: list) -> float:

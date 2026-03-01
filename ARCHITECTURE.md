@@ -296,8 +296,10 @@ Both pipelines return plain Python dicts — JSON-serializable, no torch tensors
 
 ### Engine / Architecture
 - [x] Switch embedder from DINOv3 to CLIP — done (March 2026); `Settings.embedder_model = "openai/clip-vit-base-patch32"`; combined embedding now 1024-dim (512+512)
+- [x] Fix DepthEstimator device — was defaulting to CPU (depth_pro default); now auto-detects MPS/CUDA/CPU and passes device explicitly to `create_model_and_transforms`
 - [ ] Run `benchmark_embedder.py` and record similarity data in Known Benchmark Data section; retune `similarity_threshold` if scan:match fails after switch
 - [ ] Add text chunking for documents longer than 77 CLIP tokens (currently truncated silently — fine for product labels, may be an issue for longer docs post-server migration)
+- [ ] Dependency injection for shared model instances — `RememberPipeline` and `ScanPipeline` each instantiate their own CLIP, PaddleOCR, and (in scan) DepthEstimator. Refactor constructors to accept pre-built instances so the caller can share them (e.g. `ScanPipeline(embedder=shared_clip, recognizer=shared_ocr)`). **Post-server migration:** keep and expand — on the Flask server, models should be singletons loaded once at startup and injected into request handlers, not re-instantiated per request. The DI pattern is the same; the scope changes from "test runner" to "app lifetime".
 - [ ] Implement `RememberPipeline.add_to_database()` — store combined embedding + metadata in SQLite
 - [ ] Replace folder-based `load_folder_images()` + re-embed in `ScanPipeline` with DB query
 - [ ] Add API layer (`api/` is empty) — POST /remember and POST /scan endpoints

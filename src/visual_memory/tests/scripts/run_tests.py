@@ -155,11 +155,10 @@ for _e in tail_logs(since_line=_mark2): print(f"       {json.dumps(_e)}")  # com
 _section("[3] estimator — weights load only")
 
 _mark3 = log_mark()
-from visual_memory.engine.depth import DepthEstimator
-
 try:
-    estimator = DepthEstimator(focal_length_px=FOCAL_PX)
-    _pass("estimator:load", "DepthEstimator loaded successfully")
+    # Reuse the already-loaded estimator from ScanPipeline — no second load needed.
+    estimator = scan.estimator
+    _pass("estimator:load", "DepthEstimator loaded successfully (reused from scan)")
 except Exception as exc:
     _fail("estimator:load", str(exc))
 
@@ -171,11 +170,9 @@ _section("[4] text_recognition + embedding — magnesium.heic")
 
 _mark4 = log_mark()
 try:
-    from visual_memory.engine.text_recognition import TextRecognizer
-    from visual_memory.engine.embedding import CLIPEmbedder
-
-    recognizer = TextRecognizer()
-    embedder = CLIPEmbedder()
+    # Reuse already-loaded instances from ScanPipeline — no third load of PaddleOCR/CLIP.
+    recognizer = scan.text_recognizer
+    embedder = scan.embedder
 
     r4_img = load_image(str(MAGNESIUM))
     ocr = recognizer.recognize(r4_img)
