@@ -54,6 +54,7 @@ weights/
 
 # Logs
 logs/
+*.log
 
 # Depth Pro (cloned locally for testing, installed as package via pip)
 depth_demo/ml-depth-pro/
