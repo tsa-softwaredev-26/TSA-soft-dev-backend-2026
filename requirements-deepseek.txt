@@ -1,0 +1,14 @@
+# Pinned dependencies for DeepSeek-OCR venv (production / reproducibility)
+# Usage:
+#   python3 -m venv .venv
+#   source .venv/bin/activate
+#   pip install -r requirements-deepseek.txt
+-e .
+torch==2.6.0
+transformers==4.46.3
+tokenizers==0.20.3
+einops
+addict
+easydict
+# Linux GPU servers only:
+# pip install flash-attn==2.7.3 --no-build-isolation

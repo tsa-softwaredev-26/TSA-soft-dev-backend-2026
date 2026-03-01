@@ -1,0 +1,276 @@
+{
+    "input_path": "marker.jpeg",
+    "page_index": null,
+    "page_count": null,
+    "width": 4284,
+    "height": 5712,
+    "model_settings": {
+        "use_doc_preprocessor": false,
+        "use_layout_detection": true,
+        "use_chart_recognition": false,
+        "use_seal_recognition": false,
+        "use_ocr_for_image_block": false,
+        "format_block_content": false,
+        "merge_layout_blocks": true,
+        "markdown_ignore_labels": [
+            "number",
+            "footnote",
+            "header",
+            "header_image",
+            "footer",
+            "footer_image",
+            "aside_text"
+        ],
+        "return_layout_polygon_points": true
+    },
+    "parsing_res_list": [
+        {
+            "block_label": "text",
+            "block_content": "The quick brown fox jumps over the lazy dog over the lazy dog",
+            "block_bbox": [
+                1152,
+                1204,
+                3736,
+                1657
+            ],
+            "block_id": 0,
+            "block_order": 1,
+            "group_id": 0,
+            "block_polygon_points": [
+                [
+                    1152,
+                    1204
+                ],
+                [
+                    1152,
+                    1656
+                ],
+                [
+                    3585,
+                    1656
+                ],
+                [
+                    3735,
+                    1628
+                ],
+                [
+                    3735,
+                    1204
+                ],
+                [
+                    3500,
+                    1204
+                ],
+                [
+                    3262,
+                    1204
+                ],
+                [
+                    1928,
+                    1204
+                ],
+                [
+                    1927,
+                    1233
+                ]
+            ]
+        },
+        {
+            "block_label": "text",
+            "block_content": "1+1=2",
+            "block_bbox": [
+                1242,
+                2163,
+                2333,
+                2394
+            ],
+            "block_id": 1,
+            "block_order": 2,
+            "group_id": 1,
+            "block_polygon_points": [
+                [
+                    1242.0,
+                    2163.0
+                ],
+                [
+                    2333.0,
+                    2163.0
+                ],
+                [
+                    2333.0,
+                    2394.0
+                ],
+                [
+                    1242.0,
+                    2394.0
+                ]
+            ]
+        }
+    ],
+    "layout_det_res": {
+        "input_path": null,
+        "page_index": null,
+        "boxes": [
+            {
+                "cls_id": 22,
+                "label": "text",
+                "score": 0.34442228078842163,
+                "coordinate": [
+                    1161,
+                    1207,
+                    3726,
+                    1396
+                ],
+                "order": 1,
+                "polygon_points": [
+                    [
+                        1161.0,
+                        1207.0
+                    ],
+                    [
+                        3726.0,
+                        1207.0
+                    ],
+                    [
+                        3726.0,
+                        1396.0
+                    ],
+                    [
+                        1161.0,
+                        1396.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 22,
+                "label": "text",
+                "score": 0.517528772354126,
+                "coordinate": [
+                    1152,
+                    1204,
+                    3736,
+                    1657
+                ],
+                "order": 2,
+                "polygon_points": [
+                    [
+                        1152,
+                        1204
+                    ],
+                    [
+                        1152,
+                        1656
+                    ],
+                    [
+                        3585,
+                        1656
+                    ],
+                    [
+                        3735,
+                        1628
+                    ],
+                    [
+                        3735,
+                        1204
+                    ],
+                    [
+                        3500,
+                        1204
+                    ],
+                    [
+                        3262,
+                        1204
+                    ],
+                    [
+                        1928,
+                        1204
+                    ],
+                    [
+                        1927,
+                        1233
+                    ]
+                ]
+            },
+            {
+                "cls_id": 22,
+                "label": "text",
+                "score": 0.31304433941841125,
+                "coordinate": [
+                    1157,
+                    1465,
+                    3139,
+                    1657
+                ],
+                "order": 3,
+                "polygon_points": [
+                    [
+                        1157,
+                        1465
+                    ],
+                    [
+                        1157,
+                        1656
+                    ],
+                    [
+                        3117,
+                        1656
+                    ],
+                    [
+                        3117,
+                        1465
+                    ],
+                    [
+                        1712,
+                        1465
+                    ],
+                    [
+                        1689,
+                        1465
+                    ],
+                    [
+                        1647,
+                        1465
+                    ],
+                    [
+                        1520,
+                        1465
+                    ],
+                    [
+                        1179,
+                        1493
+                    ]
+                ]
+            },
+            {
+                "cls_id": 22,
+                "label": "text",
+                "score": 0.4033662974834442,
+                "coordinate": [
+                    1242,
+                    2163,
+                    2333,
+                    2394
+                ],
+                "order": 4,
+                "polygon_points": [
+                    [
+                        1242.0,
+                        2163.0
+                    ],
+                    [
+                        2333.0,
+                        2163.0
+                    ],
+                    [
+                        2333.0,
+                        2394.0
+                    ],
+                    [
+                        1242.0,
+                        2394.0
+                    ]
+                ]
+            }
+        ]
+    }
+}

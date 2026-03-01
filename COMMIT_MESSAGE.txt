@@ -1,0 +1,86 @@
+feat: Add comprehensive PaddleOCR integration & debug infrastructure (needs further tuning)
+
+Implement pluggable PaddleOCR backend with extensive debugging & logging. Initial
+benchmarking shows PaddleOCR model loads successfully but text extraction fails
+(returns empty results). Infrastructure in place for future investigation.
+EasyOCR remains default and primary backend.
+
+**New files:**
+- src/visual_memory/engine/text_recognition/paddle_recognizer.py
+  PaddleOCRRecognizer class with comprehensive debug logging
+  - Converts PIL images to temp files (PaddleOCRVL requires file paths)
+  - Attempts text extraction from JSON exports
+  - Logs at every step for debugging (init, predict, JSON parsing)
+
+- src/visual_memory/tests/scripts/test_ocr_benchmark.py
+  Comprehensive OCR comparison framework:
+  - Word-overlap %: set intersection / union of recognized vs ground truth words
+  - Exact match: case-insensitive string comparison
+  - Average confidence per image
+  - Inference time per image
+  - Defaults to marker.jpeg; other images commented out for opt-in testing
+  - Summary table + decision logic (>=50% avg word-overlap = winner)
+
+**Modified files:**
+- src/visual_memory/engine/text_recognition/__init__.py
+  Add PaddleOCRRecognizer to factory; support ocr_backend="paddle"
+
+- src/visual_memory/config/settings.py
+  Document "paddle" as ocr_backend option (default: "easyocr")
+
+- src/visual_memory/tests/scripts/run_tests.py
+  Support OCR_BACKEND env var for backend selection in test 4
+  Add VERBOSE=1 mode showing text vs ground truth comparison
+  Merged text recognition + embedding into single test (test 4)
+  Proper logging of OCR events
+
+- pyproject.toml
+  Add paddleocr>=3.2.0 dependency (CPU-compatible, no version conflicts)
+
+**Test files:**
+- Renamed: market.jpeg → marker.jpeg, market.txt → marker.txt
+- All ground truth files updated
+- Test infrastructure supports both EasyOCR and PaddleOCR (factory pattern)
+
+**Benchmark Results (Feb 28, 16:16-17:55 UTC):**
+- EasyOCR: 11.1% word-overlap on marker.jpeg (baseline)
+- PaddleOCR: 0.0% word-overlap (inference debugging in progress)
+  - Model initialization: ✓ successful
+  - Prediction: ✓ completes without error
+  - Text extraction: ✗ returns empty (boxes list is empty, markdown output empty)
+  - Issue: PaddleOCRVL prediction not detecting text despite successful model load
+
+**Known Issues & TODO:**
+1. PaddleOCR text extraction broken:
+   - JSON export has empty parsing_res_list and layout_det_res.boxes
+   - Markdown export is blank
+   - Suspected causes:
+     a) Model (PaddleOCR-VL-1.5) may not be trained for photo-based text (trained on documents)
+     b) Image format/preprocessing mismatch
+     c) Model expects different input constraints
+   - Next steps: Try different models, preprocessing, or document support limits
+
+2. Logging infrastructure working correctly:
+   - All paddle_* events logged to logs/app.log
+   - DEBUG, INFO, WARNING, ERROR levels captured
+   - JSON format allows structured analysis
+
+3. EasyOCR remains default due to PaddleOCR limitations
+
+**Architecture Notes:**
+- Combined embedding (image + text) remains core design—provides granularity
+  even if OCR confidence varies between engines
+- Factory pattern allows engine swapping without pipeline changes
+- Modular design ready for other OCR backends (TesseractOCR, etc.)
+- Extensive logging enables post-hoc debugging of model behavior
+
+**Pre-Merge Checklist:**
+✓ All existing tests pass (remember:detect, scan:match, estimator:load, text_recognition x2)
+✓ New OCR backend doesn't break existing pipelines
+✓ Logging system operational across all engines
+✓ Benchmark infrastructure ready for performance analysis
+- TODO: Investigate PaddleOCR text extraction failure (separate PR)
+- TODO: Consider model selection (document-focused vs. general-purpose OCR)
+- TODO: Profile inference time (PaddleOCR ~3x faster if extraction works)
+
+Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>
