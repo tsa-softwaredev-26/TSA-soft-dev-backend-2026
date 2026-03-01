@@ -9,7 +9,7 @@ Tests:
     1. RememberPipeline: wallet_1ft_table.jpg + "small rectangular wallet"
     2. ScanPipeline: wallet_3ft_table.jpg
     3. DepthEstimator: weights load only (inference skipped — too slow for CI)
-    4. TextRecognition: magnesium.heic — TextRecognizer + CLIPEmbedder
+    4. TextRecognition: magnesium.heic — TextRecognizer + CLIPTextEmbedder
 """
 
 from __future__ import annotations
@@ -172,7 +172,7 @@ _mark4 = log_mark()
 try:
     # Reuse already-loaded instances from ScanPipeline — no third load of PaddleOCR/CLIP.
     recognizer = scan.text_recognizer
-    embedder = scan.embedder
+    embedder = scan.text_embedder
 
     r4_img = load_image(str(MAGNESIUM))
     ocr = recognizer.recognize(r4_img)
