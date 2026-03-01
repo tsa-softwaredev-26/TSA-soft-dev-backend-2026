@@ -2,7 +2,7 @@
 import torch
 import torch.nn.functional as F
 
-_TEXT_DIM = 384  # all-MiniLM-L6-v2 output dimension
+_TEXT_DIM = 512  # CLIP ViT-B/32 output dimension (was 384 for MiniLM)
 
 
 def make_combined_embedding(
@@ -20,10 +20,10 @@ def make_combined_embedding(
 
     Args:
         img_emb:  (1, img_dim) image embedding tensor
-        text_emb: (1, 384) text embedding tensor, or None
+        text_emb: (1, 512) text embedding tensor, or None
 
     Returns:
-        (1, img_dim + 384) normalized+concatenated tensor
+        (1, img_dim + 512) normalized+concatenated tensor
     """
     img_norm = F.normalize(img_emb, dim=1)
     if text_emb is None:

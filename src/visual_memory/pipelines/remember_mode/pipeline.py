@@ -4,7 +4,7 @@ import pillow_heif
 
 from visual_memory.utils import load_image, crop_object, get_logger
 from visual_memory.engine.object_detection import GroundingDinoDetector
-from visual_memory.engine.embedding import ImageEmbedder, TextEmbedder, make_combined_embedding
+from visual_memory.engine.embedding import CLIPEmbedder, make_combined_embedding
 from visual_memory.engine.text_recognition import TextRecognizer
 
 pillow_heif.register_heif_opener()
@@ -15,9 +15,8 @@ _log = get_logger(__name__)
 class RememberPipeline:
     def __init__(self):
         self.detector = GroundingDinoDetector()
-        self.embedder = ImageEmbedder()
+        self.embedder = CLIPEmbedder()
         self.text_recognizer = TextRecognizer()
-        self.text_embedder = TextEmbedder()
 
         # TODO: replace with real database later
         self.database = None
@@ -70,7 +69,7 @@ class RememberPipeline:
         ocr_result = self.text_recognizer.recognize(cropped)
         text_embedding = None
         if ocr_result["text"]:
-            text_embedding = self.text_embedder.embed(ocr_result["text"])
+            text_embedding = self.embedder.embed_text(ocr_result["text"])
 
         _log.info({
             "event": "remember_ocr",

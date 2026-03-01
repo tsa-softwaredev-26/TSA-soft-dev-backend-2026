@@ -1,6 +1,6 @@
 from pathlib import Path
 from visual_memory.config import Settings
-from visual_memory.engine.embedding import ImageEmbedder, TextEmbedder, make_combined_embedding
+from visual_memory.engine.embedding import CLIPEmbedder, make_combined_embedding
 from visual_memory.engine.object_detection import YoloeDetector
 from visual_memory.engine.depth import DepthEstimator
 from visual_memory.engine.text_recognition import TextRecognizer
@@ -12,9 +12,8 @@ _log = get_logger(__name__)
 
 class ScanPipeline:
     def __init__(self, database_dir: Path, focal_length_px: float):
-        self.embedder = ImageEmbedder()
+        self.embedder = CLIPEmbedder()
         self.text_recognizer = TextRecognizer()
-        self.text_embedder = TextEmbedder()
         self.detector = YoloeDetector()
         self.estimator = DepthEstimator(focal_length_px=focal_length_px)
 
@@ -27,7 +26,7 @@ class ScanPipeline:
         for file_path, img in self.database_images:
             img_emb = self.embedder.embed(img)
             ocr_result = self.text_recognizer.recognize(img)
-            text_emb = self.text_embedder.embed(ocr_result["text"]) if ocr_result["text"] else None
+            text_emb = self.embedder.embed_text(ocr_result["text"]) if ocr_result["text"] else None
             combined = make_combined_embedding(img_emb, text_emb)
             embeddings.append((file_path, combined))
         return embeddings
@@ -51,7 +50,7 @@ class ScanPipeline:
 
             img_emb = self.embedder.embed(cropped)
             ocr_result = self.text_recognizer.recognize(cropped)
-            text_emb = self.text_embedder.embed(ocr_result["text"]) if ocr_result["text"] else None
+            text_emb = self.embedder.embed_text(ocr_result["text"]) if ocr_result["text"] else None
             combined = make_combined_embedding(img_emb, text_emb)
 
             match_path, similarity = find_match(
