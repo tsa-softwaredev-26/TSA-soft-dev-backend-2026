@@ -20,14 +20,16 @@ wheels/
 .installed.cfg
 *.egg
 
-# Virtual Environment
+# Virtual Environments
 venv/
+.venv/
 ENV/
 env/
 
 # macOS
 .DS_Store
 ._*
+
 # Environment variables
 .env
 
@@ -38,36 +40,20 @@ env/
 *.swo
 .cursor/
 
-# OS
-.DS_Store
-Thumbs.db
-._*
+# Claude Code (local dev instructions — not part of the package)
+CLAUDE.md
 
-# Model weights
+# Model weights / checkpoints
 *.pt
 *.pth
 *.onnx
 *.safetensors
-object_detection/mobileclip2_b.ts
-
-# Model directories
+checkpoints/
 models/
 weights/
-checkpoints/
 
-# Claude dev context
-CLAUDE.md
+# Logs
+logs/
 
-# Depth Pro — cloned locally for testing, installed as package via pip
+# Depth Pro (cloned locally for testing, installed as package via pip)
 depth_demo/ml-depth-pro/
-
-# Test dir
-similarity_tests/
-
-# Test images — large, not committed
-depth_demo/test_images/
-depth_estimation/test_images/
-*.ts # or be specific:
-object_detection/mobileclip2_b.ts
-*.ts # or be specific:
-object_detection/mobileclip2_b.ts
