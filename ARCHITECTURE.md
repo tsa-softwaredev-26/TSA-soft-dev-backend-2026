@@ -19,12 +19,13 @@ Python backend for a visual memory app built for blind users. The system narrate
 
 ## Setup
 
-Request permission for Grounding DINO on Hugging Face, then:
+Request permission for Grounding DINO on Hugging Face, then git clone and paste setup:
 
 ```bash
+pip install --upgrade pip
 pip install -e .
 python setup_weights.py
-huggingface-cli login
+hf auth login
 ```
 
 `pip install -e .` installs all dependencies including depth-pro from GitHub.
