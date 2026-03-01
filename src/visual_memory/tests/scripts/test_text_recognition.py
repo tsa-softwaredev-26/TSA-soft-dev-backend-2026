@@ -16,7 +16,7 @@ import pillow_heif
 pillow_heif.register_heif_opener()
 
 from visual_memory.engine.text_recognition import TextRecognizer
-from visual_memory.engine.embedding import CLIPEmbedder
+from visual_memory.engine.embedding import CLIPTextEmbedder
 from visual_memory.utils import load_image
 
 
@@ -50,9 +50,9 @@ def run_text_recognition_tests(image_path: Path) -> dict:
         results["errors"].append(f"TextRecognizer: {e}")
         return results
 
-    # Test 2: CLIPEmbedder text embedding
+    # Test 2: CLIPTextEmbedder text embedding
     try:
-        embedder = CLIPEmbedder()
+        embedder = CLIPTextEmbedder()
         sample_text = ocr["text"] if ocr["text"] else "test document"
         embedding = embedder.embed_text(sample_text)
         assert embedding.shape[0] == 1, f"Expected batch dim 1, got {embedding.shape[0]}"
@@ -60,7 +60,7 @@ def run_text_recognition_tests(image_path: Path) -> dict:
         results["embedder_ok"] = True
         results["embedding_shape"] = list(embedding.shape)
     except Exception as e:
-        results["errors"].append(f"CLIPEmbedder: {e}")
+        results["errors"].append(f"CLIPTextEmbedder: {e}")
 
     return results
 
