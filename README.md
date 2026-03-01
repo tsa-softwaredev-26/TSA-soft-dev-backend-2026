@@ -14,7 +14,7 @@ python -m pip install --upgrade pip
 pip install -e .
 hf auth login
 python setup_weights.py
-
+```
 ## Modes
 
 - **Remember Mode** - detect + store an object from a text prompt
