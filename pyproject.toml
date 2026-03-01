@@ -13,10 +13,13 @@ dependencies = [
     "pillow>=9.0.0",
     "pillow-heif>=0.10.0",
     "ultralytics>=8.0.0",
-    "huggingface_hub>=0.16.0",
+    "huggingface_hub>=0.26.0",
     "depth-pro @ git+https://github.com/apple/ml-depth-pro.git",
-    "easyocr>=1.7.0",
+    "paddleocr>=3.2.0",
     "sentence-transformers>=3.0.0",
+    "einops",
+    "addict",
+    "easydict",
 ]
 
 [project.scripts]

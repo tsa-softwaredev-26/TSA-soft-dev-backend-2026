@@ -4,7 +4,7 @@ import pillow_heif
 
 from visual_memory.utils import load_image, crop_object, get_logger
 from visual_memory.engine.object_detection import GroundingDinoDetector
-from visual_memory.engine.embedding import ImageEmbedder, TextEmbedder
+from visual_memory.engine.embedding import ImageEmbedder, TextEmbedder, make_combined_embedding
 from visual_memory.engine.text_recognition import TextRecognizer
 
 pillow_heif.register_heif_opener()
@@ -80,9 +80,12 @@ class RememberPipeline:
             "has_text_embedding": text_embedding is not None,
         })
 
+        # Build combined embedding (image + text) for consistent matching
+        combined = make_combined_embedding(embedding, text_embedding)
+
         # Hook for database storage
         self.add_to_database(
-            embedding,
+            combined,
             metadata={
                 "label": label,
                 "location": None,
@@ -90,7 +93,6 @@ class RememberPipeline:
                 "timestamp": None,
                 "image_path": str(image_path),
                 "ocr_text": ocr_result["text"],
-                "text_embedding": text_embedding,
             }
         )
 

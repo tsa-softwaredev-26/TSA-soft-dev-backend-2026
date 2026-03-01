@@ -7,7 +7,7 @@
 
 ## Project Overview
 
-Python backend for a visual memory app built for blind users The system narrates the environment by detecting and locating previously-remembered objects in a new scan image.
+Python backend for a visual memory app built for blind users. The system narrates the environment by detecting and locating previously-remembered objects in a new scan image.
 
 **Two modes:**
 
@@ -18,21 +18,22 @@ Python backend for a visual memory app built for blind users The system narrates
 ---
 
 ## Setup
+
 Request permission for DINOv2 and Grounding DINO on Hugging Face, then:
+
 ```bash
 pip install -e .
 python setup_weights.py
+huggingface-cli login
 ```
 
 `pip install -e .` installs all dependencies including depth-pro from GitHub.
-`setup_weights.py` downloads the Depth Pro checkpoint (~2GB) from `apple/DepthPro` on HuggingFace
-directly into `checkpoints/depth_pro.pt` at the project root. Works on Windows, macOS, and Linux.
+`setup_weights.py` downloads the Depth Pro checkpoint (~2GB) and YOLOE weights into the project root.
+`DepthEstimator` resolves the checkpoint path at import time using `Path(__file__)`.
 
-`DepthEstimator` resolves the checkpoint path at import time using `Path(__file__)`, so it works
-from any working directory without symlinks or environment variables.
 ---
 
-## Core Structure:
+## Core Structure
 
 ```
 src/visual_memory/
@@ -41,23 +42,36 @@ src/visual_memory/
 │   └── scan_mode/pipeline.py
 │
 ├── engine/
-│   ├── embedding/embed_image.py        # CLIP Vision embedder
+│   ├── embedding/
+│   │   ├── embed_image.py              # ImageEmbedder (DINOv3)
+│   │   ├── embed_text.py              # TextEmbedder (sentence-transformers)
+│   │   └── embed_combined.py          # make_combined_embedding()
+│   ├── text_recognition/
+│   │   ├── base.py                    # BaseTextRecognizer ABC
+│   │   └── paddle_recognizer.py       # PaddleOCRRecognizer (active)
 │   ├── object_detection/
-│   │   ├── detect_all.py               # YOLOE
-│   │   └── prompt_based.py             # GroundingDINO
-│   └── depth/estimator.py              # Depth Pro wrapper
+│   │   ├── detect_all.py              # YOLOE
+│   │   └── prompt_based.py            # GroundingDINO
+│   └── depth/estimator.py             # Depth Pro wrapper
 │
 ├── utils/
 │   ├── image_utils.py
-│   └── similarity_utils.py
+│   ├── similarity_utils.py
+│   └── logger.py                      # JSON structured logging
 │
 ├── config/settings.py                  # All tunable thresholds
 ├── api/                                # Reserved for Flask/FastAPI
-└── cli/                                # Integration test scripts
+└── tests/                             # Test scripts + test data
+    ├── scripts/                        # Runnable .py test scripts
+    ├── input_images/                   # Object test images
+    ├── demo_database/                  # Reference crops for ScanPipeline
+    └── text_demo/                      # OCR test images + ground_truth/
 ```
+
 ---
 
 ## Module Reference
+
 ### `pipelines/remember_mode/pipeline.py` - `RememberPipeline`
 - `run(image_path, prompt) -> dict`
 - Returns `{"success": bool, "message": str, "result": {"label", "confidence", "box"} | None}`
@@ -72,11 +86,10 @@ src/visual_memory/
 
 ### `config/settings.py` - `Settings`
 - Single dataclass, all ML tuning params in one place
-- All detector/pipeline defaults are pulled from here — edit here to tune
-- Fields: `grounding_dino_model`, `box_threshold`, `text_threshold`, `yoloe_confidence`, `yoloe_iou`, `embedder_model`, `similarity_threshold`, `dedup_iou_threshold`, `narration_high_confidence`
+- Fields: `grounding_dino_model`, `box_threshold`, `text_threshold`, `yoloe_confidence`, `yoloe_iou`, `embedder_model`, `similarity_threshold`, `dedup_iou_threshold`, `narration_high_confidence`, `ocr_backend`, `text_embedder_model`, `text_similarity_threshold`
 
 ### `engine/object_detection/prompt_based.py` - `GroundingDinoDetector`
-- Model: `IDEA-Research/grounding-dino-base` (upgraded from tiny Feb 2026)
+- Model: `IDEA-Research/grounding-dino-base`
 - Input: PIL Image + text prompt
 - Output: `{'box': [x1,y1,x2,y2], 'score': float, 'label': str}` or `None`
 - Used in: Remember Mode
@@ -85,7 +98,6 @@ src/visual_memory/
 - Model: `yoloe-26l-seg-pf.pt` (local, prompt-free)
 - Input: PIL Image
 - Output: `(List[[x1,y1,x2,y2]], List[float])` or `(None, None)`
-- Thresholds: `conf=0.35`, `iou=0.45`
 - Used in: Scan Mode
 
 ### `engine/embedding/embed_image.py` - `ImageEmbedder`
@@ -94,24 +106,41 @@ src/visual_memory/
 - Output: `torch.Tensor` shape `(1, embedding_dim)`
 - Used in: Both modes
 
+### `engine/embedding/embed_text.py` - `TextEmbedder`
+- Model: `sentence-transformers/all-MiniLM-L6-v2`
+- Input: str
+- Output: `torch.Tensor` shape `(1, 384)`
+- Used in: Both modes (when OCR text is available)
+
+### `engine/embedding/embed_combined.py` - `make_combined_embedding`
+- Concatenates normalized image + text embeddings
+- Non-document objects pass a zero text vector — image similarity dominates unchanged
+- Used in: Both pipelines
+
+### `engine/text_recognition/paddle_recognizer.py` - `PaddleOCRRecognizer`
+- Model: PaddleOCR-VL-1.5 with PP-DocLayoutV3 layout detection
+- Input: PIL Image (saved to temp PNG, passed as file path)
+- Output: `{"text": str, "confidence": float, "segments": list}`
+- Inference: ~3-18s per image
+- Extracts text from `parsing_res_list[].block_content` in JSON export
+
 ### `utils/image_utils.py`
-- `load_image(path)` - PIL Image (RGB, EXIF-corrected, HEIC-compatible)
-- `load_folder_images(folder)` - `List[(path, PIL Image)]`
-- `crop_object(image, box)` - cropped PIL Image
+- `load_image(path)` — PIL Image (RGB, EXIF-corrected, HEIC-compatible)
+- `load_folder_images(folder)` — `List[(path, PIL Image)]`
+- `crop_object(image, box)` — cropped PIL Image
 
 ### `utils/similarity_utils.py`
-- `cosine_similarity(t1, t2)` - scalar tensor
-- `find_match(query, database, threshold)` - `(path, score)` or `(None, 0.0)`
-- `deduplicate_matches(matches, iou_threshold)` - filtered list
-- Linear search, fine for expected scale
+- `cosine_similarity(t1, t2)` — scalar tensor
+- `find_match(query, database, threshold)` — `(path, score)` or `(None, 0.0)`
+- `deduplicate_matches(matches, iou_threshold)` — filtered list
 
 ### `engine/depth/estimator.py` - `DepthEstimator`
 - Model: Apple Depth Pro
-- `__init__(focal_length_px=None)` - loads model once
+- `__init__(focal_length_px=None)` — loads model once
 - `estimate(image: PIL.Image) -> torch.Tensor` — depth map in meters
-- `get_depth_at_bbox(depth_map, bbox) -> float` - mean depth in feet, inner 50% of bbox
-- `get_direction(bbox, img_w) -> str` - 5-zone direction string
-- `build_narration(label, direction, distance_ft, similarity) -> str | None` - final output
+- `get_depth_at_bbox(depth_map, bbox) -> float` — mean depth in feet, inner 50% of bbox
+- `get_direction(bbox, img_w) -> str` — 5-zone direction string
+- `build_narration(label, direction, distance_ft, similarity) -> str | None` — final output
 
 ---
 
@@ -123,7 +152,9 @@ image_path + text prompt
     → load_image()
     → GroundingDinoDetector.detect(image, prompt)
     → crop_object(image, box)
-    → ImageEmbedder.embed(crop)
+    → TextRecognizer.recognize(crop)    → text embedding
+    → ImageEmbedder.embed(crop)         → image embedding
+    → make_combined_embedding()
     → add_to_database()          ← stub, awaiting DB integration
     → return {"success": bool, "result": {...}}
 ```
@@ -151,19 +182,18 @@ run(query_image):
 
 ### Model: Apple Depth Pro
 - Metric depth (absolute meters)
-- `f_px=None` -> model infers (~75% error at close range)
-- `f_px=tensor` -> calibrated (~26% error) — always use when available
+- `f_px=None` → model infers (~75% error at close range)
+- `f_px=tensor` → calibrated (~26% error) — always use when available
 - Checkpoint: `checkpoints/depth_pro.pt` — absolute path resolved via `Path(__file__)` in estimator.py
 
 ### Focal Length
 ```
 f_px = (focalLengthMm / sensorWidthMm) * imageWidthPx
 ```
-Pass from Android camera API. iPhone 15 Plus reference: `f_mm=6.24`, `sensor_width=8.64mm` -> `f_px=3094.0`
+Pass from Android camera API. iPhone 15 Plus reference: `f_mm=6.24`, `sensor_width=8.64mm` → `f_px=3094.0`
 
 ### Test Results (18 images, iPhone 15 Plus)
 - Average error: 27.8% — acceptable for navigation
-- Floor shots have higher error (camera angled down, straight-line > measured horizontal)
 
 ---
 
@@ -186,126 +216,116 @@ return                "to your right"
 
 ---
 
-## CLI Test Scripts
+## Test Scripts
 
-Run from project root.
+Run from project root (`python -m visual_memory.tests.scripts.<name>`).
 
 ```bash
-# Remember Mode
-python -m visual_memory.cli.tests.test_remember <image_path> "<prompt>"
+# Integration test runner — run after any engine/pipeline change
+python -m visual_memory.tests.scripts.run_tests
+VERBOSE=1 python -m visual_memory.tests.scripts.run_tests   # show OCR text diff
 
-# Scan Mode
-python -m visual_memory.cli.tests.test_scan <image_path> [--db <database_dir>] [--focal <f_px>]
+# Standalone CLI scripts
+python -m visual_memory.tests.scripts.test_remember <image_path> "<prompt>"
+python -m visual_memory.tests.scripts.test_scan <image_path> [--db <dir>] [--focal <f_px>]
+python -m visual_memory.tests.scripts.test_text_recognition [image_path]
+python -m visual_memory.tests.scripts.test_estimator
 
-# Integration test runner
-python -m visual_memory.cli.tests.run_tests
-
-# Probe detector — compact summary (single image)
-python -m visual_memory.cli.tests.probe_detector <image_path> --prompt "<prompt>"
-
-# Probe detector — full Stage 1–8 breakdown
-python -m visual_memory.cli.tests.probe_detector <image_path> --prompt "<prompt>" --verbose
-
-# Probe detector — batch distance sweep
-python -m visual_memory.cli.tests.probe_detector --batch wallet
-python -m visual_memory.cli.tests.probe_detector --batch airpods --prompt "airpods"
-python -m visual_memory.cli.tests.probe_detector --batch all --prompt "wallet"
-
-# Probe detector — YOLOE instead of GroundingDINO
-python -m visual_memory.cli.tests.probe_detector <image_path> --prompt "<prompt>" --detector yoloe
+# Detector probe
+python -m visual_memory.tests.scripts.probe_detector <image_path> --prompt "<prompt>"
+python -m visual_memory.tests.scripts.probe_detector --batch wallet
+python -m visual_memory.tests.scripts.probe_detector <image_path> --detector yoloe
 ```
-
-`probe_detector` replaces `inspect_scores` + `debug_detection_stages`. Compact mode shows
-raw sigmoid stats at threshold=0 with markers at the configured threshold. Batch mode sweeps
-all `{object}_{1ft,3ft,6ft}_{floor,table}.jpg` variants and prints a summary table — use this
-to confirm at which distance GroundingDINO reliably detects the target.
 
 ---
 
-## API Plan 
+## API Plan
 
-Both pipelines return plain Python dicts - JSON-serializable, no torch tensors in output.
+Both pipelines return plain Python dicts — JSON-serializable, no torch tensors in output.
 
 ### POST /remember
 **Input:** `image` (file), `prompt` (string), optional: `focal_length_px` (float)
-**Pipeline call:** `RememberPipeline().run(image_path, prompt)`
 **Response:**
 ```json
 {
   "success": true,
   "message": "Object detected and embedded successfully.",
-  "result": {
-    "label": "wallet",
-    "confidence": 0.87,
-    "box": [120, 200, 340, 410]
-  }
+  "result": { "label": "wallet", "confidence": 0.87, "box": [120, 200, 340, 410] }
 }
 ```
 
 ### POST /scan
-**Input:** `image` (file), `focal_length_px` (float, required for accuracy), optional: `database_dir` (str)
-**Pipeline call:** `ScanPipeline(database_dir, focal_length_px).run(image)`
+**Input:** `image` (file), `focal_length_px` (float, required), optional: `database_dir` (str)
 **Response:**
 ```json
 {
   "matches": [
-    {
-      "label": "wallet",
-      "similarity": 0.72,
-      "distance_ft": 2.3,
-      "direction": "ahead",
-      "narration": "Wallet ahead, 2 feet away."
-    }
+    { "label": "wallet", "similarity": 0.72, "distance_ft": 2.3, "direction": "ahead",
+      "narration": "Wallet ahead, 2 feet away." }
   ],
   "count": 1
 }
 ```
 
+---
+
+## Known Benchmark Data
+
+### Detection score data
+
+| model               | image                | prompt | max sigmoid       |
+|---------------------|----------------------|--------|-------------------|
+| grounding-dino-tiny | wallet_6ft_table.jpg | wallet | 0.1655            |
+| grounding-dino-tiny | skipper.HEIC         | wallet | 0.2286 (FP)       |
+| grounding-dino-base | wallet_6ft_table.jpg | wallet | 0.2036 (FN)       |
+| grounding-dino-base | skipper.HEIC         | wallet | 0.3308 (FP)       |
+
+6ft detection out of range for GDINO-base (FP > FN, no safe threshold). Use 1ft/3ft images.
+
+---
+
 ## Current State
 
-- Core engine complete and tested (depth, detection, embedding)
-- Both pipelines return structured JSON dicts
-- Test scripts functional at `src/visual_memory/cli/tests`
-- `api/` directory empty, awaiting implementation -
-- Database is flat folder of images, re-embedded on each `ScanPipeline` init - temporary
-- All testing via local image files until connected to frontend
+- Core engine complete and tested (depth, detection, embedding, OCR)
+- Both pipelines produce structured JSON dicts including combined image+text embeddings
+- **All 5 integration tests pass** (`run_tests.py`: remember:detect, scan:match, estimator:load, text_recognition:recognizer, text_recognition:embedder)
+- `api/` directory empty, awaiting implementation
+- Database is flat folder of images, re-embedded on each `ScanPipeline` init — temporary
+- OCR backend: PaddleOCR-VL-1.5 (`settings.ocr_backend = "paddle"`)
 
 ---
+
 ## TODO
-- [ ] Switch embedder from DINOv3 to CLIP - +0.37 similarity improvement measured in testing; update `Settings.embedder_model` and retune `similarity_threshold` (0.3 -> 0.5–0.6)
-- [ ] Validate end-to-end scan pipeline with real device images
 
-### Next: Database 
-- [ ] Implement `RememberPipeline.add_to_database()` 
-- [ ] Replace folder-based `load_folder_images()` + re-embed in `ScanPipeline` with DB query function
-- [ ] Get embeddings for similarity: `get_all_embeddings() -> List[(id, label, embedding)]`
+### Engine / Architecture
+- [ ] Switch embedder from DINOv3 to CLIP — +0.37 similarity improvement measured; update `Settings.embedder_model` and retune `similarity_threshold`
+- [ ] Implement `RememberPipeline.add_to_database()` — store combined embedding + metadata in SQLite
+- [ ] Replace folder-based `load_folder_images()` + re-embed in `ScanPipeline` with DB query
+- [ ] Add API layer (`api/` is empty) — POST /remember and POST /scan endpoints
 
-### Cleanup
-- [ ] Shorten this doc after API + DB phases complete
+### Next: Database
+- [ ] Schema: `(id, label, combined_embedding BLOB, ocr_text TEXT, image_path TEXT, timestamp)`
+- [ ] `add_to_database(combined, metadata)` → INSERT
+- [ ] `ScanPipeline._embed_database()` → `SELECT id, label, combined_embedding FROM items`
+
 ---
 
+## Future Plans
 
+- **Input Enhancement in Remember Mode** — Run user prompt through a lightweight LLM to expand vague descriptions before Grounding DINO. `"remember my airpods"` → `["white round earbuds", "white round earbud case", ...]` → best detection wins.
+- **GPU Server Migration** — `device='cuda'` across all models, batch processing.
+- **Bloat Prevention** — Duplicate entry detection, pruning unused entries, user confirmation before overwriting similar embeddings.
+- **HNSW index** — Marginal benefit below ~10k entries; defer until scale requires it.
 
-## Future Plans:
-    Input Enhancement in Remember Mode:
-        Run user prompt through a lightweight LLM to expand vague descriptions before Grounding DINO.
-        `"remember my airpods"` → `["white round earbuds", "white round earbud case", ...]` -> best detection out of 3-5 wins.
+---
 
-    GPU Server Migration:
-        `device='cuda'` across all models,
-        Batch processing
+## Design Decisions
 
-    Bloat Prevention (once sqlite is implemented)
-    Duplicate entry detection, pruning unused entries, user confirmation before overwriting similar embeddings.
-
-### Optional Plans (extra time)
-Phone IMU reports exact tilt angle to  compensate depth for angled shots. Android/iOS concern, not backend.
-HNSW index for search - not difficult to implement, but benefit is marginal for >10k images
-
-## Design Decisions and Why
-
-- **DINOv3 for embeddings** - CLIP switch planned. CLIP captures semantic identity better, and better handles real world lighting changes, object upsidedown, etc. Has downside of making two wallets that look different similar, but not an issue for this app's scope
-- **YOLOE prompt-free for scan** - broad detection, similarity handles bloat
-- **Grounding DINO for remember** - handles vague natural language well, much stronger than prompted YOLOE for this use
-- **Depth Pro** — only monocular model with metric (absolute) depth, no scale factor needed
-- **Actionability over information/accuracy** - "May be a wallet two feet to your right, focus to verify" is actionable, not just informational: "Wallet detected two feet to your right, 23% confidence"
+- **DINOv3 for embeddings** — CLIP switch planned. CLIP captures semantic identity better across lighting, orientation, and distance variation. Downside: makes visually distinct versions of the same object more similar, but not an issue for this app's scope.
+- **YOLOE prompt-free for scan** — Broad detection; similarity threshold handles bloat.
+- **Grounding DINO for remember** — Handles vague natural language; much stronger than prompted YOLOE for this use case.
+- **Depth Pro** — Only monocular model with metric (absolute) depth; no scale factor needed.
+- **Actionability over accuracy** — "May be a wallet two feet to your right, focus to verify" is actionable. A raw confidence percentage is not.
+- **PaddleOCR over EasyOCR** — Switched from EasyOCR to PaddleOCR-VL-1.5 (Feb 2026). EasyOCR averaged 9.7% word-overlap on the `text_demo/` test set at 200-435s/image. PaddleOCR-VL-1.5 runs in 3-18s/image (~15x faster) and correctly extracts layout-aware text from `parsing_res_list[].block_content` in its JSON output. Text extraction was initially broken due to the engine searching wrong JSON paths; fixed by targeting the correct field.
+- **Combined embedding over hybrid matching** — `max(image_sim, text_sim)` could false-match two white documents with different text (image similarity alone passes threshold). The combined embedding `normalize(img) ‖ normalize(text)` means cosine similarity ≈ average of both sub-similarities, so both image AND text must match. Non-document objects get a zero text slot; image similarity dominates unchanged.
+- **Single venv** — All dependencies including PaddleOCR live in one `pip install -e .` install.

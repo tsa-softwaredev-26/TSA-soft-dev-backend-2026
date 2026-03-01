@@ -1,16 +1,13 @@
 from pathlib import Path
 from visual_memory.config import Settings
-from visual_memory.engine.embedding import ImageEmbedder, TextEmbedder
+from visual_memory.engine.embedding import ImageEmbedder, TextEmbedder, make_combined_embedding
 from visual_memory.engine.object_detection import YoloeDetector
 from visual_memory.engine.depth import DepthEstimator
-<<<<<<< Updated upstream
-from visual_memory.utils import crop_object, find_match, load_folder_images, deduplicate_matches
-=======
 from visual_memory.engine.text_recognition import TextRecognizer
-from visual_memory.utils import crop_object, find_match, load_folder_images, deduplicate_matches, get_logger, cosine_similarity
->>>>>>> Stashed changes
+from visual_memory.utils import crop_object, find_match, load_folder_images, deduplicate_matches, get_logger
 
 _settings = Settings()
+_log = get_logger(__name__)
 
 
 class ScanPipeline:
@@ -25,13 +22,14 @@ class ScanPipeline:
         self.database_embeddings = self._embed_database()
 
     def _embed_database(self):
-        """Embed each database image (visual + optional text) and return list of tuples."""
+        """Embed each database image as a combined (image+text) embedding."""
         embeddings = []
         for file_path, img in self.database_images:
-            image_embedding = self.embedder.embed(img)
+            img_emb = self.embedder.embed(img)
             ocr_result = self.text_recognizer.recognize(img)
-            text_embedding = self.text_embedder.embed(ocr_result["text"]) if ocr_result["text"] else None
-            embeddings.append((file_path, image_embedding, text_embedding))
+            text_emb = self.text_embedder.embed(ocr_result["text"]) if ocr_result["text"] else None
+            combined = make_combined_embedding(img_emb, text_emb)
+            embeddings.append((file_path, combined))
         return embeddings
 
     def run(self, query_image):
@@ -45,66 +43,34 @@ class ScanPipeline:
         if not boxes:
             return {"matches": [], "count": 0}
 
-        # ---- PASS 1: similarity matching ----
-        # Build image-only database embeddings list for find_match (expects (path, embedding) pairs)
-        image_db = [(p, img_emb) for p, img_emb, _ in self.database_embeddings]
-
+        # ---- PASS 1: combined similarity matching ----
         matches = []
 
         for box, score in zip(boxes, scores):
             cropped = crop_object(query_image, box)
-            image_embedding = self.embedder.embed(cropped)
 
-            match_path, image_similarity = find_match(
-                image_embedding,
-                image_db,
-                _settings.similarity_threshold
+            img_emb = self.embedder.embed(cropped)
+            ocr_result = self.text_recognizer.recognize(cropped)
+            text_emb = self.text_embedder.embed(ocr_result["text"]) if ocr_result["text"] else None
+            combined = make_combined_embedding(img_emb, text_emb)
+
+            match_path, similarity = find_match(
+                combined,
+                self.database_embeddings,
+                _settings.similarity_threshold,
             )
 
-            # Text-based matching: OCR the crop and compare against database text embeddings
-            ocr_result = self.text_recognizer.recognize(cropped)
-            crop_text_embedding = self.text_embedder.embed(ocr_result["text"]) if ocr_result["text"] else None
-
-            best_text_path = None
-            best_text_similarity = 0.0
-            if crop_text_embedding is not None:
-                for db_path, _, db_text_emb in self.database_embeddings:
-                    if db_text_emb is None:
-                        continue
-                    sim = float(cosine_similarity(crop_text_embedding, db_text_emb))
-                    if sim > best_text_similarity:
-                        best_text_similarity = sim
-                        best_text_path = db_path
-
-            # Promote text match if it clears the threshold and beats image match
-            text_match_path = best_text_path if best_text_similarity >= _settings.text_similarity_threshold else None
-
-            if text_match_path and best_text_similarity > image_similarity:
-                final_path = text_match_path
-                final_similarity = best_text_similarity
-                match_via = "text"
-            elif match_path:
-                final_path = match_path
-                final_similarity = image_similarity
-                match_via = "image"
-            else:
-                final_path = None
-                final_similarity = 0.0
-                match_via = None
-
-            if final_path:
+            if match_path:
                 _log.info({
                     "event": "scan_text_match",
-                    "label": Path(final_path).stem,
-                    "match_via": match_via,
-                    "image_similarity": round(image_similarity, 4),
-                    "text_similarity": round(best_text_similarity, 4),
+                    "label": Path(match_path).stem,
+                    "similarity": round(similarity, 4),
                     "ocr_text_length": len(ocr_result["text"]),
                 })
                 entry = {
                     "box": box,
-                    "label": Path(final_path).stem,
-                    "similarity": final_similarity,
+                    "label": Path(match_path).stem,
+                    "similarity": similarity,
                 }
                 if ocr_result["text"]:
                     entry["ocr_text"] = ocr_result["text"]
