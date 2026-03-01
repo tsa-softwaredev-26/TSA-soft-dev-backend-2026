@@ -23,7 +23,7 @@ class Settings:
     narration_high_confidence: float = 0.6
 
     # OCR (text recognition)
-    ocr_backend: str = "easyocr"    # "easyocr" (main venv) or "deepseek" (requires pinned venv)
+    ocr_backend: str = "paddle"
     ocr_languages: list = field(default_factory=lambda: ["en"])
     ocr_min_confidence: float = 0.3
 

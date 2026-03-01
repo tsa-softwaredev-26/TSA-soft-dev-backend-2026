@@ -1,3 +1,12 @@
-"""Text recognition engine using EasyOCR."""
+"""Text recognition engine — factory returns the active PaddleOCR backend."""
 
-from .recognizer import TextRecognizer
+from .base import BaseTextRecognizer
+from .paddle_recognizer import PaddleOCRRecognizer
+
+
+def make_recognizer() -> BaseTextRecognizer:
+    return PaddleOCRRecognizer()
+
+
+# Pipelines do: self.text_recognizer = TextRecognizer()
+TextRecognizer = make_recognizer

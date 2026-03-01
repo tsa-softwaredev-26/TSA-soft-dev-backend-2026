@@ -79,7 +79,7 @@ class YoloeDetector:
         try:
             results = self.prompt_free_model.predict(
                 image,
-                verbose=True,
+                verbose=False,
                 conf=self.confidence_threshold,
                 iou=self.intersection_threshold
             )
