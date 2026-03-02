@@ -349,7 +349,7 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - [x] Tune embedder - settled on DINOv3 (image, 1024-dim) + CLIP text encoder (OCR, 512-dim); combined 1536-dim. Tried CLIP alone for images (March 2026), reverted due to inter-class context bleed (intra/inter ratio 0.961).
 - [x] Fix DepthEstimator device - was defaulting to CPU (depth_pro default); now auto-detects MPS/CUDA/CPU and passes device explicitly to `create_model_and_transforms`
 - [x] Run `benchmark_embedder.py` and record similarity data — done (March 2026); DINOv3 pipeline scan match: 0.315, 0.306, 0.238; `similarity_threshold=0.2` kept
-- [ ] Add text chunking for documents longer than 77 CLIP tokens (currently truncated silently — fine for product labels, may be an issue for longer docs post-server migration)
+- [x] Add text chunking for documents longer than 77 CLIP tokens — done (March 2026); non-overlapping 75-token chunks, mean-pool raw projections, L2-normalize once.
 - [ ] Dependency injection for shared model instances — `RememberPipeline` and `ScanPipeline` each instantiate their own CLIP, PaddleOCR, and (in scan) DepthEstimator. Refactor constructors to accept pre-built instances so the caller can share them (e.g. `ScanPipeline(embedder=shared_clip, recognizer=shared_ocr)`). **Post-server migration:** keep and expand — on the Flask server, models should be singletons loaded once at startup and injected into request handlers, not re-instantiated per request. The DI pattern is the same; the scope changes from "test runner" to "app lifetime".
 - [ ] Implement `RememberPipeline.add_to_database()` — store combined embedding + metadata in SQLite
 - [ ] Replace folder-based `load_folder_images()` + re-embed in `ScanPipeline` with DB query
