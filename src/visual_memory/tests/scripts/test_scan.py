@@ -19,7 +19,6 @@ from pathlib import Path
 
 import pillow_heif
 pillow_heif.register_heif_opener()
-
 from visual_memory.utils import load_image
 from visual_memory.pipelines.scan_mode.pipeline import ScanPipeline
 
