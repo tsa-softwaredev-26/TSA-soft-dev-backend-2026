@@ -282,7 +282,7 @@ Both pipelines return plain Python dicts — JSON-serializable, no torch tensors
 
 ## Known Benchmark Data
 
-### Detection score data
+### Detection score data (Full benchmarks ongoing, to be adeded to a seperate .md)
 
 | model               | image                | prompt | max sigmoid       |
 |---------------------|----------------------|--------|-------------------|
