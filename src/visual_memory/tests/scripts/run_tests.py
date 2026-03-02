@@ -1,15 +1,20 @@
 """
 Integration test runner for the visual_memory pipelines.
 
+Flags (env vars, set before running):
+    DEPTH=1    load and test DepthEstimator (default off - loads 2GB model)
+    VERBOSE=1  show OCR text diff and log entries
+
 Run:
     python -m visual_memory.tests.scripts.run_tests
-    VERBOSE=1 python -m visual_memory.tests.scripts.run_tests  # show OCR text diff
+    DEPTH=1 python -m visual_memory.tests.scripts.run_tests
+    VERBOSE=1 python -m visual_memory.tests.scripts.run_tests
 
 Tests:
     1. RememberPipeline: wallet_1ft_table.jpg + "small rectangular wallet"
     2. ScanPipeline: wallet_3ft_table.jpg
-    3. DepthEstimator: weights load only (inference skipped — too slow for CI)
-    4. TextRecognition: magnesium.heic — TextRecognizer + CLIPTextEmbedder
+    3. DepthEstimator: reused from scan (skipped unless DEPTH=1)
+    4. TextRecognition: magnesium.heic - TextRecognizer + CLIPTextEmbedder
 """
 
 from __future__ import annotations
@@ -19,7 +24,14 @@ import os
 import sys
 from pathlib import Path
 
-# Suppress model-loading noise before any ML imports
+# Set pipeline flags before any project imports so Settings instances read them
+DEPTH   = os.environ.get("DEPTH",   "0") == "1"
+VERBOSE = os.environ.get("VERBOSE", "0") == "1"
+
+if not DEPTH:
+    os.environ["ENABLE_DEPTH"] = "0"
+
+# Suppress model-loading noise
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
@@ -37,20 +49,16 @@ _log = get_logger(__name__)
 
 # Paths (cwd-independent)
 SCRIPTS_DIR = Path(__file__).resolve().parent   # tests/scripts/
-TESTS_DIR = SCRIPTS_DIR.parent                  # tests/
-INPUT_DIR = TESTS_DIR / "input_images"
-DEMO_DB = TESTS_DIR / "demo_database"
-TEXT_DEMO = TESTS_DIR / "text_demo"
-PROJECT_ROOT = TESTS_DIR.parents[2]             # project root
-CHECKPOINT_DIR = PROJECT_ROOT / "checkpoints"
+TESTS_DIR   = SCRIPTS_DIR.parent                # tests/
+INPUT_DIR   = TESTS_DIR / "input_images"
+DEMO_DB     = TESTS_DIR / "demo_database"
+TEXT_DEMO   = TESTS_DIR / "text_demo"
 
 WALLET_1FT = INPUT_DIR / "wallet_1ft_table.jpg"
 WALLET_3FT = INPUT_DIR / "wallet_3ft_table.jpg"
-MAGNESIUM = INPUT_DIR / "magnesium.heic"
+MAGNESIUM  = INPUT_DIR / "magnesium.heic"
 
 FOCAL_PX = 3094.0
-
-VERBOSE = os.environ.get("VERBOSE", "0") == "1"
 
 _G = "\033[32m"
 _R = "\033[31m"
@@ -62,15 +70,11 @@ _results: list[tuple[str, bool, str]] = []
 
 
 def _load_ground_truth(image_stem: str) -> str:
-    """Load ground truth text for a test image."""
     gt_file = TEXT_DEMO / "ground_truth" / f"{image_stem}.txt"
-    if gt_file.exists():
-        return gt_file.read_text().strip()
-    return None
+    return gt_file.read_text().strip() if gt_file.exists() else None
 
 
 def _show_text_diff(recognized: str, ground_truth: str) -> None:
-    """Print recognized text vs ground truth with visual comparison."""
     if not ground_truth:
         return
     print(f"     {_Y}Ground Truth:{_X} {ground_truth[:100]}{'...' if len(ground_truth) > 100 else ''}")
@@ -78,8 +82,7 @@ def _show_text_diff(recognized: str, ground_truth: str) -> None:
     if recognized.lower() == ground_truth.lower():
         print(f"     {_G}Match: EXACT{_X}")
     else:
-        # Simple word overlap
-        gt_words = set(ground_truth.lower().split())
+        gt_words  = set(ground_truth.lower().split())
         rec_words = set(recognized.lower().split())
         overlap = len(gt_words & rec_words) / len(gt_words | rec_words) if gt_words or rec_words else 0
         print(f"     {_Y}Match: {overlap*100:.1f}% word overlap{_X}")
@@ -95,48 +98,44 @@ def _fail(tag: str, detail: str) -> None:
     print(f"  {_R}FAIL{_X}  {detail}")
 
 
+def _skip(tag: str, detail: str) -> None:
+    print(f"  {_Y}SKIP{_X}  {detail}")
+
+
 def _section(title: str) -> None:
     print(f"\n{_B}{title}{_X}")
 
 
-# Test 1 — RememberPipeline
-_section("[1] remember_mode — wallet_1ft_table.jpg")
+# Test 1 - RememberPipeline
+_section("[1] remember_mode - wallet_1ft_table.jpg")
 
 _mark1 = log_mark()
 from visual_memory.pipelines.remember_mode.pipeline import RememberPipeline
 
 remember = RememberPipeline()
-
-r1 = remember.run(
-    image_path=WALLET_1FT,
-    prompt="small rectangular wallet",
-)
+r1 = remember.run(image_path=WALLET_1FT, prompt="small rectangular wallet")
 
 print("     json:", json.dumps(r1))
 
 has_box = bool(r1.get("result") and "box" in r1["result"])
-
 if r1["success"] and has_box:
     res = r1["result"]
-    _pass(
-        "remember:detect",
-        f"label={res['label']}  conf={res['confidence']:.3f}"
-    )
+    _pass("remember:detect", f"label={res['label']}  conf={res['confidence']:.3f}")
 else:
     _fail("remember:detect", f"success={r1['success']}  result={r1['result']}")
 
-for _e in tail_logs(since_line=_mark1): print(f"       {json.dumps(_e)}")  # comment to reduce verbosity
+if VERBOSE:
+    for _e in tail_logs(since_line=_mark1): print(f"       {json.dumps(_e)}")
 
 
-# Test 2 — ScanPipeline
-_section("[2] scan_mode — wallet_3ft_table.jpg")
+# Test 2 - ScanPipeline
+_section("[2] scan_mode - wallet_3ft_table.jpg")
 
 _mark2 = log_mark()
 from visual_memory.pipelines.scan_mode.pipeline import ScanPipeline
 
 try:
     scan = ScanPipeline(database_dir=DEMO_DB, focal_length_px=FOCAL_PX)
-
     r2 = scan.run(load_image(str(WALLET_3FT)))
     print("     json:", json.dumps(r2))
 
@@ -148,62 +147,71 @@ try:
 except Exception as exc:
     _fail("scan:match", str(exc))
 
-for _e in tail_logs(since_line=_mark2): print(f"       {json.dumps(_e)}")  # comment to reduce verbosity
+if VERBOSE:
+    for _e in tail_logs(since_line=_mark2): print(f"       {json.dumps(_e)}")
 
 
-# Test 3 — DepthEstimator
-_section("[3] estimator — weights load only")
+# Test 3 - DepthEstimator
+_section("[3] estimator")
 
 _mark3 = log_mark()
-try:
-    # Reuse the already-loaded estimator from ScanPipeline — no second load needed.
-    estimator = scan.estimator
-    _pass("estimator:load", "DepthEstimator loaded successfully (reused from scan)")
-except Exception as exc:
-    _fail("estimator:load", str(exc))
+if not DEPTH:
+    _skip("estimator:load", "DEPTH=0 (set DEPTH=1 to enable)")
+else:
+    try:
+        estimator = scan.estimator
+        if estimator is not None:
+            _pass("estimator:load", "reused from scan")
+        else:
+            _fail("estimator:load", "scan.estimator is None")
+    except Exception as exc:
+        _fail("estimator:load", str(exc))
 
-for _e in tail_logs(since_line=_mark3): print(f"       {json.dumps(_e)}")  # comment to reduce verbosity
+if VERBOSE:
+    for _e in tail_logs(since_line=_mark3): print(f"       {json.dumps(_e)}")
 
 
-# Test 4 — Text Recognition + Embedding
-_section("[4] text_recognition + embedding — magnesium.heic")
+# Test 4 - Text Recognition + Embedding
+_section("[4] text_recognition + embedding - magnesium.heic")
 
 _mark4 = log_mark()
-try:
-    # Reuse already-loaded instances from ScanPipeline — no third load of PaddleOCR/CLIP.
-    recognizer = scan.text_recognizer
-    embedder = scan.text_embedder
+if scan.text_recognizer is None:
+    _skip("text_recognition:recognizer", "ENABLE_OCR=0")
+    _skip("text_recognition:embedder",   "ENABLE_OCR=0")
+else:
+    try:
+        recognizer = scan.text_recognizer
+        embedder   = scan.text_embedder
 
-    r4_img = load_image(str(MAGNESIUM))
-    ocr = recognizer.recognize(r4_img)
+        r4_img = load_image(str(MAGNESIUM))
+        ocr = recognizer.recognize(r4_img)
 
-    ocr_display = {"text": ocr["text"][:80], "confidence": round(ocr["confidence"], 3), "segments": len(ocr["segments"])}
-    print("     ocr:", json.dumps(ocr_display))
+        ocr_display = {"text": ocr["text"][:80], "confidence": round(ocr["confidence"], 3), "segments": len(ocr["segments"])}
+        print("     ocr:", json.dumps(ocr_display))
 
-    if isinstance(ocr, dict) and "text" in ocr and "confidence" in ocr and "segments" in ocr:
-        _pass("text_recognition:recognizer", f"engine=paddle  segments={len(ocr['segments'])}  conf={ocr['confidence']:.3f}")
-    else:
-        _fail("text_recognition:recognizer", "unexpected result structure")
+        if isinstance(ocr, dict) and "text" in ocr and "confidence" in ocr and "segments" in ocr:
+            _pass("text_recognition:recognizer", f"engine=paddle  segments={len(ocr['segments'])}  conf={ocr['confidence']:.3f}")
+        else:
+            _fail("text_recognition:recognizer", "unexpected result structure")
 
-    # Show text comparison if verbose
-    if VERBOSE:
-        gt = _load_ground_truth("magnesium")
-        if gt:
-            _show_text_diff(ocr["text"], gt)
+        if VERBOSE:
+            gt = _load_ground_truth("magnesium")
+            if gt:
+                _show_text_diff(ocr["text"], gt)
 
-    sample_text = ocr["text"] if ocr["text"] else "test document"
-    emb = embedder.embed_text(sample_text)
-    # TODO: remove shape check comment once CLIP is stable
-    if emb.shape == (1, 512):
-        _pass("text_recognition:embedder", f"shape={list(emb.shape)}")
-    else:
-        _fail("text_recognition:embedder", f"unexpected shape={list(emb.shape)}")
+        sample_text = ocr["text"] if ocr["text"] else "test document"
+        emb = embedder.embed_text(sample_text)
+        if emb.shape == (1, 512):
+            _pass("text_recognition:embedder", f"shape={list(emb.shape)}")
+        else:
+            _fail("text_recognition:embedder", f"unexpected shape={list(emb.shape)}")
 
-except Exception as exc:
-    _fail("text_recognition:recognizer", str(exc))
-    _fail("text_recognition:embedder", "skipped due to earlier error")
+    except Exception as exc:
+        _fail("text_recognition:recognizer", str(exc))
+        _fail("text_recognition:embedder", "skipped due to earlier error")
 
-for _e in tail_logs(since_line=_mark4): print(f"       {json.dumps(_e)}")  # comment to reduce verbosity
+if VERBOSE:
+    for _e in tail_logs(since_line=_mark4): print(f"       {json.dumps(_e)}")
 
 
 # Summary
@@ -214,7 +222,7 @@ print()
 print(f"{_B}Results:{_X} {n_pass} passed / {n_fail} failed / {len(_results)} total")
 
 for tag, ok, detail in _results:
-    icon = f"{_G}✓{_X}" if ok else f"{_R}✗{_X}"
+    icon = f"{_G}+{_X}" if ok else f"{_R}x{_X}"
     print(f"  {icon}  {tag:<30}  {detail}")
 
 sys.exit(0 if n_fail == 0 else 1)
