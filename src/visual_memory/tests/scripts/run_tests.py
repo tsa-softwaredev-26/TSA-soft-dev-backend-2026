@@ -3,16 +3,18 @@ Integration test runner for the visual_memory pipelines.
 
 Flags (env vars, set before running):
     DEPTH=1    load and test DepthEstimator (default off - loads 2GB model)
+    FAST=1     disable scan OCR (2 OCRs total instead of 8, ~10x faster)
     VERBOSE=1  show OCR text diff and log entries
 
 Run:
     python -m visual_memory.tests.scripts.run_tests
+    FAST=1 python -m visual_memory.tests.scripts.run_tests
     DEPTH=1 python -m visual_memory.tests.scripts.run_tests
     VERBOSE=1 python -m visual_memory.tests.scripts.run_tests
 
 Tests:
     1. RememberPipeline: wallet_1ft_table.jpg + "small rectangular wallet"
-    2. ScanPipeline: wallet_3ft_table.jpg
+    2. ScanPipeline: wallet_3ft_table.jpg (OCR skipped in FAST mode)
     3. DepthEstimator: reused from scan (skipped unless DEPTH=1)
     4. TextRecognition: magnesium.heic - TextRecognizer + CLIPTextEmbedder
 """
@@ -26,6 +28,7 @@ from pathlib import Path
 
 # Set pipeline flags before any project imports so Settings instances read them
 DEPTH   = os.environ.get("DEPTH",   "0") == "1"
+FAST    = os.environ.get("FAST",    "0") == "1"
 VERBOSE = os.environ.get("VERBOSE", "0") == "1"
 
 if not DEPTH:
@@ -132,6 +135,12 @@ if VERBOSE:
 _section("[2] scan_mode - wallet_3ft_table.jpg")
 
 _mark2 = log_mark()
+
+# FAST mode: disable scan OCR to cut ~6 slow PaddleOCR calls on the database images.
+# Test 4 recovers the already-loaded recognizer from the registry.
+if FAST:
+    os.environ["ENABLE_OCR"] = "0"
+
 from visual_memory.pipelines.scan_mode.pipeline import ScanPipeline
 
 try:
@@ -175,16 +184,24 @@ if VERBOSE:
 _section("[4] text_recognition + embedding - magnesium.heic")
 
 _mark4 = log_mark()
-if scan.text_recognizer is None:
+
+# FAST mode: scan had OCR disabled, so reuse the recognizer loaded by RememberPipeline.
+# Access private attrs to avoid triggering lazy-load of a second instance.
+if FAST and scan.text_recognizer is None:
+    from visual_memory.engine.model_registry import registry as _reg
+    _recognizer = _reg._text_recognizer
+    _embedder   = _reg._text_embedder
+else:
+    _recognizer = scan.text_recognizer
+    _embedder   = scan.text_embedder
+
+if _recognizer is None:
     _skip("text_recognition:recognizer", "ENABLE_OCR=0")
     _skip("text_recognition:embedder",   "ENABLE_OCR=0")
 else:
     try:
-        recognizer = scan.text_recognizer
-        embedder   = scan.text_embedder
-
         r4_img = load_image(str(MAGNESIUM))
-        ocr = recognizer.recognize(r4_img)
+        ocr = _recognizer.recognize(r4_img)
 
         ocr_display = {"text": ocr["text"][:80], "confidence": round(ocr["confidence"], 3), "segments": len(ocr["segments"])}
         print("     ocr:", json.dumps(ocr_display))
@@ -200,7 +217,7 @@ else:
                 _show_text_diff(ocr["text"], gt)
 
         sample_text = ocr["text"] if ocr["text"] else "test document"
-        emb = embedder.embed_text(sample_text)
+        emb = _embedder.embed_text(sample_text)
         if emb.shape == (1, 512):
             _pass("text_recognition:embedder", f"shape={list(emb.shape)}")
         else:
