@@ -14,7 +14,7 @@ class Settings:
     yoloe_iou: float = 0.45
 
     # Image embedder (both modes) - DINOv3 vision-only, better object discrimination
-    image_embedder_model: str = "facebook/dinov3-vitl16-pretrain-lvd1689m"
+    image_embedder_model: str = "facebook/dinov3-vits16-pretrain-lvd1689m"
 
     # Text embedder (both modes) - CLIP text encoder only (no vision model loaded)
     embedder_model: str = "openai/clip-vit-base-patch32"
@@ -32,7 +32,7 @@ class Settings:
     ocr_min_confidence: float = 0.3
 
     # Text similarity (CLIP text embeddings)
-    text_similarity_threshold: float = 0.3
+    text_similarity_threshold: float = 0.4
 
     # Pipeline feature toggles - overridable via env vars before pipeline import
     enable_depth: bool = field(default_factory=lambda: os.environ.get("ENABLE_DEPTH", "1") != "0")
