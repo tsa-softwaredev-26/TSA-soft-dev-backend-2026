@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+import os
 
 
 @dataclass
@@ -12,10 +13,10 @@ class Settings:
     yoloe_confidence: float = 0.5
     yoloe_iou: float = 0.45
 
-    # Image embedder (both modes) — DINOv3 vision-only, better object discrimination
+    # Image embedder (both modes) - DINOv3 vision-only, better object discrimination
     image_embedder_model: str = "facebook/dinov3-vitl16-pretrain-lvd1689m"
 
-    # Text embedder (both modes) — CLIP text encoder only (no vision model loaded)
+    # Text embedder (both modes) - CLIP text encoder only (no vision model loaded)
     embedder_model: str = "openai/clip-vit-base-patch32"
 
     # Similarity matching (scan mode)
@@ -30,10 +31,10 @@ class Settings:
     ocr_languages: list = field(default_factory=lambda: ["en"])
     ocr_min_confidence: float = 0.3
 
-    # Text similarity (CLIP text embeddings, same space as image)
+    # Text similarity (CLIP text embeddings)
     text_similarity_threshold: float = 0.3
 
-    # Pipeline feature toggles — set False for lightweight / faster runs
-    enable_depth: bool = True    # load + run DepthEstimator (Depth Pro, ~2GB); disable to skip distance/direction
-    enable_ocr: bool = True      # run TextRecognizer on each crop; disable for speed (image-only matching)
-    enable_dedup: bool = True    # deduplicate overlapping match boxes after Pass 1
+    # Pipeline feature toggles - overridable via env vars before pipeline import
+    enable_depth: bool = field(default_factory=lambda: os.environ.get("ENABLE_DEPTH", "1") != "0")
+    enable_ocr:   bool = field(default_factory=lambda: os.environ.get("ENABLE_OCR",   "1") != "0")
+    enable_dedup: bool = field(default_factory=lambda: os.environ.get("ENABLE_DEDUP", "1") != "0")
