@@ -1,8 +1,9 @@
 # Setup
 **Prerequisites:** Python >= 3.10, Hugging Face account
 
-**Request access:**
-- [Grounding DINO model](https://huggingface.co/IDEA-Research/grounding-dino-base)
+**Request access (gated models):**
+- [IDEA-Research/grounding-dino-base](https://huggingface.co/IDEA-Research/grounding-dino-base)
+- [facebook/dinov3-vitl16-pretrain-lvd1689m](https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m)
 
 
 ```bash
