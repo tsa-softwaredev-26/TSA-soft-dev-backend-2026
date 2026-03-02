@@ -4,9 +4,8 @@ import pillow_heif
 
 from visual_memory.config import Settings
 from visual_memory.utils import load_image, crop_object, get_logger
-from visual_memory.engine.object_detection import GroundingDinoDetector
-from visual_memory.engine.embedding import ImageEmbedder, CLIPTextEmbedder, make_combined_embedding
-from visual_memory.engine.text_recognition import TextRecognizer
+from visual_memory.engine.embedding import make_combined_embedding
+from visual_memory.engine.model_registry import registry
 
 pillow_heif.register_heif_opener()
 
@@ -16,10 +15,10 @@ _log = get_logger(__name__)
 
 class RememberPipeline:
     def __init__(self):
-        self.detector = GroundingDinoDetector()
-        self.img_embedder = ImageEmbedder()
-        self.text_embedder = CLIPTextEmbedder() if _settings.enable_ocr else None
-        self.text_recognizer = TextRecognizer() if _settings.enable_ocr else None
+        self.detector        = registry.gdino_detector
+        self.img_embedder    = registry.img_embedder
+        self.text_embedder   = registry.text_embedder   if _settings.enable_ocr else None
+        self.text_recognizer = registry.text_recognizer if _settings.enable_ocr else None
 
         # TODO: replace with real database later
         self.database = None

@@ -32,7 +32,7 @@ TESTS = [
 
 
 def main():
-    estimator = DepthEstimator(focal_length_px=FOCAL_LENGTH_PX)
+    estimator = DepthEstimator()
     detector  = GroundingDinoDetector()
 
     for img_path, prompt, gt_ft in TESTS:
@@ -46,7 +46,7 @@ def main():
 
         box        = detection["box"]
         similarity = detection["score"]
-        depth_map  = estimator.estimate(image)
+        depth_map  = estimator.estimate(image, focal_length_px=FOCAL_LENGTH_PX)
         dist_ft    = estimator.get_depth_at_bbox(depth_map, box)
         direction  = estimator.get_direction(box, image.width)
         narration  = estimator.build_narration(detection["label"], direction, dist_ft, similarity)
