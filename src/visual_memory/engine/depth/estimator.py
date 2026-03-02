@@ -1,8 +1,8 @@
 """
 Depth estimation and spatial narration for scan mode.
 
-All spatial logic lives here 
-Instantiate once per scan session, not per image.
+All spatial logic lives here.
+Instantiate once per process via model_registry.
 """
 
 from __future__ import annotations
@@ -24,11 +24,7 @@ CONFIDENCE_HIGH = 0.6
 
 class DepthEstimator:
 
-    def __init__(self, focal_length_px: float = None):
-        # focal_length_px from Android: (focalLengthMm / sensorWidthMm) * imageWidthPx
-        # None = Depth Pro infers (~75% error vs ~26% calibrated at close range)
-        self.f_px = torch.tensor(focal_length_px, dtype=torch.float32) if focal_length_px else None
-
+    def __init__(self):
         # Auto-detect device — MPS (macOS GPU) first, then CUDA, then CPU.
         # depth_pro.create_model_and_transforms defaults to CPU if not passed explicitly,
         # which causes 10-30x slowdown vs GPU. Always pass device explicitly.
@@ -44,11 +40,13 @@ class DepthEstimator:
         self.model, self.transform = depth_pro.create_model_and_transforms(config=config, device=self.device)
         self.model.eval()
 
-    def estimate(self, image: Image.Image) -> torch.Tensor:
+    def estimate(self, image: Image.Image, focal_length_px: float = None) -> torch.Tensor:
+        # focal_length_px from Android: (focalLengthMm / sensorWidthMm) * imageWidthPx
+        # None = Depth Pro infers (~75% error vs ~26% calibrated at close range)
         # Call once per query image — reuse depth_map for all matched objects
         # depth_pro.load_rgb expects a file path, so we use transform directly on the PIL image
         image_tensor = self.transform(image).to(self.device)
-        f_px = self.f_px.to(self.device) if self.f_px is not None else None
+        f_px = torch.tensor(focal_length_px, dtype=torch.float32).to(self.device) if focal_length_px else None
         with torch.no_grad():
             prediction = self.model.infer(image_tensor, f_px=f_px)
         return prediction["depth"]  # (H, W) metric meters
