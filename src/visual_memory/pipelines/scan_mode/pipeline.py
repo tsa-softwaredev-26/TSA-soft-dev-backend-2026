@@ -1,9 +1,7 @@
 from pathlib import Path
 from visual_memory.config import Settings
-from visual_memory.engine.embedding import ImageEmbedder, CLIPTextEmbedder, make_combined_embedding
-from visual_memory.engine.object_detection import YoloeDetector
-from visual_memory.engine.depth import DepthEstimator
-from visual_memory.engine.text_recognition import TextRecognizer
+from visual_memory.engine.embedding import make_combined_embedding
+from visual_memory.engine.model_registry import registry
 from visual_memory.utils import crop_object, find_match, load_folder_images, deduplicate_matches, get_logger
 
 _settings = Settings()
@@ -12,11 +10,12 @@ _log = get_logger(__name__)
 
 class ScanPipeline:
     def __init__(self, database_dir: Path, focal_length_px: float):
-        self.img_embedder = ImageEmbedder()
-        self.text_embedder = CLIPTextEmbedder() if _settings.enable_ocr else None
-        self.detector = YoloeDetector()
-        self.text_recognizer = TextRecognizer() if _settings.enable_ocr else None
-        self.estimator = DepthEstimator(focal_length_px=focal_length_px) if _settings.enable_depth else None
+        self.img_embedder    = registry.img_embedder
+        self.text_embedder   = registry.text_embedder   if _settings.enable_ocr   else None
+        self.detector        = registry.yoloe_detector
+        self.text_recognizer = registry.text_recognizer if _settings.enable_ocr   else None
+        self.estimator       = registry.depth_estimator if _settings.enable_depth else None
+        self.focal_length_px = focal_length_px
 
         self.database_images = load_folder_images(database_dir)
         self.database_embeddings = self._embed_database()
@@ -105,7 +104,7 @@ class ScanPipeline:
                 output_matches.append(out)
             return {"matches": output_matches, "count": len(output_matches)}
 
-        depth_map = self.estimator.estimate(query_image)
+        depth_map = self.estimator.estimate(query_image, focal_length_px=self.focal_length_px)
 
         output_matches = []
 
