@@ -18,9 +18,6 @@ class CLIPTextEmbedder:
     Loads only the text encoder + projection head, not the full CLIP vision model.
     Returns 512-dim L2-normalized embeddings in the CLIP shared text space.
 
-    CLIP text input is capped at 77 tokens; longer text is silently truncated.
-    OCR snippets from product labels are well within this limit.
-
     TODO (server migration): add batch_embed_text(texts) for GPU throughput.
     """
 
@@ -52,21 +49,49 @@ class CLIPTextEmbedder:
 
         Returns:
             Embedding tensor of shape (1, 512)
-
-        TODO: Add chunking for long documents once migrated to server.
         """
-        enc = self.tokenizer(
-            [text], return_tensors="pt", padding=True, truncation=True, max_length=77
+        CHUNK = 75  # content tokens per chunk (77 - 2 special tokens)
+
+        raw = self.tokenizer(
+            [text], return_tensors="pt", padding=False,
+            truncation=False, add_special_tokens=False,
         )
-        input_ids = enc["input_ids"].to(self.device)
-        attention_mask = enc["attention_mask"].to(self.device)
-        with torch.inference_mode():
-            outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
-        result = F.normalize(outputs.text_embeds, dim=-1).detach().cpu()
+        token_ids = raw["input_ids"][0]
+
+        if len(token_ids) <= CHUNK:
+            enc = self.tokenizer(
+                [text], return_tensors="pt", padding=True,
+                truncation=True, max_length=77,
+            )
+            input_ids = enc["input_ids"].to(self.device)
+            attn_mask = enc["attention_mask"].to(self.device)
+            with torch.inference_mode():
+                outputs = self.model(input_ids=input_ids, attention_mask=attn_mask)
+            result = F.normalize(outputs.text_embeds, dim=-1).detach().cpu()
+        else:
+            bos = self.tokenizer.bos_token_id
+            eos = self.tokenizer.eos_token_id
+            pad = self.tokenizer.pad_token_id
+
+            all_ids, all_masks = [], []
+            for start in range(0, len(token_ids), CHUNK):
+                chunk = token_ids[start : start + CHUNK].tolist()
+                ids   = [bos] + chunk + [eos]
+                pad_n = 77 - len(ids)
+                all_ids.append(ids + [pad] * pad_n)
+                all_masks.append([1] * len(ids) + [0] * pad_n)
+
+            input_ids = torch.tensor(all_ids,   dtype=torch.long).to(self.device)
+            attn_mask = torch.tensor(all_masks, dtype=torch.long).to(self.device)
+            with torch.inference_mode():
+                outputs = self.model(input_ids=input_ids, attention_mask=attn_mask)
+            pooled = outputs.text_embeds.mean(dim=0, keepdim=True)
+            result = F.normalize(pooled, dim=-1).detach().cpu()
 
         _log.info({
             "event": "text_embedding",
             "text_length": len(text),
+            "n_chunks": max(1, (len(token_ids) + CHUNK - 1) // CHUNK),
             "embedding_shape": list(result.shape),
         })
         return result
