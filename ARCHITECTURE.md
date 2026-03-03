@@ -9,12 +9,11 @@
 
 Python backend for a visual memory app built for blind users. The system narrates the environment by detecting and locating previously-remembered objects in a new scan image.
 
-**Two modes:**
+**Three modes:**
 
-**Remember Mode** — User specifies an object by text prompt. System detects + crops it, embeds it, stores it (database hook ready, not yet implemented).
-
-**Scan Mode** — User takes a photo. System detects all objects, embeds each crop, searches the database for matches. Every match = a significant object. Returns structured JSON per match, including depth and direction.
-
+Teach: "These are my house keys on the dining room table" - Teaching is quick and easy, single shot
+Scan: Recognizes stuff you've taught it "I see a wallet 3 feet away on your left, house keys 5 feet away on your right, tax returns 3 feet ahead" (User can then verify/deny to further train their personal AI)
+Ask: The user can ask "where did i leave X", "whats the receipt that has my office chair?" it messages back the doc and where you last left it. They can then ask it to read out the doc or export. 
 ---
 
 ## Setup
