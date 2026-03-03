@@ -7,14 +7,60 @@
 
 ## Project Overview
 
-Python backend for a visual memory app built for blind users. The system narrates the environment by detecting and locating previously-remembered objects in a new scan image.
+Blind users cannot quickly visually re-scan their environment the way sighted people naturally do. This makes spatial recall slow and cognitively draining.
 
-**Three modes:**
+Spaitra restores this ability by creating a personal, spatial memory of the user’s physical world.
 
-Teach: "These are my house keys on the dining room table" - Teaching is quick and easy, single shot
-Scan: Recognizes stuff you've taught it "I see a wallet 3 feet away on your left, house keys 5 feet away on your right, tax returns 3 feet ahead" (User can then verify/deny to further train their personal AI)
-Ask: The user can ask "where did i leave X", "whats the receipt that has my office chair?" it messages back the doc and where you last left it. They can then ask it to read out the doc or export. 
+
+## Core Modes
+
+### Teach Mode
+
+> “These are my house keys on the dining room table.”
+
+Single-shot memory creation.
+
+- Detect object
+- Generate visual + text embeddings
+- Store spatial position
+- Add to personal memory index
+
+The user can confirm or correct detections to improve personalization.
+
 ---
+
+### Scan Mode
+
+Recognizes previously taught objects in the current scene.
+
+Example narration:
+> “Wallet 3 feet to your left. House keys 5 feet to your right. Tax returns 3 feet ahead.”
+
+- Objects are ordered spatially (left → right)
+- Results returned as structured JSON
+
+---
+
+### Ask Mode
+
+> “Where did I leave my wallet?”  
+> “What’s the receipt that has my office chair on it?”
+
+Semantic memory retrieval.
+
+- Search stored embeddings
+- Match object or document
+- Return last known spatial location
+- Optionally read document content aloud or export
+
+---
+
+### Main Differentiators
+- Embedding-based semantic search across personal memory
+- Spatial grounding (distance + direction of important objects)
+- Personalized self-training detection (head on top of DINOv3) to improve accuracy with use
+- Continuous adaptation to the user’s environment
+- Minimalist, voice-based interface
 
 ## Setup
 
