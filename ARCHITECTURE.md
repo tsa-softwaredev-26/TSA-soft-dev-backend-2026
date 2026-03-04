@@ -111,6 +111,11 @@ src/visual_memory/
 │   ├── similarity_utils.py
 │   └── logger.py                      # JSON structured logging
 │
+├── learning/
+│   ├── projection_head.py             # ProjectionHead (residual linear, identity at init)
+│   ├── trainer.py                     # ProjectionTrainer + triplet_loss (CLI: python -m visual_memory.learning.trainer)
+│   └── feedback_store.py              # FeedbackStore (.pt file persistence, DB-ready interface)
+│
 ├── config/settings.py                  # All tunable thresholds
 ├── api/                                # Reserved for Flask/FastAPI
 └── tests/                             # Test scripts + test data
@@ -135,10 +140,11 @@ src/visual_memory/
 - Returns `{"matches": [...], "count": int}`
 - Each match: `{"label", "similarity", "distance_ft", "direction", "narration"}`
 - Database is re-embedded on each init (temporary — persistent DB is future work)
+- Loads `ProjectionHead` on init; applies it at match time only when weights file exists
 
 ### `config/settings.py` - `Settings`
 - Single dataclass, all ML tuning params in one place
-- Fields: `grounding_dino_model`, `box_threshold`, `text_threshold`, `yoloe_confidence`, `yoloe_iou`, `image_embedder_model`, `embedder_model`, `similarity_threshold`, `dedup_iou_threshold`, `narration_high_confidence`, `ocr_backend`, `text_similarity_threshold`, `enable_depth`, `enable_ocr`, `enable_dedup`
+- Fields: `grounding_dino_model`, `box_threshold`, `text_threshold`, `yoloe_confidence`, `yoloe_iou`, `image_embedder_model`, `embedder_model`, `similarity_threshold`, `dedup_iou_threshold`, `narration_high_confidence`, `ocr_backend`, `text_similarity_threshold`, `enable_depth`, `enable_ocr`, `enable_dedup`, `projection_head_path`, `projection_head_dim`
 
 ### `engine/object_detection/prompt_based.py` - `GroundingDinoDetector`
 - Model: `IDEA-Research/grounding-dino-base`
@@ -174,6 +180,29 @@ src/visual_memory/
 - Output: `{"text": str, "confidence": float, "segments": list}`
 - Inference: ~3-18s per image
 - Extracts text from `parsing_res_list[].block_content` in JSON export
+
+### `learning/projection_head.py` - `ProjectionHead`
+- Single residual linear layer (`Linear(1536, 1536, bias=False)`) initialized to zeros
+- At init: `linear(x) = 0`, so `forward(x) = normalize(x + 0) = x` — identity transform
+- Safe to enable by default before any training; no-op until weights file exists
+- `load(path) -> bool` — loads weights if file exists, returns False if not
+- `save(path)` — saves state dict; creates parent dirs
+- `project(x)` — alias for `forward()`
+
+### `learning/trainer.py` - `ProjectionTrainer` + `triplet_loss`
+- `triplet_loss(anchor, positive, negative, margin=0.2)` — cosine distance, `relu(pos_dist - neg_dist + margin).mean()`
+- `ProjectionTrainer(head, lr=1e-4)` — Adam optimizer with `weight_decay=1e-4`
+- `train_step(anchor, positive, negative, weight=1.0) -> float` — single gradient step
+- `train(triplets, epochs=20) -> float` — applies linear recency bias (oldest=0.5, newest=1.0); returns avg final loss
+- CLI: `python -m visual_memory.learning.trainer [--feedback-dir feedback/] [--output models/projection_head.pt] [--epochs 20] [--lr 1e-4]`
+
+### `learning/feedback_store.py` - `FeedbackStore`
+- `FeedbackStore(store_dir=Path("feedback"))` — creates dir on init
+- `record_positive(anchor_emb, query_emb, label)` — saves `.pt` file (type="positive")
+- `record_negative(anchor_emb, query_emb, label)` — saves `.pt` file (type="negative")
+- `load_triplets() -> List[(anchor, positive, negative)]` — pairs each positive with each negative per label
+- `count() -> dict` — `{"positives": int, "negatives": int, "triplets": int}`
+- DB contract and Flask endpoint contract documented in module docstring
 
 ### `utils/image_utils.py`
 - `load_image(path)` — PIL Image (RGB, EXIF-corrected, HEIC-compatible)
@@ -215,10 +244,13 @@ image_path + text prompt
 ```
 init:
     database_dir → load_folder_images() → embed each → database_embeddings[]
+    ProjectionHead.load("models/projection_head.pt") → _head_trained (True/False)
 
 run(query_image):
     → YoloeDetector.detect_all()
-    → PASS 1: for each box → crop → embed → find_match() → collect matches
+    → PASS 1: for each box → crop → embed (combined 1536-dim)
+        → if _head_trained: project query + all DB embeddings via ProjectionHead
+        → find_match() → collect matches
     → deduplicate_matches()
     → PASS 2: DepthEstimator.estimate(image) → depth_map  (once, only if matches found)
     → for each match:
@@ -291,6 +323,13 @@ python -m visual_memory.tests.scripts.test_estimator
 python -m visual_memory.tests.scripts.probe_detector <image_path> --prompt "<prompt>"
 python -m visual_memory.tests.scripts.probe_detector --batch wallet
 python -m visual_memory.tests.scripts.probe_detector <image_path> --detector yoloe
+
+# Projection head unit tests (CPU-only, no model loading, ~2s)
+python -m visual_memory.tests.scripts.test_projection_head
+
+# Train projection head from collected feedback
+python -m visual_memory.learning.trainer
+python -m visual_memory.learning.trainer --epochs 50 --lr 5e-5
 ```
 
 ---
@@ -385,6 +424,7 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - OCR backend: PaddleOCR-VL-1.5 (`settings.ocr_backend = "paddle"`)
 - Image embedder: DINOv3 ViT-L/16 (`settings.image_embedder_model`, 1024-dim, gated on HuggingFace)
 - Text embedder: CLIP text encoder (`settings.embedder_model`, 512-dim)
+- Projection head wired into ScanPipeline — identity at init, no-op until `models/projection_head.pt` exists
 
 ---
 
@@ -399,6 +439,8 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - [ ] Implement `RememberPipeline.add_to_database()` — store combined embedding + metadata in SQLite
 - [ ] Replace folder-based `load_folder_images()` + re-embed in `ScanPipeline` with DB query
 - [ ] Add API layer (`api/` is empty) — POST /remember and POST /scan endpoints
+- [ ] Collect feedback via Flask POST /feedback; call `FeedbackStore.record_positive/negative()` — contract in `feedback_store.py` docstring
+- [ ] Train projection head once enough feedback collected: `python -m visual_memory.learning.trainer`
 
 ### Next: Database
 - [ ] Schema: `(id, label, combined_embedding BLOB, ocr_text TEXT, image_path TEXT, timestamp)`
@@ -426,3 +468,4 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - **PaddleOCR over EasyOCR** — Switched from EasyOCR to PaddleOCR-VL-1.5 (Feb 2026). EasyOCR averaged 9.7% word-overlap on the `text_demo/` test set at 200-435s/image. PaddleOCR-VL-1.5 runs in 3-18s/image (~15x faster) and correctly extracts layout-aware text from `parsing_res_list[].block_content` in its JSON output. Text extraction was initially broken due to the engine searching wrong JSON paths; fixed by targeting the correct field.
 - **Combined embedding over hybrid matching** — `max(image_sim, text_sim)` could false-match two white documents with different text (image similarity alone passes threshold). The combined embedding `normalize(img) ‖ normalize(text)` means cosine similarity ≈ average of both sub-similarities, so both image AND text must match. Non-document objects get a zero text slot; image similarity dominates unchanged.
 - **Single venv** — All dependencies including PaddleOCR live in one `pip install -e .` install.
+- **Projection head: identity-at-init residual design** — A single `Linear(1536, 1536, bias=False)` initialized to zeros. At init `output = normalize(x + 0) = x`, so the head is a strict no-op before any training. This means it is safe to wire in by default with zero runtime cost. After triplet training, the head learns a small residual correction that pulls user-confirmed matches closer and pushes mismatches apart. Raw base embeddings are stored; projection is applied on-the-fly at match time, so retraining the head only requires reloading weights (restart Flask server) — no re-embedding the database.
