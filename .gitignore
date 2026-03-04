@@ -53,6 +53,9 @@ checkpoints/
 models/
 weights/
 
+# Personalization feedback data
+feedback/
+
 # Logs
 logs/
 *.log
