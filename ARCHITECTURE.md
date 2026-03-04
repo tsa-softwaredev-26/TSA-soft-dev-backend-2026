@@ -116,6 +116,12 @@ src/visual_memory/
 │   ├── trainer.py                     # ProjectionTrainer + triplet_loss (CLI: python -m visual_memory.learning.trainer)
 │   └── feedback_store.py              # FeedbackStore (.pt file persistence, DB-ready interface)
 │
+├── benchmarks/
+│   ├── full_benchmark.py              # 7-phase system benchmark (retrieval, detection, depth)
+│   ├── format_results.py              # reads results.json, writes BENCHMARKS.md at root
+│   ├── check_dataset.py               # pre-flight: verify all 120 images are in benchmarks/images/
+│   └── redact_receipt.py              # gitignored - OCR-based receipt redaction (personal tool)
+│
 ├── config/settings.py                  # All tunable thresholds
 ├── api/                                # Reserved for Flask/FastAPI
 └── tests/                             # Test scripts + test data
@@ -300,6 +306,75 @@ return                "to your right"
 
 ---
 
+## Benchmarks
+
+Full system evaluation across retrieval, detection, and depth estimation.
+
+### Dataset
+
+```
+benchmarks/dataset.csv      -- 120-row dataset (committed)
+benchmarks/images/          -- user-captured images (gitignored)
+benchmarks/ground_truth/    -- receipt OCR ground truth from redact_receipt.py (gitignored)
+benchmarks/results.csv      -- generated output (gitignored)
+benchmarks/results.json     -- generated output with metadata (gitignored)
+BENCHMARKS.md               -- formatted report at project root (gitignored)
+benchmarks/CAPTURE_GUIDE.md -- personal capture + run guide (gitignored)
+```
+
+**10 objects x 12 conditions = 120 images.**
+Conditions: 3 distances (1ft/3ft/6ft) x 2 lighting (bright/dim) x 2 backgrounds (clean/messy).
+Objects: wallet_a, wallet_b, book_a, book_b, sunglasses_a, sunglasses_b, receipt_a, receipt_b, keys_a, keys_b.
+Labels are per-instance (wallet_a vs wallet_b) to test instance-level discrimination.
+
+### Phases
+
+1. **Embed** — DINOv3 image embedding + optional PaddleOCR text embedding for each image.
+2. **Split** — 60/40 train/test per label (seeded RNG).
+3. **Database** — Individual train embeddings, identical format to production ScanPipeline.
+4. **Train** — ProjectionTrainer generates triplets from train set; trains ProjectionHead.
+5. **Retrieval** — `find_match()` with production threshold on baseline and personalized embeddings.
+6. **Detection** — GroundingDinoDetector on each test image with the object's dino_prompt.
+7. **Depth** — DepthEstimator on images where GDINO detected the object and gt_distance > 0.
+
+### Scripts
+
+```bash
+# Validate images before running
+python -m visual_memory.benchmarks.check_dataset
+
+# Redact receipts (once per receipt, interactive)
+python -m visual_memory.benchmarks.redact_receipt a
+python -m visual_memory.benchmarks.redact_receipt b
+
+# Fast smoke test (~5-10 min)
+python -m visual_memory.benchmarks.full_benchmark \
+    --dataset benchmarks/dataset.csv --images benchmarks/images \
+    --seed 42 --no-depth --no-ocr --epochs 5
+
+# Full run (~2-4 hours)
+python -m visual_memory.benchmarks.full_benchmark \
+    --dataset benchmarks/dataset.csv --images benchmarks/images --seed 42
+
+# Format into BENCHMARKS.md
+python -m visual_memory.benchmarks.format_results
+```
+
+### Metrics
+
+| Metric | What it measures |
+|--------|-----------------|
+| Baseline accuracy | Retrieval using raw DINOv3+CLIP embeddings at production threshold |
+| Personalized accuracy | Retrieval after ProjectionHead trained on benchmark train set |
+| Accuracy delta (pp) | Improvement from projection head; positive = head helps |
+| Mean sim gap | Per-image average improvement in cosine similarity score |
+| Triplet final loss | Training convergence; lower = more distinct embedding clusters |
+| Detection rate | GroundingDINO hit rate per object and per condition |
+| Mean depth abs error (ft) | Depth Pro accuracy on detected objects with known ground truth |
+| Mean depth % error | Same as above normalized by ground truth distance |
+
+---
+
 ## Test Scripts
 
 Run from project root (`python -m visual_memory.tests.scripts.<name>`).
@@ -366,7 +441,7 @@ Both pipelines return plain Python dicts — JSON-serializable, no torch tensors
 
 ## Known Benchmark Data
 
-### Detection score data (Full benchmarks ongoing, to be adeded to a seperate .md)
+### Detection score data (ad-hoc, pre-full-benchmark)
 
 | model               | image                | prompt | max sigmoid       |
 |---------------------|----------------------|--------|-------------------|
