@@ -1,13 +1,125 @@
-# Full system benchmark dataset
-# Copy or symlink images from src/visual_memory/tests/input_images/ to benchmarks/images/
-# ground_truth_distance_ft=0 skips depth evaluation for that row
+# Full system benchmark dataset — 10 objects x 12 conditions = 120 images
+# Naming: {object}_{distance}ft_{lighting}_{background}.jpg
+# Place images in benchmarks/images/ before running full_benchmark.py
+# Receipts: run redact_receipt.py first. ground_truth_distance_ft=0 skips depth eval.
 image,label,ground_truth_distance_ft,dino_prompt
-wallet_1ft_table.jpg,wallet,1.0,wallet
-wallet_3ft_table.jpg,wallet,3.0,wallet
-wallet_6ft_table.jpg,wallet,6.0,wallet
-airpods_1ft_table.jpg,airpods,1.0,airpods case
-airpods_3ft_table.jpg,airpods,3.0,airpods case
-airpods_6ft_table.jpg,airpods,6.0,airpods case
-mouse_1ft_table.jpg,mouse,1.0,computer mouse
-mouse_3ft_table.jpg,mouse,3.0,computer mouse
-mouse_6ft_table.jpg,mouse,6.0,computer mouse
+wallet_a_1ft_bright_clean.jpg,wallet_a,1.0,wallet
+wallet_a_1ft_bright_messy.jpg,wallet_a,1.0,wallet
+wallet_a_1ft_dim_clean.jpg,wallet_a,1.0,wallet
+wallet_a_1ft_dim_messy.jpg,wallet_a,1.0,wallet
+wallet_a_3ft_bright_clean.jpg,wallet_a,3.0,wallet
+wallet_a_3ft_bright_messy.jpg,wallet_a,3.0,wallet
+wallet_a_3ft_dim_clean.jpg,wallet_a,3.0,wallet
+wallet_a_3ft_dim_messy.jpg,wallet_a,3.0,wallet
+wallet_a_6ft_bright_clean.jpg,wallet_a,6.0,wallet
+wallet_a_6ft_bright_messy.jpg,wallet_a,6.0,wallet
+wallet_a_6ft_dim_clean.jpg,wallet_a,6.0,wallet
+wallet_a_6ft_dim_messy.jpg,wallet_a,6.0,wallet
+wallet_b_1ft_bright_clean.jpg,wallet_b,1.0,wallet
+wallet_b_1ft_bright_messy.jpg,wallet_b,1.0,wallet
+wallet_b_1ft_dim_clean.jpg,wallet_b,1.0,wallet
+wallet_b_1ft_dim_messy.jpg,wallet_b,1.0,wallet
+wallet_b_3ft_bright_clean.jpg,wallet_b,3.0,wallet
+wallet_b_3ft_bright_messy.jpg,wallet_b,3.0,wallet
+wallet_b_3ft_dim_clean.jpg,wallet_b,3.0,wallet
+wallet_b_3ft_dim_messy.jpg,wallet_b,3.0,wallet
+wallet_b_6ft_bright_clean.jpg,wallet_b,6.0,wallet
+wallet_b_6ft_bright_messy.jpg,wallet_b,6.0,wallet
+wallet_b_6ft_dim_clean.jpg,wallet_b,6.0,wallet
+wallet_b_6ft_dim_messy.jpg,wallet_b,6.0,wallet
+book_a_1ft_bright_clean.jpg,book_a,1.0,book
+book_a_1ft_bright_messy.jpg,book_a,1.0,book
+book_a_1ft_dim_clean.jpg,book_a,1.0,book
+book_a_1ft_dim_messy.jpg,book_a,1.0,book
+book_a_3ft_bright_clean.jpg,book_a,3.0,book
+book_a_3ft_bright_messy.jpg,book_a,3.0,book
+book_a_3ft_dim_clean.jpg,book_a,3.0,book
+book_a_3ft_dim_messy.jpg,book_a,3.0,book
+book_a_6ft_bright_clean.jpg,book_a,6.0,book
+book_a_6ft_bright_messy.jpg,book_a,6.0,book
+book_a_6ft_dim_clean.jpg,book_a,6.0,book
+book_a_6ft_dim_messy.jpg,book_a,6.0,book
+book_b_1ft_bright_clean.jpg,book_b,1.0,book
+book_b_1ft_bright_messy.jpg,book_b,1.0,book
+book_b_1ft_dim_clean.jpg,book_b,1.0,book
+book_b_1ft_dim_messy.jpg,book_b,1.0,book
+book_b_3ft_bright_clean.jpg,book_b,3.0,book
+book_b_3ft_bright_messy.jpg,book_b,3.0,book
+book_b_3ft_dim_clean.jpg,book_b,3.0,book
+book_b_3ft_dim_messy.jpg,book_b,3.0,book
+book_b_6ft_bright_clean.jpg,book_b,6.0,book
+book_b_6ft_bright_messy.jpg,book_b,6.0,book
+book_b_6ft_dim_clean.jpg,book_b,6.0,book
+book_b_6ft_dim_messy.jpg,book_b,6.0,book
+sunglasses_a_1ft_bright_clean.jpg,sunglasses_a,1.0,sunglasses
+sunglasses_a_1ft_bright_messy.jpg,sunglasses_a,1.0,sunglasses
+sunglasses_a_1ft_dim_clean.jpg,sunglasses_a,1.0,sunglasses
+sunglasses_a_1ft_dim_messy.jpg,sunglasses_a,1.0,sunglasses
+sunglasses_a_3ft_bright_clean.jpg,sunglasses_a,3.0,sunglasses
+sunglasses_a_3ft_bright_messy.jpg,sunglasses_a,3.0,sunglasses
+sunglasses_a_3ft_dim_clean.jpg,sunglasses_a,3.0,sunglasses
+sunglasses_a_3ft_dim_messy.jpg,sunglasses_a,3.0,sunglasses
+sunglasses_a_6ft_bright_clean.jpg,sunglasses_a,6.0,sunglasses
+sunglasses_a_6ft_bright_messy.jpg,sunglasses_a,6.0,sunglasses
+sunglasses_a_6ft_dim_clean.jpg,sunglasses_a,6.0,sunglasses
+sunglasses_a_6ft_dim_messy.jpg,sunglasses_a,6.0,sunglasses
+sunglasses_b_1ft_bright_clean.jpg,sunglasses_b,1.0,sunglasses
+sunglasses_b_1ft_bright_messy.jpg,sunglasses_b,1.0,sunglasses
+sunglasses_b_1ft_dim_clean.jpg,sunglasses_b,1.0,sunglasses
+sunglasses_b_1ft_dim_messy.jpg,sunglasses_b,1.0,sunglasses
+sunglasses_b_3ft_bright_clean.jpg,sunglasses_b,3.0,sunglasses
+sunglasses_b_3ft_bright_messy.jpg,sunglasses_b,3.0,sunglasses
+sunglasses_b_3ft_dim_clean.jpg,sunglasses_b,3.0,sunglasses
+sunglasses_b_3ft_dim_messy.jpg,sunglasses_b,3.0,sunglasses
+sunglasses_b_6ft_bright_clean.jpg,sunglasses_b,6.0,sunglasses
+sunglasses_b_6ft_bright_messy.jpg,sunglasses_b,6.0,sunglasses
+sunglasses_b_6ft_dim_clean.jpg,sunglasses_b,6.0,sunglasses
+sunglasses_b_6ft_dim_messy.jpg,sunglasses_b,6.0,sunglasses
+receipt_a_1ft_bright_clean.jpg,receipt_a,1.0,paper receipt
+receipt_a_1ft_bright_messy.jpg,receipt_a,1.0,paper receipt
+receipt_a_1ft_dim_clean.jpg,receipt_a,1.0,paper receipt
+receipt_a_1ft_dim_messy.jpg,receipt_a,1.0,paper receipt
+receipt_a_3ft_bright_clean.jpg,receipt_a,3.0,paper receipt
+receipt_a_3ft_bright_messy.jpg,receipt_a,3.0,paper receipt
+receipt_a_3ft_dim_clean.jpg,receipt_a,3.0,paper receipt
+receipt_a_3ft_dim_messy.jpg,receipt_a,3.0,paper receipt
+receipt_a_6ft_bright_clean.jpg,receipt_a,6.0,paper receipt
+receipt_a_6ft_bright_messy.jpg,receipt_a,6.0,paper receipt
+receipt_a_6ft_dim_clean.jpg,receipt_a,6.0,paper receipt
+receipt_a_6ft_dim_messy.jpg,receipt_a,6.0,paper receipt
+receipt_b_1ft_bright_clean.jpg,receipt_b,1.0,paper receipt
+receipt_b_1ft_bright_messy.jpg,receipt_b,1.0,paper receipt
+receipt_b_1ft_dim_clean.jpg,receipt_b,1.0,paper receipt
+receipt_b_1ft_dim_messy.jpg,receipt_b,1.0,paper receipt
+receipt_b_3ft_bright_clean.jpg,receipt_b,3.0,paper receipt
+receipt_b_3ft_bright_messy.jpg,receipt_b,3.0,paper receipt
+receipt_b_3ft_dim_clean.jpg,receipt_b,3.0,paper receipt
+receipt_b_3ft_dim_messy.jpg,receipt_b,3.0,paper receipt
+receipt_b_6ft_bright_clean.jpg,receipt_b,6.0,paper receipt
+receipt_b_6ft_bright_messy.jpg,receipt_b,6.0,paper receipt
+receipt_b_6ft_dim_clean.jpg,receipt_b,6.0,paper receipt
+receipt_b_6ft_dim_messy.jpg,receipt_b,6.0,paper receipt
+keys_a_1ft_bright_clean.jpg,keys_a,1.0,keys
+keys_a_1ft_bright_messy.jpg,keys_a,1.0,keys
+keys_a_1ft_dim_clean.jpg,keys_a,1.0,keys
+keys_a_1ft_dim_messy.jpg,keys_a,1.0,keys
+keys_a_3ft_bright_clean.jpg,keys_a,3.0,keys
+keys_a_3ft_bright_messy.jpg,keys_a,3.0,keys
+keys_a_3ft_dim_clean.jpg,keys_a,3.0,keys
+keys_a_3ft_dim_messy.jpg,keys_a,3.0,keys
+keys_a_6ft_bright_clean.jpg,keys_a,6.0,keys
+keys_a_6ft_bright_messy.jpg,keys_a,6.0,keys
+keys_a_6ft_dim_clean.jpg,keys_a,6.0,keys
+keys_a_6ft_dim_messy.jpg,keys_a,6.0,keys
+keys_b_1ft_bright_clean.jpg,keys_b,1.0,keys
+keys_b_1ft_bright_messy.jpg,keys_b,1.0,keys
+keys_b_1ft_dim_clean.jpg,keys_b,1.0,keys
+keys_b_1ft_dim_messy.jpg,keys_b,1.0,keys
+keys_b_3ft_bright_clean.jpg,keys_b,3.0,keys
+keys_b_3ft_bright_messy.jpg,keys_b,3.0,keys
+keys_b_3ft_dim_clean.jpg,keys_b,3.0,keys
+keys_b_3ft_dim_messy.jpg,keys_b,3.0,keys
+keys_b_6ft_bright_clean.jpg,keys_b,6.0,keys
+keys_b_6ft_bright_messy.jpg,keys_b,6.0,keys
+keys_b_6ft_dim_clean.jpg,keys_b,6.0,keys
+keys_b_6ft_dim_messy.jpg,keys_b,6.0,keys
