@@ -38,3 +38,7 @@ class Settings:
     enable_depth: bool = field(default_factory=lambda: os.environ.get("ENABLE_DEPTH", "1") != "0")
     enable_ocr:   bool = field(default_factory=lambda: os.environ.get("ENABLE_OCR",   "1") != "0")
     enable_dedup: bool = field(default_factory=lambda: os.environ.get("ENABLE_DEDUP", "1") != "0")
+
+    # Projection head (personalization)
+    projection_head_path: str = "models/projection_head.pt"
+    projection_head_dim: int = 1536
