@@ -1,0 +1,13 @@
+# Full system benchmark dataset
+# Copy or symlink images from src/visual_memory/tests/input_images/ to benchmarks/images/
+# ground_truth_distance_ft=0 skips depth evaluation for that row
+image,label,ground_truth_distance_ft,dino_prompt
+wallet_1ft_table.jpg,wallet,1.0,wallet
+wallet_3ft_table.jpg,wallet,3.0,wallet
+wallet_6ft_table.jpg,wallet,6.0,wallet
+airpods_1ft_table.jpg,airpods,1.0,airpods case
+airpods_3ft_table.jpg,airpods,3.0,airpods case
+airpods_6ft_table.jpg,airpods,6.0,airpods case
+mouse_1ft_table.jpg,mouse,1.0,computer mouse
+mouse_3ft_table.jpg,mouse,3.0,computer mouse
+mouse_6ft_table.jpg,mouse,6.0,computer mouse

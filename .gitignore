@@ -62,3 +62,8 @@ logs/
 
 # Depth Pro (cloned locally for testing, installed as package via pip)
 depth_demo/ml-depth-pro/
+
+# Benchmark data (images and generated outputs)
+benchmarks/images/
+benchmarks/results*
+benchmarks/projection_head_bench.pt
