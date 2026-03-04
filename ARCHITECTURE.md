@@ -510,12 +510,15 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - [x] Fix DepthEstimator device - was defaulting to CPU (depth_pro default); now auto-detects MPS/CUDA/CPU and passes device explicitly to `create_model_and_transforms`
 - [x] Run `benchmark_embedder.py` and record similarity data — done (March 2026); DINOv3 pipeline scan match: 0.315, 0.306, 0.238; `similarity_threshold=0.2` kept
 - [x] Add text chunking for documents longer than 77 CLIP tokens — done (March 2026); non-overlapping 75-token chunks, mean-pool raw projections, L2-normalize once.
-- [ ] Dependency injection for shared model instances — `RememberPipeline` and `ScanPipeline` each instantiate their own CLIP, PaddleOCR, and (in scan) DepthEstimator. Refactor constructors to accept pre-built instances so the caller can share them (e.g. `ScanPipeline(embedder=shared_clip, recognizer=shared_ocr)`). **Post-server migration:** keep and expand — on the Flask server, models should be singletons loaded once at startup and injected into request handlers, not re-instantiated per request. The DI pattern is the same; the scope changes from "test runner" to "app lifetime".
+- [x] ProjectionHead wired into ScanPipeline — identity at init, no-op until weights exist; residual design is zero-cost before training
+- [x] Full system benchmark — `full_benchmark.py` evaluates retrieval (baseline vs personalized), GroundingDINO detection, and Depth Pro accuracy across 120 images; outputs results.csv + results.json; `format_results.py` generates BENCHMARKS.md
+- [ ] Run full benchmark — 120 images captured and placed in `benchmarks/images/`; receipts redacted; results not yet recorded
+- [ ] Dependency injection for shared model instances — `RememberPipeline` and `ScanPipeline` each instantiate their own models. Refactor constructors to accept pre-built instances (e.g. `ScanPipeline(embedder=shared_embedder, recognizer=shared_ocr)`). On the Flask server, models should be singletons loaded once at startup and injected per request — same DI pattern, broader scope.
 - [ ] Implement `RememberPipeline.add_to_database()` — store combined embedding + metadata in SQLite
 - [ ] Replace folder-based `load_folder_images()` + re-embed in `ScanPipeline` with DB query
 - [ ] Add API layer (`api/` is empty) — POST /remember and POST /scan endpoints
 - [ ] Collect feedback via Flask POST /feedback; call `FeedbackStore.record_positive/negative()` — contract in `feedback_store.py` docstring
-- [ ] Train projection head once enough feedback collected: `python -m visual_memory.learning.trainer`
+- [ ] Train projection head on real user feedback: `python -m visual_memory.learning.trainer`
 
 ### Next: Database
 - [ ] Schema: `(id, label, combined_embedding BLOB, ocr_text TEXT, image_path TEXT, timestamp)`
