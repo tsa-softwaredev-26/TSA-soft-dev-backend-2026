@@ -2,6 +2,7 @@ from pathlib import Path
 from visual_memory.config import Settings
 from visual_memory.engine.embedding import make_combined_embedding
 from visual_memory.engine.model_registry import registry
+from visual_memory.learning import ProjectionHead
 from visual_memory.utils import crop_object, find_match, load_folder_images, deduplicate_matches, get_logger
 
 _settings = Settings()
@@ -16,6 +17,11 @@ class ScanPipeline:
         self.text_recognizer = registry.text_recognizer if _settings.enable_ocr   else None
         self.estimator       = registry.depth_estimator if _settings.enable_depth else None
         self.focal_length_px = focal_length_px
+
+        self._head = ProjectionHead(dim=_settings.projection_head_dim)
+        _head_path = Path(_settings.projection_head_path)
+        self._head_trained = self._head.load(_head_path)
+        self._head.eval()
 
         self.database_images = load_folder_images(database_dir)
         self.database_embeddings = self._embed_database()
@@ -59,9 +65,16 @@ class ScanPipeline:
                 text_emb = self.text_embedder.embed_text(ocr_text) if ocr_text else None
             combined = make_combined_embedding(img_emb, text_emb)
 
+            if self._head_trained:
+                projected_query = self._head.project(combined)
+                projected_db = [(p, self._head.project(e)) for p, e in self.database_embeddings]
+            else:
+                projected_query = combined
+                projected_db = self.database_embeddings
+
             match_path, similarity = find_match(
-                combined,
-                self.database_embeddings,
+                projected_query,
+                projected_db,
                 _settings.similarity_threshold,
             )
 
