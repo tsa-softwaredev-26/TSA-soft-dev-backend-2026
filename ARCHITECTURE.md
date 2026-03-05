@@ -512,13 +512,13 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - [x] Add text chunking for documents longer than 77 CLIP tokens — done (March 2026); non-overlapping 75-token chunks, mean-pool raw projections, L2-normalize once.
 - [x] ProjectionHead wired into ScanPipeline — identity at init, no-op until weights exist; residual design is zero-cost before training
 - [x] Full system benchmark — `full_benchmark.py` evaluates retrieval (baseline vs personalized), GroundingDINO detection, and Depth Pro accuracy across 120 images; outputs results.csv + results.json; `format_results.py` generates BENCHMARKS.md
-- [ ] Run full benchmark — 120 images captured and placed in `benchmarks/images/`; receipts redacted; results not yet recorded
-- [ ] Dependency injection for shared model instances — `RememberPipeline` and `ScanPipeline` each instantiate their own models. Refactor constructors to accept pre-built instances (e.g. `ScanPipeline(embedder=shared_embedder, recognizer=shared_ocr)`). On the Flask server, models should be singletons loaded once at startup and injected per request — same DI pattern, broader scope.
+- [ ] Run full benchmark — 120 images not yet captured; see `benchmarks/CAPTURE_GUIDE.md` (4-block shooting session, ~1-2 hrs)
+- [ ] Ensure all pipelines use ModelRegistry in `engine/`
 - [ ] Implement `RememberPipeline.add_to_database()` — store combined embedding + metadata in SQLite
 - [ ] Replace folder-based `load_folder_images()` + re-embed in `ScanPipeline` with DB query
 - [ ] Add API layer (`api/` is empty) — POST /remember and POST /scan endpoints
 - [ ] Collect feedback via Flask POST /feedback; call `FeedbackStore.record_positive/negative()` — contract in `feedback_store.py` docstring
-- [ ] Train projection head on real user feedback: `python -m visual_memory.learning.trainer`
+- [ ] Train projection head on user feedback from frontend: `python -m visual_memory.learning.trainer`
 
 ### Next: Database
 - [ ] Schema: `(id, label, combined_embedding BLOB, ocr_text TEXT, image_path TEXT, timestamp)`
