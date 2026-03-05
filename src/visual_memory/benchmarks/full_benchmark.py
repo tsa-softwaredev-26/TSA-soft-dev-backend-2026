@@ -1,15 +1,15 @@
-"""Full system benchmark: retrieval, detection, and depth evaluation.
+"""Full system benchmark: retrieval, detection, depth, latency, and false-positive rate.
 
 Usage:
-    python -m visual_memory.benchmarks.full_benchmark \\
-        --dataset benchmarks/dataset.csv \\
-        --images benchmarks/images \\
+    python -m visual_memory.benchmarks.full_benchmark \
+        --dataset benchmarks/dataset.csv \
+        --images benchmarks/images \
         --seed 42
 
-    # Fast smoke test (skip depth + OCR):
-    python -m visual_memory.benchmarks.full_benchmark \\
-        --dataset benchmarks/dataset.csv \\
-        --images benchmarks/images \\
+    # Fast smoke test (skip depth + OCR, ~5-10 min):
+    python -m visual_memory.benchmarks.full_benchmark \
+        --dataset benchmarks/dataset.csv \
+        --images benchmarks/images \
         --seed 42 --no-depth --no-ocr --epochs 5
 """
 from __future__ import annotations
@@ -19,6 +19,7 @@ import csv
 import json
 import random
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -41,6 +42,7 @@ from visual_memory.utils.similarity_utils import find_match
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _BENCHMARKS_DIR = _PROJECT_ROOT / "benchmarks"
 _CHECKPOINT = _PROJECT_ROOT / "checkpoints" / "depth_pro.pt"
+_DEFAULT_NEG_IMAGES = _PROJECT_ROOT / "src" / "visual_memory" / "tests" / "input_images"
 
 
 # ---- arg parsing ----
@@ -49,18 +51,16 @@ def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Full system benchmark")
     p.add_argument("--dataset", type=Path, default=_BENCHMARKS_DIR / "dataset.csv")
     p.add_argument("--images", type=Path, default=_BENCHMARKS_DIR / "images")
+    p.add_argument("--negative-dataset", type=Path,
+                   default=_BENCHMARKS_DIR / "negative_dataset.csv")
+    p.add_argument("--images-neg", type=Path, default=_DEFAULT_NEG_IMAGES,
+                   help="Directory containing negative test images")
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--focal-length", type=float, default=None,
-                   help="Focal length in pixels (iPhone 15 Plus: 3094.0). "
-                        "Omit to let Depth Pro infer.")
-    p.add_argument("--epochs", type=int, default=20,
-                   help="Projection head training epochs (default: 20)")
-    p.add_argument("--lr", type=float, default=1e-4,
-                   help="Projection head learning rate (default: 1e-4)")
-    p.add_argument("--no-depth", action="store_true",
-                   help="Skip Depth Pro evaluation")
-    p.add_argument("--no-ocr", action="store_true",
-                   help="Skip PaddleOCR (faster for quick runs)")
+    p.add_argument("--focal-length", type=float, default=None)
+    p.add_argument("--epochs", type=int, default=20)
+    p.add_argument("--lr", type=float, default=1e-4)
+    p.add_argument("--no-depth", action="store_true")
+    p.add_argument("--no-ocr", action="store_true")
     return p.parse_args()
 
 
@@ -69,7 +69,6 @@ def _parse_args() -> argparse.Namespace:
 def _load_dataset(csv_path: Path) -> List[dict]:
     rows = []
     with open(csv_path, newline="") as f:
-        # Skip comment lines starting with '#'
         filtered = (line for line in f if not line.lstrip().startswith("#"))
         for row in csv.DictReader(filtered):
             rows.append({
@@ -77,6 +76,22 @@ def _load_dataset(csv_path: Path) -> List[dict]:
                 "label": row["label"],
                 "distance_ft": float(row["ground_truth_distance_ft"]),
                 "dino_prompt": row["dino_prompt"],
+            })
+    return rows
+
+
+def _load_negative_dataset(csv_path: Path) -> List[dict]:
+    if not csv_path.exists():
+        return []
+    rows = []
+    with open(csv_path, newline="") as f:
+        filtered = (line for line in f if not line.lstrip().startswith("#"))
+        for row in csv.DictReader(filtered):
+            rows.append({
+                "image": row["image"],
+                "label": "negative",
+                "distance_ft": 0.0,
+                "dino_prompt": "",
             })
     return rows
 
@@ -92,16 +107,26 @@ def _embed_rows(
         fname = row["image"]
         img_path = images_dir / fname
         if not img_path.exists():
-            print(f"  [warn] image not found, skipping: {img_path}", file=sys.stderr)
+            print(f"  [warn] not found, skipping: {img_path}", file=sys.stderr)
             continue
-        print(f"  [{i+1}/{n}] embedding: {fname} ({row['label']})")
+        print(f"  [{i+1}/{n}] {fname}")
         img = load_image(str(img_path))
+
+        t0 = time.perf_counter()
         img_emb = registry.img_embedder.embed(img)
+        lat_img = time.perf_counter() - t0
+
         text_emb = None
+        lat_ocr = lat_txt = 0.0
         if not no_ocr:
+            t0 = time.perf_counter()
             text = registry.text_recognizer.recognize(img)
+            lat_ocr = time.perf_counter() - t0
             if text and text.strip():
+                t0 = time.perf_counter()
                 text_emb = registry.text_embedder.embed_text(text)
+                lat_txt = time.perf_counter() - t0
+
         emb = make_combined_embedding(img_emb, text_emb)
         embedded[fname] = {
             "label": row["label"],
@@ -109,6 +134,9 @@ def _embed_rows(
             "dino_prompt": row["dino_prompt"],
             "embedding": emb,
             "image": img,
+            "lat_embed_img": lat_img,
+            "lat_ocr": lat_ocr,
+            "lat_embed_txt": lat_txt,
         }
     return embedded
 
@@ -147,7 +175,6 @@ def _build_database(
     train_set: List[str],
     embedded: Dict[str, dict],
 ) -> List[Tuple[str, torch.Tensor]]:
-    # One entry per training image — identical format to production ScanPipeline.
     return [(embedded[f]["label"], embedded[f]["embedding"]) for f in train_set]
 
 
@@ -157,7 +184,6 @@ def _build_triplets(
     train_set: List[str],
     embedded: Dict[str, dict],
 ) -> List[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
-    # One triplet per training image where both same-label and diff-label partners exist.
     triplets = []
     for fname in train_set:
         anchor_emb = embedded[fname]["embedding"]
@@ -166,9 +192,7 @@ def _build_triplets(
         diff = [f for f in train_set if embedded[f]["label"] != label]
         if not same or not diff:
             continue
-        positive_emb = embedded[same[0]]["embedding"]
-        negative_emb = embedded[diff[0]]["embedding"]
-        triplets.append((anchor_emb, positive_emb, negative_emb))
+        triplets.append((anchor_emb, embedded[same[0]]["embedding"], embedded[diff[0]]["embedding"]))
     return triplets
 
 
@@ -182,8 +206,7 @@ def _train_head(
     head = ProjectionHead()
     triplets = _build_triplets(train_set, embedded)
     if not triplets:
-        print("  [warn] no triplets available "
-              "(need >= 2 labels, each with >= 2 train images)")
+        print("  [warn] no triplets — need >= 2 labels with >= 2 train images each")
         head.eval()
         return head, 0.0
     print(f"  {len(triplets)} triplets, {epochs} epochs")
@@ -191,7 +214,6 @@ def _train_head(
     final_loss = trainer.train(triplets, epochs=epochs)
     head.eval()
     head.save(save_path)
-    print(f"  saved: {save_path}")
     return head, final_loss
 
 
@@ -212,9 +234,13 @@ def _eval_retrieval(
         test_emb = data["embedding"]
         true_label = data["label"]
 
+        t0 = time.perf_counter()
         bl_label, bl_sim = find_match(test_emb, database, threshold)
-        proj_query = head.project(test_emb)
-        pe_label, pe_sim = find_match(proj_query, projected_db, threshold)
+        lat_bl = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        pe_label, pe_sim = find_match(head.project(test_emb), projected_db, threshold)
+        lat_pe = time.perf_counter() - t0
 
         results.append({
             "image": fname,
@@ -226,6 +252,11 @@ def _eval_retrieval(
             "similarity_gap": pe_sim - bl_sim,
             "baseline_correct": int(bl_label == true_label),
             "personalized_correct": int(pe_label == true_label),
+            "lat_embed_img": data["lat_embed_img"],
+            "lat_ocr": data["lat_ocr"],
+            "lat_embed_txt": data["lat_embed_txt"],
+            "lat_retrieve_bl": lat_bl,
+            "lat_retrieve_pe": lat_pe,
         })
     return results
 
@@ -240,19 +271,15 @@ def _eval_detection(
     results: Dict[str, dict] = {}
     for fname in test_set:
         data = embedded[fname]
+        t0 = time.perf_counter()
         det = detector.detect(data["image"], data["dino_prompt"])
+        lat_detect = time.perf_counter() - t0
         if det:
-            results[fname] = {
-                "detected": 1,
-                "confidence": det["score"],
-                "box": det["box"],
-            }
+            results[fname] = {"detected": 1, "confidence": det["score"],
+                              "box": det["box"], "lat_detect": lat_detect}
         else:
-            results[fname] = {
-                "detected": 0,
-                "confidence": 0.0,
-                "box": None,
-            }
+            results[fname] = {"detected": 0, "confidence": 0.0,
+                              "box": None, "lat_detect": lat_detect}
     return results
 
 
@@ -271,7 +298,7 @@ def _eval_depth(
     focal_length: Optional[float],
     no_depth: bool,
 ) -> Dict[str, dict]:
-    blank = {"predicted_ft": None, "abs_error": None, "pct_error": None}
+    blank = {"predicted_ft": None, "abs_error": None, "pct_error": None, "lat_depth": 0.0}
     results = {fname: dict(blank) for fname in test_set}
 
     if no_depth:
@@ -279,7 +306,7 @@ def _eval_depth(
 
     estimator = _load_depth_estimator()
     if estimator is None:
-        print("  [info] depth checkpoint not found — skipping depth evaluation")
+        print("  [info] depth checkpoint not found — skipping")
         return results
 
     for fname in test_set:
@@ -288,19 +315,48 @@ def _eval_depth(
         gt_dist = data["distance_ft"]
         if not det["detected"] or gt_dist <= 0:
             continue
+        t0 = time.perf_counter()
         depth_map = estimator.estimate(data["image"], focal_length_px=focal_length)
         pred_ft = estimator.get_depth_at_bbox(depth_map, det["box"])
+        lat_depth = time.perf_counter() - t0
         abs_err = abs(pred_ft - gt_dist)
-        pct_err = abs_err / gt_dist * 100.0
         results[fname] = {
             "predicted_ft": pred_ft,
             "abs_error": abs_err,
-            "pct_error": pct_err,
+            "pct_error": abs_err / gt_dist * 100.0,
+            "lat_depth": lat_depth,
         }
     return results
 
 
-# ---- phase 8: output ----
+# ---- negative FP evaluation ----
+
+def _eval_negatives(
+    neg_embedded: Dict[str, dict],
+    database: List[Tuple[str, torch.Tensor]],
+    head: ProjectionHead,
+    threshold: float,
+) -> List[dict]:
+    head.eval()
+    projected_db = [(lbl, head.project(e)) for lbl, e in database]
+    results = []
+    for fname, data in neg_embedded.items():
+        emb = data["embedding"]
+        bl_lbl, bl_sim = find_match(emb, database, threshold)
+        pe_lbl, pe_sim = find_match(head.project(emb), projected_db, threshold)
+        results.append({
+            "image": fname,
+            "baseline_fp": int(bl_lbl is not None),
+            "baseline_match": bl_lbl or "",
+            "baseline_sim": round(bl_sim, 6),
+            "personalized_fp": int(pe_lbl is not None),
+            "personalized_match": pe_lbl or "",
+            "personalized_sim": round(pe_sim, 6),
+        })
+    return results
+
+
+# ---- output ----
 
 _CSV_FIELDS = [
     "image", "label", "ground_truth_distance_ft",
@@ -308,6 +364,8 @@ _CSV_FIELDS = [
     "baseline_correct", "personalized_correct",
     "dino_detected", "dino_confidence",
     "predicted_distance_ft", "depth_absolute_error", "depth_percentage_error",
+    "lat_embed_img_s", "lat_ocr_s", "lat_embed_txt_s",
+    "lat_retrieve_bl_s", "lat_retrieve_pe_s", "lat_detect_s", "lat_depth_s",
 ]
 
 
@@ -319,8 +377,9 @@ def _merge_rows(
     rows = []
     for r in retrieval:
         fname = r["image"]
-        d = dino.get(fname, {"detected": 0, "confidence": 0.0})
-        dep = depth.get(fname, {"predicted_ft": None, "abs_error": None, "pct_error": None})
+        d = dino.get(fname, {"detected": 0, "confidence": 0.0, "lat_detect": 0.0})
+        dep = depth.get(fname, {"predicted_ft": None, "abs_error": None,
+                                 "pct_error": None, "lat_depth": 0.0})
         rows.append({
             "image": fname,
             "label": r["label"],
@@ -333,25 +392,43 @@ def _merge_rows(
             "dino_detected": d["detected"],
             "dino_confidence": round(d["confidence"], 6),
             "predicted_distance_ft": (
-                round(dep["predicted_ft"], 3) if dep["predicted_ft"] is not None else ""
-            ),
+                round(dep["predicted_ft"], 3) if dep["predicted_ft"] is not None else ""),
             "depth_absolute_error": (
-                round(dep["abs_error"], 3) if dep["abs_error"] is not None else ""
-            ),
+                round(dep["abs_error"], 3) if dep["abs_error"] is not None else ""),
             "depth_percentage_error": (
-                round(dep["pct_error"], 2) if dep["pct_error"] is not None else ""
-            ),
+                round(dep["pct_error"], 2) if dep["pct_error"] is not None else ""),
+            "lat_embed_img_s": round(r["lat_embed_img"], 4),
+            "lat_ocr_s": round(r["lat_ocr"], 4),
+            "lat_embed_txt_s": round(r["lat_embed_txt"], 4),
+            "lat_retrieve_bl_s": round(r["lat_retrieve_bl"], 6),
+            "lat_retrieve_pe_s": round(r["lat_retrieve_pe"], 6),
+            "lat_detect_s": round(d["lat_detect"], 4),
+            "lat_depth_s": round(dep["lat_depth"], 4),
         })
     return rows
 
 
+def _latency_stats(values: List[float], label_col: Optional[List[str]] = None):
+    """Return (mean, min, max, outliers) where outliers are >2x mean."""
+    if not values:
+        return 0.0, 0.0, 0.0, []
+    mean = sum(values) / len(values)
+    threshold = mean * 2.0
+    outliers = []
+    if label_col:
+        for v, lbl in zip(values, label_col):
+            if v > threshold:
+                outliers.append(f"{lbl} ({v:.2f}s)")
+    return mean, min(values), max(values), outliers
+
+
 def _write_output(
     rows: List[dict],
+    neg_results: List[dict],
     args: argparse.Namespace,
     final_loss: float,
     threshold: float,
     train_set: List[str],
-    n_test: int,
 ) -> None:
     _BENCHMARKS_DIR.mkdir(parents=True, exist_ok=True)
     csv_path = _BENCHMARKS_DIR / "results.csv"
@@ -368,12 +445,13 @@ def _write_output(
         "lr": args.lr,
         "similarity_threshold": threshold,
         "n_train": len(train_set),
-        "n_test": n_test,
+        "n_test": len(rows),
+        "n_negatives": len(neg_results),
         "final_triplet_loss": round(final_loss, 6),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     with open(json_path, "w") as f:
-        json.dump({"metadata": metadata, "results": rows}, f, indent=2)
+        json.dump({"metadata": metadata, "results": rows, "negatives": neg_results}, f, indent=2)
 
     print(f"\nResults written to: {csv_path}, {json_path}")
 
@@ -382,6 +460,7 @@ def _print_summary(
     retrieval: List[dict],
     dino: Dict[str, dict],
     depth: Dict[str, dict],
+    neg_results: List[dict],
     final_loss: float,
     threshold: float,
     no_depth: bool,
@@ -392,6 +471,7 @@ def _print_summary(
     bl_sims = [r["baseline_similarity"] for r in retrieval]
     pe_sims = [r["personalized_similarity"] for r in retrieval]
     gaps = [r["similarity_gap"] for r in retrieval]
+    fnames = [r["image"] for r in retrieval]
 
     mean_bl = sum(bl_sims) / n if n else 0.0
     mean_pe = sum(pe_sims) / n if n else 0.0
@@ -402,18 +482,18 @@ def _print_summary(
     det_total = len(det_vals)
 
     depth_evaluated = [v for v in depth.values() if v["abs_error"] is not None]
-    mean_abs = (
-        sum(v["abs_error"] for v in depth_evaluated) / len(depth_evaluated)
-        if depth_evaluated else None
-    )
-    mean_pct = (
-        sum(v["pct_error"] for v in depth_evaluated) / len(depth_evaluated)
-        if depth_evaluated else None
-    )
+    mean_abs = (sum(v["abs_error"] for v in depth_evaluated) / len(depth_evaluated)
+                if depth_evaluated else None)
+    mean_pct = (sum(v["pct_error"] for v in depth_evaluated) / len(depth_evaluated)
+                if depth_evaluated else None)
 
     delta_pp = 100.0 * (pe_correct - bl_correct) / max(n, 1)
     sign = "+" if delta_pp >= 0 else ""
     gap_sign = "+" if mean_gap >= 0 else ""
+
+    n_neg = len(neg_results)
+    bl_fp = sum(r["baseline_fp"] for r in neg_results)
+    pe_fp = sum(r["personalized_fp"] for r in neg_results)
 
     print("\n=== Benchmark Summary ===")
     print(f"Similarity threshold: {threshold:.2f}  (production value)")
@@ -435,17 +515,47 @@ def _print_summary(
     if no_depth or not _CHECKPOINT.exists():
         print("                      skipped")
     elif not depth_evaluated:
-        print(
-            f"Evaluated on:         0 / {det_total} images  "
-            "(no detected images with ground truth distance)"
-        )
+        print(f"Evaluated on:         0 / {det_total} images")
     else:
-        print(
-            f"Evaluated on:         {len(depth_evaluated)} / {det_total} images  "
-            "(detected + have ground truth)"
-        )
+        print(f"Evaluated on:         {len(depth_evaluated)} / {det_total} images")
         print(f"Mean abs. error:      {mean_abs:.1f} ft")
         print(f"Mean % error:         {mean_pct:.1f}%")
+    print()
+    if n_neg > 0:
+        delta_fp = pe_fp - bl_fp
+        fp_sign = "+" if delta_fp > 0 else ""
+        print("--- False Positives (Negative Images) ---")
+        print(f"Baseline FP rate:     {bl_fp} / {n_neg}  ({100*bl_fp/n_neg:.1f}%)")
+        print(f"Personalized FP rate: {pe_fp} / {n_neg}  ({100*pe_fp/n_neg:.1f}%)")
+        print(f"Delta:                {fp_sign}{100*delta_fp/n_neg:.1f} pp")
+        if bl_fp or pe_fp:
+            for r in neg_results:
+                tags = []
+                if r["baseline_fp"]:
+                    tags.append(f"BL matched {r['baseline_match']} ({r['baseline_sim']:.3f})")
+                if r["personalized_fp"]:
+                    tags.append(f"PL matched {r['personalized_match']} ({r['personalized_sim']:.3f})")
+                if tags:
+                    print(f"  FP: {r['image']} — {', '.join(tags)}")
+        print()
+    # Latency summary
+    print("--- Latency ---")
+    phases = [
+        ("embed_image", [r["lat_embed_img"] for r in retrieval]),
+        ("ocr",         [r["lat_ocr"] for r in retrieval if r["lat_ocr"] > 0]),
+        ("embed_text",  [r["lat_embed_txt"] for r in retrieval if r["lat_embed_txt"] > 0]),
+        ("detect",      [v["lat_detect"] for v in dino.values() if v["lat_detect"] > 0]),
+        ("retrieve_bl", [r["lat_retrieve_bl"] for r in retrieval]),
+        ("retrieve_pl", [r["lat_retrieve_pe"] for r in retrieval]),
+        ("depth",       [v["lat_depth"] for v in depth.values() if v["lat_depth"] > 0]),
+    ]
+    for phase_name, vals in phases:
+        if not vals:
+            continue
+        mean, lo, hi, outliers = _latency_stats(
+            vals, fnames if len(vals) == len(fnames) else None)
+        outlier_str = f"  outliers: {', '.join(outliers[:3])}" if outliers else ""
+        print(f"  {phase_name:<14} mean {mean:.3f}s  [{lo:.3f}s – {hi:.3f}s]{outlier_str}")
 
 
 # ---- main ----
@@ -459,55 +569,63 @@ def main() -> None:
     print(f"Images:  {args.images}")
     print(f"Seed:    {args.seed}")
 
-    # Phase 1
-    print("\n[1/7] Loading dataset and embedding images...")
+    # Phase 1: Embed
+    print("\n[1/7] Loading and embedding images...")
     rows = _load_dataset(args.dataset)
     embedded = _embed_rows(rows, args.images, args.no_ocr)
     if not embedded:
-        print("No images embedded. Check --images path and dataset.csv.", file=sys.stderr)
+        print("No images found. Check --images path.", file=sys.stderr)
         sys.exit(1)
 
-    # Phase 2
-    print("\n[2/7] Splitting train/test (60/40 per label)...")
+    # Phase 2: Split
+    print("\n[2/7] Train/test split (60/40 per label)...")
     train_set, test_set = _split(embedded, args.seed)
     print(f"  train: {len(train_set)}, test: {len(test_set)}")
     if not test_set:
-        print(
-            "Not enough images for a test split "
-            "(need at least 2 images per label).",
-            file=sys.stderr,
-        )
+        print("Not enough images for a test split.", file=sys.stderr)
         sys.exit(1)
 
-    # Phase 3
+    # Phase 3: Database
     print("\n[3/7] Building reference database...")
     database = _build_database(train_set, embedded)
     print(f"  {len(database)} entries")
 
-    # Phase 4
+    # Phase 4: Train
     print(f"\n[4/7] Training projection head ({args.epochs} epochs)...")
     head_path = _BENCHMARKS_DIR / "projection_head_bench.pt"
     head, final_loss = _train_head(train_set, embedded, args.epochs, args.lr, head_path)
     print(f"  final loss: {final_loss:.4f}")
 
-    # Phase 5
+    # Phase 5: Retrieval
     print("\n[5/7] Evaluating retrieval...")
     retrieval_results = _eval_retrieval(test_set, embedded, database, head, threshold)
 
-    # Phase 6
+    # Phase 6: Detection
     print("\n[6/7] Evaluating GroundingDINO detection...")
     dino_results = _eval_detection(test_set, embedded)
 
-    # Phase 7
+    # Phase 7: Depth
     print("\n[7/7] Evaluating depth estimation...")
     depth_results = _eval_depth(
-        test_set, embedded, dino_results, args.focal_length, args.no_depth
-    )
+        test_set, embedded, dino_results, args.focal_length, args.no_depth)
 
-    # Phase 8
-    _print_summary(retrieval_results, dino_results, depth_results, final_loss, threshold, args.no_depth)
+    # Negative FP evaluation
+    neg_results: List[dict] = []
+    if args.negative_dataset.exists():
+        print("\n[neg] Evaluating false positive rate on negative images...")
+        neg_rows = _load_negative_dataset(args.negative_dataset)
+        neg_embedded = _embed_rows(neg_rows, args.images_neg, args.no_ocr)
+        if neg_embedded:
+            neg_results = _eval_negatives(neg_embedded, database, head, threshold)
+            print(f"  {len(neg_results)} negative images evaluated")
+    else:
+        print(f"\n[neg] negative_dataset.csv not found — skipping FP evaluation")
+
+    # Output
+    _print_summary(retrieval_results, dino_results, depth_results,
+                   neg_results, final_loss, threshold, args.no_depth)
     merged = _merge_rows(retrieval_results, dino_results, depth_results)
-    _write_output(merged, args, final_loss, threshold, train_set, len(test_set))
+    _write_output(merged, neg_results, args, final_loss, threshold, train_set)
 
 
 if __name__ == "__main__":
