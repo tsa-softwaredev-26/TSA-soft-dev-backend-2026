@@ -1,0 +1,16 @@
+# Negative test images — should return NO match from the benchmark database.
+# Files are in src/visual_memory/tests/input_images/ (preexisting, no new photos needed).
+# category: true_negative = not remotely in database; hard_negative = same class but different instance
+image,category,note
+10lb_dumbbell.heic,true_negative,dumbbell - not in database
+Airpods.heic,true_negative,airpods - not in database
+compressed_air.heic,true_negative,can of compressed air - not in database
+dog_treats.heic,true_negative,dog treat bag - not in database
+magnesium.heic,true_negative,supplement bottle with text - tests OCR path FP against receipts
+Rubik's_cube.heic,true_negative,rubiks cube - not in database
+tennis_ball.heic,true_negative,tennis ball - not in database
+Wallet.heic,hard_negative,different wallet not in database - tests instance discrimination
+Wallet2.heic,hard_negative,different wallet not in database - tests instance discrimination
+wallet_1ft_table.jpg,hard_negative,old wallet photo not in database - tests instance discrimination
+airpods_1ft_table.jpg,hard_negative,airpods at 1ft - different object class than all registered items
+mouse_1ft_table.jpg,hard_negative,mouse at 1ft - different object class than all registered items
