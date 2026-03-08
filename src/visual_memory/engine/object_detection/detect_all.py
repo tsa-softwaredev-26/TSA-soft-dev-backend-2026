@@ -50,9 +50,7 @@ class YoloeDetector:
                 f"Please ensure the model file is in the correct location."
             )
         
-        # ultralytics auto-selects device: CUDA (Linux GPU server) → MPS (macOS) → CPU.
-        # No explicit device arg needed — YOLOE() handles it internally.
-        # TODO (server migration): remove MPS branch in ultralytics by pinning device="cuda".
+        # ultralytics auto-selects device: CUDA > MPS > CPU. No explicit device arg needed.
         self.prompt_free_model = YOLOE(prompt_free_model_path)
         self.confidence_threshold = confidence_threshold
         self.intersection_threshold = intersection_threshold
@@ -96,3 +94,27 @@ class YoloeDetector:
         scores = results[0].boxes.conf.tolist()
 
         return boxes, scores
+
+    def detect_all_batch(
+        self,
+        images: List[Union[str, Image.Image]],
+    ) -> List[Tuple[Optional[List[List[float]]], Optional[List[float]]]]:
+        """
+        Run prompt-free detection on a batch of images in a single forward pass.
+
+        Returns List of (boxes, scores) tuples aligned with input images.
+        Preferred over calling detect_all() in a loop on CUDA - single model forward pass.
+        """
+        results = self.prompt_free_model.predict(
+            images,
+            verbose=False,
+            conf=self.confidence_threshold,
+            iou=self.intersection_threshold,
+        )
+        output = []
+        for r in results:
+            if len(r.boxes) == 0:
+                output.append((None, None))
+            else:
+                output.append((r.boxes.xyxy.tolist(), r.boxes.conf.tolist()))
+        return output

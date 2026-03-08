@@ -25,16 +25,11 @@ CONFIDENCE_HIGH = 0.6
 class DepthEstimator:
 
     def __init__(self):
-        # Auto-detect device — MPS (macOS GPU) first, then CUDA, then CPU.
+        # Auto-detect device: CUDA > MPS > CPU.
         # depth_pro.create_model_and_transforms defaults to CPU if not passed explicitly,
         # which causes 10-30x slowdown vs GPU. Always pass device explicitly.
-        # TODO (server migration): remove MPS branch; server uses CUDA only.
-        if torch.backends.mps.is_available():
-            self.device = torch.device("mps")
-        elif torch.cuda.is_available():
-            self.device = torch.device("cuda")
-        else:
-            self.device = torch.device("cpu")
+        from visual_memory.utils.device_utils import get_device
+        self.device = torch.device(get_device())
 
         config = dataclasses.replace(DEFAULT_MONODEPTH_CONFIG_DICT, checkpoint_uri=str(_CHECKPOINT_PATH))
         self.model, self.transform = depth_pro.create_model_and_transforms(config=config, device=self.device)
