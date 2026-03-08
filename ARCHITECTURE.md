@@ -563,6 +563,10 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - [ ] Replace folder-based `load_folder_images()` + re-embed in `ScanPipeline` with DB query
 - [ ] Add API layer (`api/` is empty) - POST /remember, POST /scan, POST /feedback endpoints
 - [ ] Implement Flask POST /feedback; call `FeedbackStore.record_positive/negative()` - contract in `feedback_store.py` docstring
+- [ ] Wire `batch_embed_text()` into pipeline OCR paths once PaddleOCR supports batch (currently CPU-sequential; no gain until backend changes)
+- [ ] Wire `detect_all_batch()` into ScanPipeline when processing multiple images per request
+- [ ] Wire `detect_batch()` into RememberPipeline if multi-prompt remember is added
+- [ ] Remove `engine/embedding/projection_head/` empty dir (leftover from earlier experiment)
 
 ### Next: Database (teammate: SQLite, one .db file per user)
 - [ ] Schema: `items(id INTEGER PK, label TEXT, combined_embedding BLOB NOT NULL, ocr_text TEXT, image_path TEXT, confidence REAL, timestamp REAL)`
