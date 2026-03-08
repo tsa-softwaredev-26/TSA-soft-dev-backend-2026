@@ -1,11 +1,12 @@
 """Text embedding module using CLIP text encoder."""
-from typing import Optional
+from typing import Optional, List
 import torch
 import torch.nn.functional as F
 from transformers import CLIPTextModelWithProjection, CLIPTokenizer
 
 from visual_memory.config import Settings
 from visual_memory.utils import get_logger
+from visual_memory.utils.device_utils import get_device
 
 _defaults = Settings()
 _log = get_logger(__name__)
@@ -17,8 +18,6 @@ class CLIPTextEmbedder:
 
     Loads only the text encoder + projection head, not the full CLIP vision model.
     Returns 512-dim L2-normalized embeddings in the CLIP shared text space.
-
-    TODO (server migration): add batch_embed_text(texts) for GPU throughput.
     """
 
     def __init__(
@@ -26,17 +25,7 @@ class CLIPTextEmbedder:
         model_name: str = _defaults.embedder_model,
         device: Optional[str] = None,
     ) -> None:
-        if device:
-            self.device = torch.device(device)
-        else:
-            if torch.backends.mps.is_available():
-                self.device = torch.device("mps")  # macOS GPU for backend dev
-                # TODO (server migration): remove MPS branch; server uses CUDA only.
-            elif torch.cuda.is_available():
-                self.device = torch.device("cuda")  # CUDA for later server deployment
-            else:
-                self.device = torch.device("cpu")
-
+        self.device = torch.device(device if device else get_device())
         self.tokenizer = CLIPTokenizer.from_pretrained(model_name)
         self.model = CLIPTextModelWithProjection.from_pretrained(model_name).to(self.device).eval()
 
@@ -95,3 +84,20 @@ class CLIPTextEmbedder:
             "embedding_shape": list(result.shape),
         })
         return result
+
+    def batch_embed_text(self, texts: List[str]) -> torch.Tensor:
+        """Embed a list of texts in a single forward pass.
+
+        Returns (N, 512) L2-normalized tensor. Texts exceeding 77 tokens
+        are truncated; use embed_text() for long documents with chunking.
+        Preferred over calling embed_text() in a loop on CUDA/MPS.
+        """
+        enc = self.tokenizer(
+            texts, return_tensors="pt", padding=True,
+            truncation=True, max_length=77,
+        )
+        input_ids = enc["input_ids"].to(self.device)
+        attn_mask = enc["attention_mask"].to(self.device)
+        with torch.inference_mode():
+            outputs = self.model(input_ids=input_ids, attention_mask=attn_mask)
+        return F.normalize(outputs.text_embeds, dim=-1).detach().cpu()

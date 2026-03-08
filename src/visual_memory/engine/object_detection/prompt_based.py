@@ -1,20 +1,19 @@
 """
 Grounding DINO object detection module.
 
-This module provides a class-based interface to the Grounding DINO zero-shot
-object detection model for detecting objects from images using natural language prompts.
+Provides a class-based interface to the Grounding DINO zero-shot object detection
+model for detecting objects from images using natural language prompts.
 
-Device selection auto-maps: CUDA (Linux GPU server) → MPS (macOS) → CPU (fallback).
-TODO (server migration): add batch processing — detect() should accept List[image] + List[prompt]
-    and process in a single forward pass for GPU throughput.
+Device selection: CUDA > MPS > CPU via get_device().
 """
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import torch
 from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
 from pathlib import Path
 from PIL import Image
 
 from visual_memory.config import Settings
+from visual_memory.utils.device_utils import get_device
 
 _defaults = Settings()
 
@@ -34,86 +33,92 @@ class GroundingDinoDetector:
         text_threshold: float = _defaults.text_threshold,
         device: Optional[str] = None
     ) -> None:
-        """
-        Initialize the Grounding DINO detector.
-        
-        Args:
-            model_id: Hugging Face model ID for Grounding DINO
-            box_threshold: Confidence threshold for bounding box detection
-            text_threshold: Text-to-image similarity threshold
-            device: torch device ("cuda", "mps", "cpu", or None for auto-detect)
-        """
         self.model_id = model_id
         self.box_threshold = box_threshold
         self.text_threshold = text_threshold
-        
-        # Auto-detect best available device: CUDA (Linux GPU server) → MPS (macOS) → CPU.
-        # TODO (server migration): remove MPS branch; server uses CUDA only.
-        if device is None:
-            if torch.cuda.is_available():
-                self.device = "cuda"
-            elif torch.backends.mps.is_available():
-                self.device = "mps"
-            else:
-                self.device = "cpu"
-        else:
-            self.device = device
-                    
-        # Load model and processor immediately
+        self.device = device if device else get_device()
+
         self.processor = AutoProcessor.from_pretrained(self.model_id)
         self.model = AutoModelForZeroShotObjectDetection.from_pretrained(
             self.model_id
         ).to(self.device)
-        self.model.eval() # Prevents training mode behavior
-    def detect(self, image, prompt):
+        self.model.eval()
+
+    def detect(self, image: Image.Image, prompt: str) -> Optional[Dict[str, Any]]:
         """
         Detect an object in an image using a text prompt.
-        
-        Args:
-            image: PIL Image object
-            prompt: Text description of object to detect (e.g., "camo wallet")            
-        Returns:
-            Dictionary containing:
-                - 'box': Bounding box coordinates [x1, y1, x2, y2]
-                - 'score': Confidence score (0-1)
-                - 'label': Detected label text
-            Returns None if no detection above threshold.
+
+        Returns dict with 'box', 'score', 'label', or None if no detection above threshold.
         """
-        # Prepare inputs - text_labels must be nested list for batch processing
         text_labels = [[prompt]]
         inputs = self.processor(
-            images=image, 
-            text=text_labels, 
+            images=image,
+            text=text_labels,
             return_tensors="pt"
         ).to(self.device)
-        
-        # Only inference (no training)
+
         with torch.no_grad():
             outputs = self.model(**inputs)
-        
-        # Post-process results to get bounding boxes
+
         results = self.processor.post_process_grounded_object_detection(
             outputs,
             inputs.input_ids,
             threshold=self.box_threshold,
             text_threshold=self.text_threshold,
-            target_sizes=[image.size[::-1]]  # (width, height) -> (height, width)
+            target_sizes=[image.size[::-1]]
         )
-        
+
         result = results[0]
-        
         if len(result["boxes"]) == 0:
             return None
-        
-        # Return the highest confidence detection
+
         best_idx = result["scores"].argmax()
-        
-        detection = {
-            'box': result["boxes"][best_idx].tolist(),
-            'score': result["scores"][best_idx].item(),
-            'label': result["labels"][best_idx]
+        return {
+            "box": result["boxes"][best_idx].tolist(),
+            "score": result["scores"][best_idx].item(),
+            "label": result["labels"][best_idx],
         }
-        
-        
-        
-        return detection
+
+    def detect_batch(
+        self,
+        images: List[Image.Image],
+        prompts: List[str],
+    ) -> List[Optional[Dict[str, Any]]]:
+        """
+        Detect objects in a batch of images in a single forward pass.
+
+        Returns List[Optional[dict]] aligned with the input lists.
+        Each dict has 'box', 'score', 'label'; None if no detection above threshold.
+        Preferred over calling detect() in a loop on CUDA - single model forward pass.
+        """
+        text_labels = [[p] for p in prompts]
+        target_sizes = [img.size[::-1] for img in images]
+        inputs = self.processor(
+            images=images,
+            text=text_labels,
+            return_tensors="pt",
+        ).to(self.device)
+
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+
+        results = self.processor.post_process_grounded_object_detection(
+            outputs,
+            inputs.input_ids,
+            threshold=self.box_threshold,
+            text_threshold=self.text_threshold,
+            target_sizes=target_sizes,
+        )
+
+        detections = []
+        for result in results:
+            if len(result["boxes"]) == 0:
+                detections.append(None)
+            else:
+                best_idx = result["scores"].argmax()
+                detections.append({
+                    "box": result["boxes"][best_idx].tolist(),
+                    "score": result["scores"][best_idx].item(),
+                    "label": result["labels"][best_idx],
+                })
+        return detections
