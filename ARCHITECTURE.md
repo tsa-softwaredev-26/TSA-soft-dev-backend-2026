@@ -160,25 +160,27 @@ src/visual_memory/
 
 ### `engine/object_detection/prompt_based.py` - `GroundingDinoDetector`
 - Model: `IDEA-Research/grounding-dino-base`
-- Input: PIL Image + text prompt
-- Output: `{'box': [x1,y1,x2,y2], 'score': float, 'label': str}` or `None`
+- `detect(image, prompt)` - returns `{'box', 'score', 'label'}` or None
+- `detect_batch(images, prompts)` - single forward pass; returns `List[Optional[dict]]`
 - Used in: Remember Mode
 
 ### `engine/object_detection/detect_all.py` - `YoloeDetector`
-- Model: `yoloe-26l-seg-pf.pt` (local, prompt-free)
-- Input: PIL Image
-- Output: `(List[[x1,y1,x2,y2]], List[float])` or `(None, None)`
+- Model: `yoloe-26l-seg-pf.pt` (local, prompt-free); device auto-selected by ultralytics
+- `detect_all(image)` - returns `(List[[x1,y1,x2,y2]], List[float])` or `(None, None)`
+- `detect_all_batch(images)` - single forward pass; returns `List[(boxes, scores)]`
 - Used in: Scan Mode
 
 ### `engine/embedding/embed_image.py` - `ImageEmbedder`
 - Model: `facebook/dinov3-vitl16-pretrain-lvd1689m` (gated, ~1GB, requires `transformers>=4.56.0`)
 - `embed(image: PIL.Image) -> torch.Tensor` shape `(1, 1024)` - L2-normalized from `pooler_output`
+- `batch_embed(images: List[PIL.Image]) -> torch.Tensor` shape `(N, 1024)` - single forward pass
 - Self-supervised vision model; object-centric features with less context bleed than CLIP
 - Used in: Both modes
 
 ### `engine/embedding/embed_text.py` - `CLIPTextEmbedder`
 - Model: `openai/clip-vit-base-patch32` text encoder only (`CLIPTextModelWithProjection`, ~180MB)
-- `embed_text(text: str) -> torch.Tensor` shape `(1, 512)` - L2-normalized
+- `embed_text(text: str) -> torch.Tensor` shape `(1, 512)` - L2-normalized; chunked for long documents
+- `batch_embed_text(texts: List[str]) -> torch.Tensor` shape `(N, 512)` - single forward pass; truncates at 77 tokens
 - Used in: Both modes (OCR text embedding)
 
 ### `engine/embedding/embed_combined.py` - `make_combined_embedding`
@@ -215,6 +217,9 @@ src/visual_memory/
 - `load_triplets() -> List[(anchor, positive, negative)]` - pairs each positive with each negative per label
 - `count() -> dict` - `{"positives": int, "negatives": int, "triplets": int}`
 - DB contract and Flask endpoint contract documented in module docstring
+
+### `utils/device_utils.py`
+- `get_device() -> str` - returns "cuda", "mps", or "cpu" in priority order; used by all engine modules
 
 ### `utils/image_utils.py`
 - `load_image(path)` - PIL Image (RGB, EXIF-corrected, HEIC-compatible)
@@ -573,6 +578,7 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - **Input Enhancement in Remember Mode** - Run user prompt through a lightweight LLM to expand vague descriptions before Grounding DINO. `"remember my airpods"` -> best detection wins from expanded candidates.
 - **Bloat Prevention** - Duplicate entry detection, pruning unused entries, user confirmation before overwriting similar embeddings.
 - **HNSW index** - Marginal benefit below ~10k entries; defer until scale requires it.
+- **Pipeline batching** - ScanPipeline can call `batch_embed()` and `detect_all_batch()` instead of per-crop loops for full GPU utilization on the server.
 
 ---
 
