@@ -36,7 +36,7 @@ Recognizes previously taught objects in the current scene.
 Example narration:
 > “Wallet 3 feet to your left. House keys 5 feet to your right. Tax returns 3 feet ahead.”
 
-- Objects are ordered spatially (left → right)
+- Objects are ordered spatially (left -> right)
 - Results returned as structured JSON
 
 ---
@@ -136,21 +136,27 @@ src/visual_memory/
 ## Module Reference
 
 ### `pipelines/remember_mode/pipeline.py` - `RememberPipeline`
-- `run(image_path, prompt) -> dict`
-- Returns `{"success": bool, "message": str, "result": {"label", "confidence", "box"} | None}`
-- `add_to_database(embedding, metadata)` — stub, does nothing (awaiting DB implementation)
+- `run(image_path: str | Path, prompt: str) -> dict`
+- Returns `{"success": bool, "message": str, "result": {"label": str, "confidence": float, "box": [x1,y1,x2,y2], "ocr_text": str, "ocr_confidence": float} | None}`
+- `add_to_database(embedding, metadata)` -stub, does nothing (awaiting DB implementation)
 
 ### `pipelines/scan_mode/pipeline.py` - `ScanPipeline`
-- `__init__(database_dir: Path, focal_length_px: float)` — loads models + embeds database on init
+- `__init__(database_dir: Path, focal_length_px: float)` -loads models + embeds database on init
 - `run(query_image: PIL.Image) -> dict`
 - Returns `{"matches": [...], "count": int}`
-- Each match: `{"label", "similarity", "distance_ft", "direction", "narration"}`
-- Database is re-embedded on each init (temporary — persistent DB is future work)
-- Loads `ProjectionHead` on init; applies it at match time only when weights file exists
+- Each match (depth enabled): `{"label": str, "similarity": float, "distance_ft": float, "direction": str, "narration": str, "ocr_text": str (optional)}`
+- Each match (depth disabled): `{"label": str, "similarity": float, "ocr_text": str (optional)}`
+- Database raw base embeddings stored; ProjectionHead applied on-the-fly at match time
+- `_head_trained=False` (no weights file) -> projection is a strict no-op, zero pipeline cost
 
 ### `config/settings.py` - `Settings`
 - Single dataclass, all ML tuning params in one place
-- Fields: `grounding_dino_model`, `box_threshold`, `text_threshold`, `yoloe_confidence`, `yoloe_iou`, `image_embedder_model`, `embedder_model`, `similarity_threshold`, `dedup_iou_threshold`, `narration_high_confidence`, `ocr_backend`, `text_similarity_threshold`, `enable_depth`, `enable_ocr`, `enable_dedup`, `projection_head_path`, `projection_head_dim`
+- Detection: `grounding_dino_model`, `box_threshold`, `text_threshold`, `yoloe_confidence`, `yoloe_iou`
+- Embedding: `image_embedder_model` (`dinov3-vits16`), `embedder_model` (`clip-vit-base-patch32`)
+- Matching: `similarity_threshold` (0.2), `dedup_iou_threshold` (0.5), `narration_high_confidence` (0.6)
+- OCR: `ocr_backend` ("paddle"), `ocr_languages`, `ocr_min_confidence` (0.3), `text_similarity_threshold` (0.4)
+- Toggles (env-overridable): `enable_depth` (`ENABLE_DEPTH`), `enable_ocr` (`ENABLE_OCR`), `enable_dedup` (`ENABLE_DEDUP`)
+- Personalization: `projection_head_path` ("models/projection_head.pt"), `projection_head_dim` (1536)
 
 ### `engine/object_detection/prompt_based.py` - `GroundingDinoDetector`
 - Model: `IDEA-Research/grounding-dino-base`
@@ -189,44 +195,44 @@ src/visual_memory/
 
 ### `learning/projection_head.py` - `ProjectionHead`
 - Single residual linear layer (`Linear(1536, 1536, bias=False)`) initialized to zeros
-- At init: `linear(x) = 0`, so `forward(x) = normalize(x + 0) = x` — identity transform
+- At init: `linear(x) = 0`, so `forward(x) = normalize(x + 0) = x` - identity transform
 - Safe to enable by default before any training; no-op until weights file exists
-- `load(path) -> bool` — loads weights if file exists, returns False if not
-- `save(path)` — saves state dict; creates parent dirs
-- `project(x)` — alias for `forward()`
+- `load(path) -> bool` - loads weights if file exists, returns False if not
+- `save(path)` - saves state dict; creates parent dirs
+- `project(x)` - alias for `forward()`
 
 ### `learning/trainer.py` - `ProjectionTrainer` + `triplet_loss`
-- `triplet_loss(anchor, positive, negative, margin=0.2)` — cosine distance, `relu(pos_dist - neg_dist + margin).mean()`
-- `ProjectionTrainer(head, lr=1e-4)` — Adam optimizer with `weight_decay=1e-4`
-- `train_step(anchor, positive, negative, weight=1.0) -> float` — single gradient step
-- `train(triplets, epochs=20) -> float` — applies linear recency bias (oldest=0.5, newest=1.0); returns avg final loss
+- `triplet_loss(anchor, positive, negative, margin=0.2)` - cosine distance, `relu(pos_dist - neg_dist + margin).mean()`
+- `ProjectionTrainer(head, lr=1e-4)` - Adam optimizer with `weight_decay=1e-4`
+- `train_step(anchor, positive, negative, weight=1.0) -> float` - single gradient step
+- `train(triplets, epochs=20) -> float` - applies linear recency bias (oldest=0.5, newest=1.0); returns avg final loss
 - CLI: `python -m visual_memory.learning.trainer [--feedback-dir feedback/] [--output models/projection_head.pt] [--epochs 20] [--lr 1e-4]`
 
 ### `learning/feedback_store.py` - `FeedbackStore`
-- `FeedbackStore(store_dir=Path("feedback"))` — creates dir on init
-- `record_positive(anchor_emb, query_emb, label)` — saves `.pt` file (type="positive")
-- `record_negative(anchor_emb, query_emb, label)` — saves `.pt` file (type="negative")
-- `load_triplets() -> List[(anchor, positive, negative)]` — pairs each positive with each negative per label
-- `count() -> dict` — `{"positives": int, "negatives": int, "triplets": int}`
+- `FeedbackStore(store_dir=Path("feedback"))` - creates dir on init
+- `record_positive(anchor_emb, query_emb, label)` - saves `.pt` file (type="positive")
+- `record_negative(anchor_emb, query_emb, label)` - saves `.pt` file (type="negative")
+- `load_triplets() -> List[(anchor, positive, negative)]` - pairs each positive with each negative per label
+- `count() -> dict` - `{"positives": int, "negatives": int, "triplets": int}`
 - DB contract and Flask endpoint contract documented in module docstring
 
 ### `utils/image_utils.py`
-- `load_image(path)` — PIL Image (RGB, EXIF-corrected, HEIC-compatible)
-- `load_folder_images(folder)` — `List[(path, PIL Image)]`
-- `crop_object(image, box)` — cropped PIL Image
+- `load_image(path)` - PIL Image (RGB, EXIF-corrected, HEIC-compatible)
+- `load_folder_images(folder)` - `List[(path, PIL Image)]`
+- `crop_object(image, box)` - cropped PIL Image
 
 ### `utils/similarity_utils.py`
-- `cosine_similarity(t1, t2)` — scalar tensor
-- `find_match(query, database, threshold)` — `(path, score)` or `(None, 0.0)`
-- `deduplicate_matches(matches, iou_threshold)` — filtered list
+- `cosine_similarity(t1, t2)` - scalar tensor
+- `find_match(query, database, threshold)` - `(path, score)` or `(None, 0.0)`
+- `deduplicate_matches(matches, iou_threshold)` - filtered list
 
 ### `engine/depth/estimator.py` - `DepthEstimator`
 - Model: Apple Depth Pro
-- `__init__(focal_length_px=None)` — loads model once
-- `estimate(image: PIL.Image) -> torch.Tensor` — depth map in meters
-- `get_depth_at_bbox(depth_map, bbox) -> float` — mean depth in feet, inner 50% of bbox
-- `get_direction(bbox, img_w) -> str` — 5-zone direction string
-- `build_narration(label, direction, distance_ft, similarity) -> str | None` — final output
+- `__init__(focal_length_px=None)` -loads model once
+- `estimate(image: PIL.Image) -> torch.Tensor` -depth map in meters
+- `get_depth_at_bbox(depth_map, bbox) -> float` -mean depth in feet, inner 50% of bbox
+- `get_direction(bbox, img_w) -> str` -5-zone direction string
+- `build_narration(label, direction, distance_ft, similarity) -> str | None` -final output
 
 ---
 
@@ -235,35 +241,35 @@ src/visual_memory/
 ### Remember Mode
 ```
 image_path + text prompt
-    → load_image()
-    → GroundingDinoDetector.detect(image, prompt)
-    → crop_object(image, box)
-    → TextRecognizer.recognize(crop)        → OCR text
-    → ImageEmbedder.embed(crop)              → image embedding (1024-dim)
-    → CLIPTextEmbedder.embed_text(ocr_text)  → text embedding (512-dim)
-    → make_combined_embedding()              → combined (1536-dim)
-    → add_to_database()                    ← stub, awaiting DB integration
-    → return {"success": bool, "result": {...}}
+    -> load_image()
+    -> GroundingDinoDetector.detect(image, prompt)
+    -> crop_object(image, box)
+    -> TextRecognizer.recognize(crop)        -> OCR text
+    -> ImageEmbedder.embed(crop)              -> image embedding (1024-dim)
+    -> CLIPTextEmbedder.embed_text(ocr_text)  -> text embedding (512-dim)
+    -> make_combined_embedding()              -> combined (1536-dim)
+    -> add_to_database()                    <- stub, awaiting DB integration
+    -> return {"success": bool, "result": {...}}
 ```
 
 ### Scan Mode
 ```
 init:
-    database_dir → load_folder_images() → embed each → database_embeddings[]
-    ProjectionHead.load("models/projection_head.pt") → _head_trained (True/False)
+    database_dir -> load_folder_images() -> embed each -> database_embeddings[]
+    ProjectionHead.load("models/projection_head.pt") -> _head_trained (True/False)
 
 run(query_image):
-    → YoloeDetector.detect_all()
-    → PASS 1: for each box → crop → embed (combined 1536-dim)
-        → if _head_trained: project query + all DB embeddings via ProjectionHead
-        → find_match() → collect matches
-    → deduplicate_matches()
-    → PASS 2: DepthEstimator.estimate(image) → depth_map  (once, only if matches found)
-    → for each match:
-        → get_depth_at_bbox() → distance_ft
-        → get_direction()     → direction
-        → build_narration()   → narration string
-    → return {"matches": [...], "count": int}
+    -> YoloeDetector.detect_all()
+    -> PASS 1: for each box -> crop -> embed (combined 1536-dim)
+        -> if _head_trained: project query + all DB embeddings via ProjectionHead
+        -> find_match() -> collect matches
+    -> deduplicate_matches()
+    -> PASS 2: DepthEstimator.estimate(image) -> depth_map  (once, only if matches found)
+    -> for each match:
+        -> get_depth_at_bbox() -> distance_ft
+        -> get_direction()     -> direction
+        -> build_narration()   -> narration string
+    -> return {"matches": [...], "count": int}
 ```
 
 ---
@@ -272,27 +278,27 @@ run(query_image):
 
 ### Model: Apple Depth Pro
 - Metric depth (absolute meters)
-- `f_px=None` → model infers (~75% error at close range)
-- `f_px=tensor` → calibrated (~26% error) — always use when available
-- Checkpoint: `checkpoints/depth_pro.pt` — absolute path resolved via `Path(__file__)` in estimator.py
+- `f_px=None` -> model infers (~75% error at close range)
+- `f_px=tensor` -> calibrated (~26% error) -always use when available
+- Checkpoint: `checkpoints/depth_pro.pt` -absolute path resolved via `Path(__file__)` in estimator.py
 
 ### Focal Length
 ```
 f_px = (focalLengthMm / sensorWidthMm) * imageWidthPx
 ```
-Pass from Android camera API. iPhone 15 Plus reference: `f_mm=6.24`, `sensor_width=8.64mm` → `f_px=3094.0`
+Pass from Android camera API. iPhone 15 Plus reference: `f_mm=6.24`, `sensor_width=8.64mm` -> `f_px=3094.0`
 
 ### Test Results (18 images, iPhone 15 Plus)
-- Average error: 27.8% — acceptable for navigation
+- Average error: 27.8% -acceptable for navigation
 
 ---
 
 ## Narration Output
 
 ```
-High confidence (similarity ≥ 0.6):             "Wallet ahead, 2 feet away."
-Below high confidence (similarity_threshold–0.6): "May be a wallet slightly right, focus to verify."
-Below similarity_threshold (default 0.2):         → not announced (no match returned)
+High confidence (similarity >= 0.6):              "Wallet ahead, 2 feet away."
+Below high confidence (similarity_threshold-0.6): "May be a wallet slightly right, focus to verify."
+Below similarity_threshold (default 0.2):         no match returned
 ```
 
 ### Direction Logic (5-zone)
@@ -329,13 +335,13 @@ Labels are per-instance (wallet_a vs wallet_b) to test instance-level discrimina
 
 ### Phases
 
-1. **Embed** — DINOv3 image embedding + optional PaddleOCR text embedding for each image.
-2. **Split** — 60/40 train/test per label (seeded RNG).
-3. **Database** — Individual train embeddings, identical format to production ScanPipeline.
-4. **Train** — ProjectionTrainer generates triplets from train set; trains ProjectionHead.
-5. **Retrieval** — `find_match()` with production threshold on baseline and personalized embeddings.
-6. **Detection** — GroundingDinoDetector on each test image with the object's dino_prompt.
-7. **Depth** — DepthEstimator on images where GDINO detected the object and gt_distance > 0.
+1. **Embed** - DINOv3 image embedding + optional PaddleOCR text embedding for each image.
+2. **Split** - 60/40 train/test per label (seeded RNG).
+3. **Database** - Individual train embeddings, identical format to production ScanPipeline.
+4. **Train** - ProjectionTrainer generates triplets from train set; trains ProjectionHead.
+5. **Retrieval** - `find_match()` with production threshold on baseline and personalized embeddings.
+6. **Detection** - GroundingDinoDetector on each test image with the object's dino_prompt.
+7. **Depth** - DepthEstimator on images where GDINO detected the object and gt_distance > 0.
 
 ### Scripts
 
@@ -409,32 +415,71 @@ python -m visual_memory.learning.trainer --epochs 50 --lr 5e-5
 
 ---
 
-## API Plan
+## API Contracts
 
-Both pipelines return plain Python dicts — JSON-serializable, no torch tensors in output.
+All pipeline outputs are plain Python dicts - JSON-serializable, no torch tensors.
+Flask teammate implements the HTTP layer; these are the exact shapes to wrap.
 
 ### POST /remember
-**Input:** `image` (file), `prompt` (string), optional: `focal_length_px` (float)
-**Response:**
+**Input:** multipart form - `image` (file), `prompt` (string)
+**Response (detection succeeded):**
 ```json
 {
   "success": true,
   "message": "Object detected and embedded successfully.",
-  "result": { "label": "wallet", "confidence": 0.87, "box": [120, 200, 340, 410] }
+  "result": {
+    "label": "wallet",
+    "confidence": 0.87,
+    "box": [120, 200, 340, 410],
+    "ocr_text": "RFID Blocking",
+    "ocr_confidence": 0.91
+  }
 }
+```
+**Response (no detection):**
+```json
+{ "success": false, "message": "No object detected.", "result": null }
 ```
 
 ### POST /scan
-**Input:** `image` (file), `focal_length_px` (float, required), optional: `database_dir` (str)
-**Response:**
+**Input:** multipart form - `image` (file), `focal_length_px` (float, required for depth)
+**Response (depth enabled):**
 ```json
 {
   "matches": [
-    { "label": "wallet", "similarity": 0.72, "distance_ft": 2.3, "direction": "ahead",
-      "narration": "Wallet ahead, 2 feet away." }
+    {
+      "label": "wallet",
+      "similarity": 0.72,
+      "distance_ft": 2.3,
+      "direction": "ahead",
+      "narration": "Wallet ahead, 2 feet away.",
+      "ocr_text": "RFID Blocking"
+    }
   ],
   "count": 1
 }
+```
+**Response (depth disabled, `ENABLE_DEPTH=0`):**
+```json
+{
+  "matches": [
+    { "label": "wallet", "similarity": 0.72, "ocr_text": "RFID Blocking" }
+  ],
+  "count": 1
+}
+```
+`ocr_text` present only when OCR extracted text from the matched crop. `narration` omitted when depth is disabled.
+
+### POST /feedback
+**Contract only - not yet implemented. See `feedback_store.py` docstring.**
+**Input:** JSON body - `scan_id` (string), `label` (string), `feedback` ("correct" | "wrong")
+**Response:**
+```json
+{ "recorded": true, "label": "wallet", "feedback": "correct" }
+```
+Flask handler calls `FeedbackStore.record_positive(anchor, query, label)` or `record_negative(...)`.
+`scan_id` maps to embeddings cached by `ScanPipeline` during the preceding scan call.
+Train after collecting enough feedback: `python -m visual_memory.learning.trainer`
 ```
 
 ---
@@ -492,58 +537,53 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 ## Current State
 
 - Core engine complete and tested (depth, detection, embedding, OCR)
-- Both pipelines produce structured JSON dicts including combined image+text embeddings
+- Both pipelines produce structured JSON dicts; combined 1536-dim embeddings (DINOv3 + CLIP text)
 - `run_tests.py` passes (March 2026): remember:detect, scan:match, text_recognition x2 (DEPTH=0 skips estimator)
-- `api/` directory empty, awaiting implementation
-- Database is flat folder of images, re-embedded on each `ScanPipeline` init - temporary
-- OCR backend: PaddleOCR-VL-1.5 (`settings.ocr_backend = "paddle"`)
-- Image embedder: DINOv3 ViT-L/16 (`settings.image_embedder_model`, 1024-dim, gated on HuggingFace)
-- Text embedder: CLIP text encoder (`settings.embedder_model`, 512-dim)
-- Projection head wired into ScanPipeline — identity at init, no-op until `models/projection_head.pt` exists
+- `learning/` module complete: ProjectionHead, ProjectionTrainer, FeedbackStore - all tested CPU-only
+- `test_projection_head.py` passes: identity-at-init, triplet loss, store roundtrip, training convergence
+- ProjectionHead wired into ScanPipeline - no-op until `models/projection_head.pt` exists; raw embeddings always stored
+- `api/` directory empty, awaiting Flask implementation
+- Database is flat folder of images, re-embedded on each `ScanPipeline` init - temporary, pending DB teammate
+- OCR backend: PaddleOCR-VL-1.5 (`ocr_backend = "paddle"`)
+- Image embedder: DINOv3 ViT-S/16 (`facebook/dinov3-vits16-pretrain-lvd1689m`, gated on HuggingFace)
+- Text embedder: CLIP text encoder only (`openai/clip-vit-base-patch32`, 512-dim, ~180MB)
 
 ---
 
 ## TODO
 
 ### Engine / Architecture
-- [x] Tune embedder - settled on DINOv3 (image, 1024-dim) + CLIP text encoder (OCR, 512-dim); combined 1536-dim. Tried CLIP alone for images (March 2026), reverted due to inter-class context bleed (intra/inter ratio 0.961).
-- [x] Fix DepthEstimator device - was defaulting to CPU (depth_pro default); now auto-detects MPS/CUDA/CPU and passes device explicitly to `create_model_and_transforms`
-- [x] Run `benchmark_embedder.py` and record similarity data — done (March 2026); DINOv3 pipeline scan match: 0.315, 0.306, 0.238; `similarity_threshold=0.2` kept
-- [x] Add text chunking for documents longer than 77 CLIP tokens — done (March 2026); non-overlapping 75-token chunks, mean-pool raw projections, L2-normalize once.
-- [x] ProjectionHead wired into ScanPipeline — identity at init, no-op until weights exist; residual design is zero-cost before training
-- [x] Full system benchmark — `full_benchmark.py` evaluates retrieval (baseline vs personalized), GroundingDINO detection, and Depth Pro accuracy across 120 images; outputs results.csv + results.json; `format_results.py` generates BENCHMARKS.md
-- [ ] Run full benchmark — 120 images not yet captured; see `benchmarks/CAPTURE_GUIDE.md` (4-block shooting session, ~1-2 hrs)
-- [ ] Ensure all pipelines use ModelRegistry in `engine/`
-- [ ] Implement `RememberPipeline.add_to_database()` — store combined embedding + metadata in SQLite
+- [ ] Run full benchmark - 120 images not yet captured; see `benchmarks/CAPTURE_GUIDE.md` (~1-2 hrs)
+- [ ] Implement `RememberPipeline.add_to_database()` - store combined embedding + metadata in SQLite
 - [ ] Replace folder-based `load_folder_images()` + re-embed in `ScanPipeline` with DB query
-- [ ] Add API layer (`api/` is empty) — POST /remember and POST /scan endpoints
-- [ ] Collect feedback via Flask POST /feedback; call `FeedbackStore.record_positive/negative()` — contract in `feedback_store.py` docstring
-- [ ] Train projection head on user feedback from frontend: `python -m visual_memory.learning.trainer`
+- [ ] Add API layer (`api/` is empty) - POST /remember, POST /scan, POST /feedback endpoints
+- [ ] Implement Flask POST /feedback; call `FeedbackStore.record_positive/negative()` - contract in `feedback_store.py` docstring
 
-### Next: Database
-- [ ] Schema: `(id, label, combined_embedding BLOB, ocr_text TEXT, image_path TEXT, timestamp)`
-- [ ] `add_to_database(combined, metadata)` → INSERT
-- [ ] `ScanPipeline._embed_database()` → `SELECT id, label, combined_embedding FROM items`
+### Next: Database (teammate: SQLite, one .db file per user)
+- [ ] Schema: `items(id INTEGER PK, label TEXT, combined_embedding BLOB NOT NULL, ocr_text TEXT, image_path TEXT, confidence REAL, timestamp REAL)`
+- [ ] Schema: `user_state(projection_head BLOB)` - serialized ProjectionHead weights, one row per user db
+- [ ] `add_to_database(combined, metadata)` - INSERT into items; metadata keys: label, image_path, ocr_text, confidence, timestamp
+- [ ] `ScanPipeline._embed_database()` - SELECT id, label, combined_embedding FROM items; replaces folder scan
+- [ ] `ScanPipeline.__init__` - load projection_head BLOB from user_state on init if present
 
 ---
 
 ## Future Plans
 
-- **Input Enhancement in Remember Mode** — Run user prompt through a lightweight LLM to expand vague descriptions before Grounding DINO. `"remember my airpods"` → `["white round earbuds", "white round earbud case", ...]` → best detection wins.
-- **GPU Server Migration** — `device='cuda'` across all models, batch processing.
-- **Bloat Prevention** — Duplicate entry detection, pruning unused entries, user confirmation before overwriting similar embeddings.
-- **HNSW index** — Marginal benefit below ~10k entries; defer until scale requires it.
+- **Input Enhancement in Remember Mode** - Run user prompt through a lightweight LLM to expand vague descriptions before Grounding DINO. `"remember my airpods"` -> best detection wins from expanded candidates.
+- **Bloat Prevention** - Duplicate entry detection, pruning unused entries, user confirmation before overwriting similar embeddings.
+- **HNSW index** - Marginal benefit below ~10k entries; defer until scale requires it.
 
 ---
 
 ## Design Decisions
 
-- **Embedder: DINOv3 for images, CLIP text encoder for OCR (March 2026)** — Started with DINOv3 (1024-dim) + sentence-transformers (384-dim). Tried switching to CLIP ViT-B/32 alone (512-dim shared image+text space) to simplify the stack and unify embedding spaces. Reverted image embeddings back to DINOv3 after benchmarking: CLIP image intra/inter-class ratio 0.961 (intra=0.769, inter=0.800) on full-scene images - objects on the same table appeared more similar cross-class than the same object at different distances. DINOv3 is self-supervised and object-centric, producing better visual discrimination for the scan use case. CLIP text encoder kept for OCR matching - lightweight text-only projection (~180MB), good semantic alignment for product labels. sentence-transformers removed entirely. Combined vector: 1536-dim (DINOv3 1024 + CLIP text 512). DINOv3 is gated on HuggingFace - requires access request.
-- **YOLOE prompt-free for scan** — Broad detection; similarity threshold handles bloat.
-- **Grounding DINO for remember** — Handles vague natural language; much stronger than prompted YOLOE for this use case.
-- **Depth Pro** — Only monocular model with metric (absolute) depth; no scale factor needed.
-- **Actionability over accuracy** — "May be a wallet two feet to your right, focus to verify" is actionable. A raw confidence percentage is not.
-- **PaddleOCR over EasyOCR** — Switched from EasyOCR to PaddleOCR-VL-1.5 (Feb 2026). EasyOCR averaged 9.7% word-overlap on the `text_demo/` test set at 200-435s/image. PaddleOCR-VL-1.5 runs in 3-18s/image (~15x faster) and correctly extracts layout-aware text from `parsing_res_list[].block_content` in its JSON output. Text extraction was initially broken due to the engine searching wrong JSON paths; fixed by targeting the correct field.
-- **Combined embedding over hybrid matching** — `max(image_sim, text_sim)` could false-match two white documents with different text (image similarity alone passes threshold). The combined embedding `normalize(img) ‖ normalize(text)` means cosine similarity ≈ average of both sub-similarities, so both image AND text must match. Non-document objects get a zero text slot; image similarity dominates unchanged.
-- **Single venv** — All dependencies including PaddleOCR live in one `pip install -e .` install.
-- **Projection head: identity-at-init residual design** — A single `Linear(1536, 1536, bias=False)` initialized to zeros. At init `output = normalize(x + 0) = x`, so the head is a strict no-op before any training. This means it is safe to wire in by default with zero runtime cost. After triplet training, the head learns a small residual correction that pulls user-confirmed matches closer and pushes mismatches apart. Raw base embeddings are stored; projection is applied on-the-fly at match time, so retraining the head only requires reloading weights (restart Flask server) — no re-embedding the database.
+- **Embedder: DINOv3 for images, CLIP text encoder for OCR (March 2026)** - Started with DINOv3 (1024-dim) + sentence-transformers (384-dim). Tried switching to CLIP ViT-B/32 alone (512-dim shared image+text space) to simplify the stack and unify embedding spaces. Reverted image embeddings back to DINOv3 after benchmarking: CLIP image intra/inter-class ratio 0.961 (intra=0.769, inter=0.800) on full-scene images - objects on the same table appeared more similar cross-class than the same object at different distances. DINOv3 is self-supervised and object-centric, producing better visual discrimination for the scan use case. CLIP text encoder kept for OCR matching - lightweight text-only projection (~180MB), good semantic alignment for product labels. sentence-transformers removed entirely. Combined vector: 1536-dim (DINOv3 1024 + CLIP text 512). DINOv3 is gated on HuggingFace - requires access request.
+- **YOLOE prompt-free for scan** - Broad detection; similarity threshold handles bloat.
+- **Grounding DINO for remember** - Handles vague natural language; much stronger than prompted YOLOE for this use case.
+- **Depth Pro** - Only monocular model with metric (absolute) depth; no scale factor needed.
+- **Actionability over accuracy** - "May be a wallet two feet to your right, focus to verify" is actionable. A raw confidence percentage is not.
+- **PaddleOCR over EasyOCR** - Switched from EasyOCR to PaddleOCR-VL-1.5 (Feb 2026). EasyOCR averaged 9.7% word-overlap on the `text_demo/` test set at 200-435s/image. PaddleOCR-VL-1.5 runs in 3-18s/image (~15x faster) and correctly extracts layout-aware text from `parsing_res_list[].block_content` in its JSON output. Text extraction was initially broken due to the engine searching wrong JSON paths; fixed by targeting the correct field.
+- **Combined embedding over hybrid matching** - `max(image_sim, text_sim)` could false-match two white documents with different text (image similarity alone passes threshold). The combined embedding `normalize(img) || normalize(text)` means cosine similarity is approximately the average of both sub-similarities, so both image AND text must match. Non-document objects get a zero text slot; image similarity dominates unchanged.
+- **Single venv** - All dependencies including PaddleOCR live in one `pip install -e .` install.
+- **Projection head: identity-at-init residual design** - A single `Linear(1536, 1536, bias=False)` initialized to zeros. At init `output = normalize(x + 0) = x`, so the head is a strict no-op before any training. Safe to wire in by default with zero runtime cost. After triplet training, the head learns a small residual correction that pulls user-confirmed matches closer and pushes mismatches apart. Raw base embeddings are stored; projection applied on-the-fly at match time, so retraining only requires reloading weights - no re-embedding the database.
