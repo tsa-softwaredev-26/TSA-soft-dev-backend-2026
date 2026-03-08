@@ -28,9 +28,16 @@ class ScanPipeline:
 
     def _embed_database(self):
         """Embed each database image as a combined (image+text) embedding."""
+        if not self.database_images:
+            return []
+
+        # batch: one model forward pass for all DB images (was: embed() per image in a loop)
+        paths, imgs = zip(*self.database_images)
+        img_embs = self.img_embedder.batch_embed(list(imgs))  # (N, 1024) — one forward pass
+
         embeddings = []
-        for file_path, img in self.database_images:
-            img_emb = self.img_embedder.embed(img)
+        for i, (file_path, img) in enumerate(self.database_images):
+            img_emb = img_embs[i:i+1]  # (1, 1024) — same shape as embed() output
             text_emb = None
             if self.text_recognizer is not None:
                 ocr_result = self.text_recognizer.recognize(img)
@@ -51,16 +58,18 @@ class ScanPipeline:
             return {"matches": [], "count": 0}
 
         # ---- PASS 1: combined similarity matching ----
+        # batch: crop all first, embed in one forward pass (was: embed() inside per-box loop)
+        crops = [crop_object(query_image, box) for box in boxes]
+        img_embs = self.img_embedder.batch_embed(crops)  # (N, 1024) — one forward pass
+
         matches = []
 
-        for box, score in zip(boxes, scores):
-            cropped = crop_object(query_image, box)
-
-            img_emb = self.img_embedder.embed(cropped)
+        for i, (box, score) in enumerate(zip(boxes, scores)):
+            img_emb = img_embs[i:i+1]  # (1, 1024)
             ocr_text = ""
             text_emb = None
             if self.text_recognizer is not None:
-                ocr_result = self.text_recognizer.recognize(cropped)
+                ocr_result = self.text_recognizer.recognize(crops[i])
                 ocr_text = ocr_result["text"]
                 text_emb = self.text_embedder.embed_text(ocr_text) if ocr_text else None
             combined = make_combined_embedding(img_emb, text_emb)
