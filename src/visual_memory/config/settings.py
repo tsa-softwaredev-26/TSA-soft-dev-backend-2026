@@ -6,11 +6,11 @@ import os
 class Settings:
     # GroundingDINO (remember mode)
     grounding_dino_model: str = "IDEA-Research/grounding-dino-base"
-    box_threshold: float = 0.5
-    text_threshold: float = 0.3
+    box_threshold: float = 0.3
+    text_threshold: float = 0.25
 
     # YOLOE (scan mode)
-    yoloe_confidence: float = 0.5
+    yoloe_confidence: float = 0.35
     yoloe_iou: float = 0.45
 
     # Image embedder (both modes) - DINOv3 vision-only, better object discrimination
@@ -20,7 +20,7 @@ class Settings:
     embedder_model: str = "openai/clip-vit-base-patch32"
 
     # Similarity matching (scan mode)
-    similarity_threshold: float = 0.2
+    similarity_threshold: float = 0.3
     dedup_iou_threshold: float = 0.5
 
     # Narration (scan mode)
@@ -42,3 +42,6 @@ class Settings:
     # Projection head (personalization)
     projection_head_path: str = "models/projection_head.pt"
     projection_head_dim: int = 1536
+
+    # Database
+    db_path: str = "data/memory.db"
