@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from pathlib import Path
 from visual_memory.config import Settings
 from visual_memory.engine.embedding import make_combined_embedding
@@ -8,6 +9,8 @@ from visual_memory.database import DatabaseStore
 
 _settings = Settings()
 _log = get_logger(__name__)
+
+_SCAN_CACHE_MAX = 50
 
 
 class ScanPipeline:
@@ -28,11 +31,29 @@ class ScanPipeline:
         items = self.db.get_all_items()
         self.database_embeddings = [(item["label"], item["combined_embedding"]) for item in items]
 
-    def run(self, query_image):
+        # scan_id -> {label -> (anchor_emb, query_emb)} — capped at _SCAN_CACHE_MAX entries
+        self._emb_cache: OrderedDict = OrderedDict()
+
+    def reload_database(self):
+        """Refresh in-memory database embeddings from the DB store."""
+        items = self.db.get_all_items()
+        self.database_embeddings = [(item["label"], item["combined_embedding"]) for item in items]
+
+    def get_cached_embeddings(self, scan_id: str, label: str):
+        """Return (anchor_emb, query_emb) for a previous scan result, or None."""
+        entry = self._emb_cache.get(scan_id)
+        if entry is None:
+            return None
+        return entry.get(label)
+
+    def run(self, query_image, scan_id: str | None = None, focal_length_px: float | None = None):
         """
         query_image: PIL Image
+        scan_id: optional UUID string; if provided, caches embeddings for /feedback
+        focal_length_px: overrides self.focal_length_px for this call only
         returns structured JSON dict
         """
+        _focal = focal_length_px if focal_length_px is not None else self.focal_length_px
 
         boxes, scores = self.detector.detect_all(query_image)
 
@@ -70,15 +91,26 @@ class ScanPipeline:
             )
 
             if match_path:
+                matched_label = Path(match_path).stem
                 _log.info({
                     "event": "scan_text_match",
-                    "label": Path(match_path).stem,
+                    "label": matched_label,
                     "similarity": round(similarity, 4),
                     "ocr_text_length": len(ocr_text),
                 })
+                if scan_id is not None:
+                    anchor_emb = next(
+                        (e for p, e in projected_db if p == match_path), None
+                    )
+                    if anchor_emb is not None:
+                        if scan_id not in self._emb_cache:
+                            if len(self._emb_cache) >= _SCAN_CACHE_MAX:
+                                self._emb_cache.popitem(last=False)
+                            self._emb_cache[scan_id] = {}
+                        self._emb_cache[scan_id][matched_label] = (anchor_emb, projected_query)
                 entry = {
                     "box": box,
-                    "label": Path(match_path).stem,
+                    "label": matched_label,
                     "similarity": similarity,
                 }
                 if ocr_text:
@@ -109,7 +141,7 @@ class ScanPipeline:
                 output_matches.append(out)
             return {"matches": output_matches, "count": len(output_matches)}
 
-        depth_map = self.estimator.estimate(query_image, focal_length_px=self.focal_length_px)
+        depth_map = self.estimator.estimate(query_image, focal_length_px=_focal)
 
         output_matches = []
 
