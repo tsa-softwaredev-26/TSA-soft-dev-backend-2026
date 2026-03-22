@@ -1,4 +1,5 @@
 from __future__ import annotations
+import time
 from pathlib import Path
 import pillow_heif
 
@@ -6,6 +7,7 @@ from visual_memory.config import Settings
 from visual_memory.utils import load_image, crop_object, get_logger
 from visual_memory.engine.embedding import make_combined_embedding
 from visual_memory.engine.model_registry import registry
+from visual_memory.database import DatabaseStore
 
 pillow_heif.register_heif_opener()
 
@@ -20,19 +22,17 @@ class RememberPipeline:
         self.text_embedder   = registry.text_embedder   if _settings.enable_ocr else None
         self.text_recognizer = registry.text_recognizer if _settings.enable_ocr else None
 
-        # TODO: replace with real database later
-        self.database = None
+        self.db = DatabaseStore(Path(_settings.db_path))
 
     def add_to_database(self, embedding, metadata):
-        """
-        Placeholder for future database integration.
-        For now this does nothing.
-        """
-        # Later this could:
-        # - insert into SQLite
-        # - save to vector DB
-        # - write to file system
-        pass
+        self.db.add_item(
+            label=metadata["label"],
+            combined_embedding=embedding,
+            ocr_text=metadata.get("ocr_text", ""),
+            image_path=metadata.get("image_path", ""),
+            confidence=metadata.get("confidence", 0.0),
+            timestamp=time.time(),
+        )
 
     def run(self, image_path: str | Path, prompt: str):
         """
