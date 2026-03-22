@@ -3,14 +3,15 @@ from visual_memory.config import Settings
 from visual_memory.engine.embedding import make_combined_embedding
 from visual_memory.engine.model_registry import registry
 from visual_memory.learning import ProjectionHead
-from visual_memory.utils import crop_object, find_match, load_folder_images, deduplicate_matches, get_logger
+from visual_memory.utils import crop_object, find_match, deduplicate_matches, get_logger
+from visual_memory.database import DatabaseStore
 
 _settings = Settings()
 _log = get_logger(__name__)
 
 
 class ScanPipeline:
-    def __init__(self, database_dir: Path, focal_length_px: float):
+    def __init__(self, focal_length_px: float, db_path: str | Path = None):
         self.img_embedder    = registry.img_embedder
         self.text_embedder   = registry.text_embedder   if _settings.enable_ocr   else None
         self.detector        = registry.yoloe_detector
@@ -23,28 +24,9 @@ class ScanPipeline:
         self._head_trained = self._head.load(_head_path)
         self._head.eval()
 
-        self.database_images = load_folder_images(database_dir)
-        self.database_embeddings = self._embed_database()
-
-    def _embed_database(self):
-        """Embed each database image as a combined (image+text) embedding."""
-        if not self.database_images:
-            return []
-
-        # batch: one model forward pass for all DB images (was: embed() per image in a loop)
-        paths, imgs = zip(*self.database_images)
-        img_embs = self.img_embedder.batch_embed(list(imgs))  # (N, 1024) — one forward pass
-
-        embeddings = []
-        for i, (file_path, img) in enumerate(self.database_images):
-            img_emb = img_embs[i:i+1]  # (1, 1024) — same shape as embed() output
-            text_emb = None
-            if self.text_recognizer is not None:
-                ocr_result = self.text_recognizer.recognize(img)
-                text_emb = self.text_embedder.embed_text(ocr_result["text"]) if ocr_result["text"] else None
-            combined = make_combined_embedding(img_emb, text_emb)
-            embeddings.append((file_path, combined))
-        return embeddings
+        self.db = DatabaseStore(db_path if db_path is not None else Path(_settings.db_path))
+        items = self.db.get_all_items()
+        self.database_embeddings = [(item["label"], item["combined_embedding"]) for item in items]
 
     def run(self, query_image):
         """
@@ -120,6 +102,7 @@ class ScanPipeline:
                 out = {
                     "label": m["label"],
                     "similarity": float(m["similarity"]),
+                    "box": m["box"],
                 }
                 if "ocr_text" in m:
                     out["ocr_text"] = m["ocr_text"]
