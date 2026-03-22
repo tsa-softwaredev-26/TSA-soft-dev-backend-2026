@@ -2,10 +2,10 @@
 CLI test for ScanPipeline.
 
 Usage:
-    python -m visual_memory.tests.scripts.test_scan <image_path> [--db <database_dir>] [--focal <f_px>]
+    python -m visual_memory.tests.scripts.test_scan <image_path> [--db <db_path>] [--focal <f_px>]
 
 Defaults:
-    --db      tests/demo_database (demo embeddings folder)
+    --db      data/memory.db (project-root SQLite database)
     --focal   3094.0  (iPhone 15 Plus focal length in pixels)
 
 Example:
@@ -24,15 +24,16 @@ from visual_memory.pipelines.scan_mode.pipeline import ScanPipeline
 
 _SCRIPTS_DIR = Path(__file__).resolve().parent   # tests/scripts/
 _TESTS_DIR = _SCRIPTS_DIR.parent                 # tests/
+_PROJECT_ROOT = _TESTS_DIR.parents[2]            # project root
 
-DEMO_DATABASE_DIR = _TESTS_DIR / "demo_database"
+DEFAULT_DB_PATH = _PROJECT_ROOT / "data" / "memory.db"
 FOCAL_LENGTH_PX_IPHONE15 = 3094.0
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Test ScanPipeline from CLI.")
     parser.add_argument("image_path", type=str, help="Path to query image.")
-    parser.add_argument("--db", type=str, default=str(DEMO_DATABASE_DIR), help="Path to database folder.")
+    parser.add_argument("--db", type=str, default=str(DEFAULT_DB_PATH), help="Path to SQLite database file.")
     parser.add_argument("--focal", type=float, default=FOCAL_LENGTH_PX_IPHONE15, help="Focal length in pixels.")
     return parser.parse_args()
 
@@ -41,19 +42,14 @@ def main():
     args = parse_args()
 
     image_path = Path(args.image_path)
-    database_dir = Path(args.db)
 
     if not image_path.exists():
         print(json.dumps({"error": f"Image not found: {image_path}"}))
         sys.exit(1)
 
-    if not database_dir.exists():
-        print(json.dumps({"error": f"Database directory not found: {database_dir}"}))
-        sys.exit(1)
-
     image = load_image(str(image_path))
 
-    pipeline = ScanPipeline(database_dir=database_dir, focal_length_px=args.focal)
+    pipeline = ScanPipeline(focal_length_px=args.focal, db_path=args.db)
     result = pipeline.run(image)
 
     print(json.dumps(result, indent=2))
