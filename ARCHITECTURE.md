@@ -123,7 +123,15 @@ src/visual_memory/
 │   └── redact_receipt.py              # gitignored - OCR-based receipt redaction (personal tool)
 │
 ├── config/settings.py                  # All tunable thresholds
-├── api/                                # Reserved for Flask/FastAPI
+├── api/
+│   ├── app.py                          # create_app() factory - blueprints, auth, upload cap
+│   ├── pipelines.py                    # Lazy singletons: get_remember_pipeline(), get_scan_pipeline(), get_feedback_store(), warm_all()
+│   ├── run.py                          # Local dev entry point (python src/visual_memory/api/run.py)
+│   └── routes/
+│       ├── health.py                   # GET /health
+│       ├── remember.py                 # POST /remember
+│       ├── scan.py                     # POST /scan
+│       └── feedback.py                 # POST /feedback
 └── tests/                             # Test scripts + test data
     ├── scripts/                        # Runnable .py test scripts
     ├── input_images/                   # Object test images
@@ -138,14 +146,18 @@ src/visual_memory/
 ### `pipelines/remember_mode/pipeline.py` - `RememberPipeline`
 - `run(image_path: str | Path, prompt: str) -> dict`
 - Returns `{"success": bool, "message": str, "result": {"label": str, "confidence": float, "box": [x1,y1,x2,y2], "ocr_text": str, "ocr_confidence": float} | None}`
-- `add_to_database(embedding, metadata)` -stub, does nothing (awaiting DB implementation)
+- `add_to_database(embedding, metadata)` - persists combined embedding to SQLite via DatabaseStore
 
 ### `pipelines/scan_mode/pipeline.py` - `ScanPipeline`
-- `__init__(database_dir: Path, focal_length_px: float)` -loads models + embeds database on init
-- `run(query_image: PIL.Image) -> dict`
+- `__init__(focal_length_px: float, db_path: str | Path = None)` - loads models + fetches DB embeddings on init
+- `run(query_image: PIL.Image, scan_id: str | None = None, focal_length_px: float | None = None) -> dict`
+- `scan_id`: if provided, caches (anchor_emb, query_emb) per label for /feedback lookup
+- `focal_length_px`: per-call override; falls back to `self.focal_length_px` if None
 - Returns `{"matches": [...], "count": int}`
 - Each match (depth enabled): `{"label": str, "similarity": float, "distance_ft": float, "direction": str, "narration": str, "ocr_text": str (optional)}`
-- Each match (depth disabled): `{"label": str, "similarity": float, "ocr_text": str (optional)}`
+- Each match (depth disabled): `{"label": str, "similarity": float, "box": list, "ocr_text": str (optional)}`
+- `reload_database()` - re-fetches all items from DB; call after /remember adds an entry
+- `get_cached_embeddings(scan_id, label) -> (anchor_emb, query_emb) | None`
 - Database raw base embeddings stored; ProjectionHead applied on-the-fly at match time
 - `_head_trained=False` (no weights file) -> projection is a strict no-op, zero pipeline cost
 
@@ -157,6 +169,7 @@ src/visual_memory/
 - OCR: `ocr_backend` ("paddle"), `ocr_languages`, `ocr_min_confidence` (0.3), `text_similarity_threshold` (0.4)
 - Toggles (env-overridable): `enable_depth` (`ENABLE_DEPTH`), `enable_ocr` (`ENABLE_OCR`), `enable_dedup` (`ENABLE_DEDUP`)
 - Personalization: `projection_head_path` ("models/projection_head.pt"), `projection_head_dim` (1536)
+- API: `api_host` ("127.0.0.1"), `api_port` (5000)
 
 ### `engine/object_detection/prompt_based.py` - `GroundingDinoDetector`
 - Model: `IDEA-Research/grounding-dino-base`
@@ -420,10 +433,22 @@ python -m visual_memory.learning.trainer --epochs 50 --lr 5e-5
 
 ---
 
-## API Contracts
+## API
 
-All pipeline outputs are plain Python dicts - JSON-serializable, no torch tensors.
-Flask teammate implements the HTTP layer; these are the exact shapes to wrap.
+Run locally: `python src/visual_memory/api/run.py`
+Production (Ubuntu/NVIDIA): `gunicorn -w 1 -b 0.0.0.0:5000 "visual_memory.api.app:create_app()"`
+Single worker is required - model state is process-local.
+
+**Environment variables:**
+- `API_KEY=<secret>` - enforce `X-API-Key` header on all routes except `/health` (opt-in; unset = no auth)
+- `ENABLE_DEPTH=0` - skip Depth Pro (~2GB VRAM savings)
+- `ENABLE_OCR=0` - skip PaddleOCR
+- `api_host` / `api_port` controlled via `settings.py` (defaults: 127.0.0.1:5000)
+
+Models are loaded once at startup via `warm_all()` in `create_app()`. Upload cap: 50MB.
+
+### GET /health
+**Response:** `{"status": "ok"}` - always 200, no auth required.
 
 ### POST /remember
 **Input:** multipart form - `image` (file), `prompt` (string)
@@ -441,16 +466,16 @@ Flask teammate implements the HTTP layer; these are the exact shapes to wrap.
   }
 }
 ```
-**Response (no detection):**
-```json
-{ "success": false, "message": "No object detected.", "result": null }
-```
+**Response (no detection):** `{"success": false, "message": "No object detected.", "result": null}`
+
+On success, ScanPipeline reloads its in-memory database so the new item is immediately visible to /scan.
 
 ### POST /scan
-**Input:** multipart form - `image` (file), `focal_length_px` (float, required for depth)
+**Input:** multipart form - `image` (file), `focal_length_px` (float, optional - 0 disables depth)
 **Response (depth enabled):**
 ```json
 {
+  "scan_id": "a3f9...",
   "matches": [
     {
       "label": "wallet",
@@ -464,28 +489,25 @@ Flask teammate implements the HTTP layer; these are the exact shapes to wrap.
   "count": 1
 }
 ```
-**Response (depth disabled, `ENABLE_DEPTH=0`):**
+**Response (depth disabled / `ENABLE_DEPTH=0`):**
 ```json
 {
-  "matches": [
-    { "label": "wallet", "similarity": 0.72, "ocr_text": "RFID Blocking" }
-  ],
+  "scan_id": "a3f9...",
+  "matches": [{ "label": "wallet", "similarity": 0.72, "box": [...], "ocr_text": "RFID Blocking" }],
   "count": 1
 }
 ```
-`ocr_text` present only when OCR extracted text from the matched crop. `narration` omitted when depth is disabled.
+`scan_id` is a UUID hex string. Pass it to /feedback to record corrections.
+`ocr_text` present only when OCR extracted text. `narration` / `distance_ft` / `direction` only when depth enabled.
 
 ### POST /feedback
-**Contract only - not yet implemented. See `feedback_store.py` docstring.**
 **Input:** JSON body - `scan_id` (string), `label` (string), `feedback` ("correct" | "wrong")
-**Response:**
-```json
-{ "recorded": true, "label": "wallet", "feedback": "correct" }
-```
-Flask handler calls `FeedbackStore.record_positive(anchor, query, label)` or `record_negative(...)`.
-`scan_id` maps to embeddings cached by `ScanPipeline` during the preceding scan call.
-Train after collecting enough feedback: `python -m visual_memory.learning.trainer`
-```
+**Response:** `{"recorded": true, "label": "wallet", "feedback": "correct"}`
+**404** if `scan_id` not in cache (last 50 scan results cached in memory).
+
+`scan_id` maps to (anchor_emb, query_emb) cached by ScanPipeline during the scan call.
+Calls `FeedbackStore.record_positive()` or `record_negative()`.
+Train projection head after collecting feedback: `python -m visual_memory.learning.trainer`
 
 ---
 
@@ -547,8 +569,9 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - `learning/` module complete: ProjectionHead, ProjectionTrainer, FeedbackStore - all tested CPU-only
 - `test_projection_head.py` passes: identity-at-init, triplet loss, store roundtrip, training convergence
 - ProjectionHead wired into ScanPipeline - no-op until `models/projection_head.pt` exists; raw embeddings always stored
-- `api/` directory empty, awaiting Flask implementation
-- Database is flat folder of images, re-embedded on each `ScanPipeline` init - temporary, pending DB teammate
+- Flask API implemented: POST /remember, POST /scan, POST /feedback, GET /health
+- Database: SQLite via DatabaseStore; both pipelines persist/query embeddings
+- ScanPipeline reloads DB after /remember; scan_id embedding cache for /feedback (last 50)
 - OCR backend: PaddleOCR-VL-1.5 (`ocr_backend = "paddle"`)
 - Image embedder: DINOv3 ViT-S/16 (`facebook/dinov3-vits16-pretrain-lvd1689m`, gated on HuggingFace)
 - Text embedder: CLIP text encoder only (`openai/clip-vit-base-patch32`, 512-dim, ~180MB)
@@ -559,20 +582,14 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 
 ### Engine / Architecture
 - [ ] Run full benchmark - 120 images not yet captured; see `benchmarks/CAPTURE_GUIDE.md` (~1-2 hrs)
-- [ ] Implement `RememberPipeline.add_to_database()` - store combined embedding + metadata in SQLite
-- [ ] Replace folder-based `load_folder_images()` + re-embed in `ScanPipeline` with DB query
-- [ ] Add API layer (`api/` is empty) - POST /remember, POST /scan, POST /feedback endpoints
-- [ ] Implement Flask POST /feedback; call `FeedbackStore.record_positive/negative()` - contract in `feedback_store.py` docstring
 - [ ] Wire `batch_embed_text()` into pipeline OCR paths once PaddleOCR supports batch (currently CPU-sequential; no gain until backend changes)
 - [ ] Wire `detect_all_batch()` into ScanPipeline when processing multiple images per request
 - [ ] Wire `detect_batch()` into RememberPipeline if multi-prompt remember is added
 - [ ] Remove `engine/embedding/projection_head/` empty dir (leftover from earlier experiment)
+- [ ] `str | Path` type hints in pipeline files require Python 3.10+; `pyproject.toml` allows 3.8+ (pre-existing, low priority)
 
-### Next: Database (teammate: SQLite, one .db file per user)
-- [ ] Schema: `items(id INTEGER PK, label TEXT, combined_embedding BLOB NOT NULL, ocr_text TEXT, image_path TEXT, confidence REAL, timestamp REAL)`
-- [ ] Schema: `user_state(projection_head BLOB)` - serialized ProjectionHead weights, one row per user db
-- [ ] `add_to_database(combined, metadata)` - INSERT into items; metadata keys: label, image_path, ocr_text, confidence, timestamp
-- [ ] `ScanPipeline._embed_database()` - SELECT id, label, combined_embedding FROM items; replaces folder scan
+### Database
+- [ ] `user_state` table: store serialized ProjectionHead weights per user db (currently loaded from file only)
 - [ ] `ScanPipeline.__init__` - load projection_head BLOB from user_state on init if present
 
 ---
