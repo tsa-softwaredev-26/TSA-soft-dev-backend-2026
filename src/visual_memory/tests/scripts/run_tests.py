@@ -144,7 +144,7 @@ if FAST:
 from visual_memory.pipelines.scan_mode.pipeline import ScanPipeline
 
 try:
-    scan = ScanPipeline(database_dir=DEMO_DB, focal_length_px=FOCAL_PX)
+    scan = ScanPipeline(focal_length_px=FOCAL_PX)
     r2 = scan.run(load_image(str(WALLET_3FT)))
     print("     json:", json.dumps(r2))
 
