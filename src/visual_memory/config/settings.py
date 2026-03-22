@@ -45,3 +45,7 @@ class Settings:
 
     # Database
     db_path: str = "data/memory.db"
+
+    # API server
+    api_host: str = "127.0.0.1"
+    api_port: int = 5000

@@ -19,6 +19,7 @@ dependencies = [
     "einops",
     "addict",
     "easydict",
+    "flask>=3.0.0",
 ]
 
 [project.scripts]
