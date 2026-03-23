@@ -122,10 +122,12 @@ src/visual_memory/
 │   ├── check_dataset.py               # pre-flight: verify all 120 images are in benchmarks/images/
 │   └── redact_receipt.py              # gitignored - OCR-based receipt redaction (personal tool)
 │
-├── config/settings.py                  # All tunable thresholds
+├── config/
+│   ├── settings.py                     # All ML tuning thresholds
+│   └── user_settings.py                # User preferences: PerformanceMode, UserSettings (JSON-persisted)
 ├── api/
 │   ├── app.py                          # create_app() factory - blueprints, auth, upload cap
-│   ├── pipelines.py                    # Lazy singletons: get_remember_pipeline(), get_scan_pipeline(), get_feedback_store(), warm_all()
+│   ├── pipelines.py                    # Lazy singletons: get_remember_pipeline(), get_scan_pipeline(), get_feedback_store(), get_user_settings(), warm_all()
 │   ├── run.py                          # Local dev entry point (python src/visual_memory/api/run.py)
 │   └── routes/
 │       ├── health.py                   # GET /health
@@ -133,7 +135,8 @@ src/visual_memory/
 │       ├── scan.py                     # POST /scan
 │       ├── feedback.py                 # POST /feedback
 │       ├── retrain.py                  # POST /retrain
-│       └── settings_route.py           # GET /settings, PATCH /settings
+│       ├── settings_route.py           # GET /settings, PATCH /settings (ML tuning)
+│       └── user_settings_route.py      # GET /user-settings, PATCH /user-settings (user prefs)
 └── tests/                             # Test scripts + test data
     ├── scripts/                        # Runnable .py test scripts
     ├── input_images/                   # Object test images
@@ -167,6 +170,17 @@ src/visual_memory/
 - `_triplet_count` - set by /retrain after training; drives automatic weight scaling
 - Database raw base embeddings stored; ProjectionHead applied on-the-fly at match time; DB projected once per `run()` call (outside box loop)
 - `_head_trained=False` (no weights file) -> `_apply_head` is a no-op, zero pipeline cost
+
+### `config/user_settings.py` - `UserSettings`
+- User-facing preferences, separate from ML tuning params in settings.py
+- Persisted to `data/user_settings.json`; loaded once at process start via `get_user_settings()`
+- `PerformanceMode`: FAST | BALANCED | ACCURATE (string enum)
+- `PerformanceConfig.for_mode(mode)` - returns `{depth_enabled, target_latency}` for each mode
+- `UserSettings` fields: `performance_mode` (BALANCED), `voice_speed` (1.0, range 0.5-2.0), `auto_update_location` (False), `learning_enabled` (True), `button_layout` ("default" | "swapped", stub)
+- `save(path)` / `load(path)` - JSON round-trip with safe defaults on missing/corrupt file
+- `to_dict()` - serializes for API response; includes derived `performance_config` block
+- Exposed via GET /user-settings, PATCH /user-settings
+- PATCH /user-settings propagates `learning_enabled` to ScanPipeline immediately
 
 ### `config/settings.py` - `Settings`
 - Single dataclass, all ML tuning params in one place
