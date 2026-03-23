@@ -11,6 +11,7 @@ _settings = Settings()
 _remember_pipeline = None
 _scan_pipeline = None
 _feedback_store = None
+_user_settings = None
 
 
 def get_remember_pipeline():
@@ -40,6 +41,15 @@ def get_feedback_store():
 def get_settings():
     """Return the module-level Settings instance for read/write by API routes."""
     return _settings
+
+
+def get_user_settings():
+    """Return the UserSettings singleton, loading from disk on first access."""
+    global _user_settings
+    if _user_settings is None:
+        from visual_memory.config.user_settings import UserSettings
+        _user_settings = UserSettings.load()
+    return _user_settings
 
 
 def warm_all():
