@@ -8,10 +8,20 @@ from visual_memory.config import Settings
 
 _settings = Settings()
 
+_database = None
 _remember_pipeline = None
 _scan_pipeline = None
 _feedback_store = None
 _user_settings = None
+
+
+def get_database():
+    """Shared DatabaseStore instance - single connection for API-layer reads/writes."""
+    global _database
+    if _database is None:
+        from visual_memory.database.store import DatabaseStore
+        _database = DatabaseStore(_settings.db_path)
+    return _database
 
 
 def get_remember_pipeline():
@@ -44,11 +54,11 @@ def get_settings():
 
 
 def get_user_settings():
-    """Return the UserSettings singleton, loading from disk on first access."""
+    """Return the UserSettings singleton, loading from DB on first access."""
     global _user_settings
     if _user_settings is None:
         from visual_memory.config.user_settings import UserSettings
-        _user_settings = UserSettings.load()
+        _user_settings = UserSettings.load(get_database())
     return _user_settings
 
 

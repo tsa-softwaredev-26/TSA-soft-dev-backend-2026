@@ -28,12 +28,20 @@ class DatabaseStore:
                 confidence       REAL,
                 timestamp        REAL
             );
+            -- id is the user ID; hardcoded to 1 for single-user demo.
+            -- Multi-user: remove CHECK constraint and pass uid into all user_state methods.
             CREATE TABLE IF NOT EXISTS user_state (
                 id               INTEGER PRIMARY KEY CHECK(id = 1),
-                projection_head  BLOB
+                projection_head  BLOB,
+                user_settings    TEXT
             );
         """)
-        self._conn.commit()
+        # migrate existing DBs that predate the user_settings column
+        try:
+            self._conn.execute("ALTER TABLE user_state ADD COLUMN user_settings TEXT")
+            self._conn.commit()
+        except Exception:
+            pass  # column already exists
 
     # ---- serialization helpers ----
 
@@ -103,6 +111,27 @@ class DatabaseStore:
             return None
         buf = io.BytesIO(row[0])
         return torch.load(buf, map_location="cpu", weights_only=True)
+
+    def save_user_settings(self, data: dict) -> None:
+        import json
+        self._conn.execute(
+            "INSERT INTO user_state (id, user_settings) VALUES (1, ?)"
+            " ON CONFLICT(id) DO UPDATE SET user_settings = excluded.user_settings",
+            (json.dumps(data),),
+        )
+        self._conn.commit()
+
+    def load_user_settings(self) -> Optional[dict]:
+        import json
+        row = self._conn.execute(
+            "SELECT user_settings FROM user_state WHERE id = 1"
+        ).fetchone()
+        if row is None or row[0] is None:
+            return None
+        try:
+            return json.loads(row[0])
+        except (json.JSONDecodeError, TypeError):
+            return None
 
     # ---- lifecycle ----
 

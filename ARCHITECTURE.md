@@ -173,11 +173,12 @@ src/visual_memory/
 
 ### `config/user_settings.py` - `UserSettings`
 - User-facing preferences, separate from ML tuning params in settings.py
-- Persisted to `data/user_settings.json`; loaded once at process start via `get_user_settings()`
+- Persisted as JSON text in `user_state.user_settings` (SQLite, same DB as items)
+- Loaded once at process start via `get_user_settings()` which calls `get_database()`
 - `PerformanceMode`: FAST | BALANCED | ACCURATE (string enum)
 - `PerformanceConfig.for_mode(mode)` - returns `{depth_enabled, target_latency}` for each mode
 - `UserSettings` fields: `performance_mode` (BALANCED), `voice_speed` (1.0, range 0.5-2.0), `auto_update_location` (False), `learning_enabled` (True), `button_layout` ("default" | "swapped", stub)
-- `save(path)` / `load(path)` - JSON round-trip with safe defaults on missing/corrupt file
+- `save(db)` / `load(db)` - DB round-trip with safe defaults on missing/corrupt row
 - `to_dict()` - serializes for API response; includes derived `performance_config` block
 - Exposed via GET /user-settings, PATCH /user-settings
 - PATCH /user-settings propagates `learning_enabled` to ScanPipeline immediately
@@ -662,7 +663,7 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 Steps needed before deploying to a Linux/NVIDIA server (can be completed by an agent in ~5 min each):
 
 1. **Async /retrain** - wrap training in `threading.Thread`, store status in a module-level dict, add `GET /retrain/status` route returning `{"running": bool, "last_result": {...}}`. Change `/retrain` to start the thread and return `{"started": true}` immediately.
-2. **Persist settings** - add a `user_settings` table to `DatabaseStore` (columns: key TEXT, value TEXT). On `PATCH /settings`, write to DB. On `ScanPipeline.__init__` and `create_app()`, read from DB and apply via the same setters used by the route.
+2. **Persist ML settings** - PATCH /settings currently writes to an in-memory Settings instance only. On `PATCH /settings`, also write changed fields to DB (e.g., a `settings` TEXT column in `user_state`). On startup, read from DB and apply via the same setters. (User prefs already persisted via `user_state.user_settings`.)
 3. **Move FeedbackStore to DB** - `FeedbackStore.record_positive/record_negative` currently write `.pt` files to `feedback/`. Replace with `INSERT INTO feedback (label, type, anchor_blob, query_blob, timestamp)` in the user DB. Update `load_triplets()` to `SELECT` and deserialize. This removes a flat-file dependency and enables per-user feedback isolation.
 
 ---
