@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 
-from visual_memory.api.pipelines import get_scan_pipeline, get_user_settings
+from visual_memory.api.pipelines import get_database, get_scan_pipeline, get_user_settings
 from visual_memory.config.user_settings import PerformanceMode, _BUTTON_LAYOUTS
 
 user_settings_bp = Blueprint("user_settings", __name__)
@@ -87,6 +87,6 @@ def patch_user_settings():
     if "learning_enabled" in applied:
         get_scan_pipeline().set_enable_learning(us.learning_enabled)
 
-    us.save()
+    us.save(get_database())
 
     return jsonify(us.to_dict())

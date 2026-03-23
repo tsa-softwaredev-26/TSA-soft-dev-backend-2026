@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from visual_memory.database.store import DatabaseStore
 
 
 # -----------------------------------------------------------------------
@@ -45,8 +47,6 @@ class PerformanceConfig:
 
 # -----------------------------------------------------------------------
 
-_DEFAULT_PATH = Path("data/user_settings.json")
-
 # Valid values for button_layout (stub - mobile UI not yet shipped)
 _BUTTON_LAYOUTS = {"default", "swapped"}
 
@@ -79,22 +79,19 @@ class UserSettings:
     def get_performance_config(self) -> PerformanceConfig:
         return PerformanceConfig.for_mode(self.performance_mode)
 
-    def save(self, path: Path | str = _DEFAULT_PATH) -> None:
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
+    def save(self, db: DatabaseStore) -> None:
+        db.save_user_settings({
             "performance_mode": self.performance_mode.value,
             "voice_speed": self.voice_speed,
             "auto_update_location": self.auto_update_location,
             "learning_enabled": self.learning_enabled,
             "button_layout": self.button_layout,
-        }
-        path.write_text(json.dumps(payload, indent=2))
+        })
 
     @classmethod
-    def load(cls, path: Path | str = _DEFAULT_PATH) -> UserSettings:
+    def load(cls, db: DatabaseStore) -> UserSettings:
+        data = db.load_user_settings() or {}
         try:
-            data = json.loads(Path(path).read_text())
             return cls(
                 performance_mode=PerformanceMode(data.get("performance_mode", "balanced")),
                 voice_speed=float(data.get("voice_speed", 1.0)),
@@ -102,7 +99,7 @@ class UserSettings:
                 learning_enabled=bool(data.get("learning_enabled", True)),
                 button_layout=str(data.get("button_layout", "default")),
             )
-        except (FileNotFoundError, json.JSONDecodeError, ValueError):
+        except ValueError:
             return cls()
 
     def to_dict(self) -> dict:
