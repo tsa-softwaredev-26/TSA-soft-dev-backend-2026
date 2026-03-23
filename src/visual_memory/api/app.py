@@ -6,6 +6,8 @@ from visual_memory.api.routes.health import health_bp
 from visual_memory.api.routes.remember import remember_bp
 from visual_memory.api.routes.scan import scan_bp
 from visual_memory.api.routes.feedback import feedback_bp
+from visual_memory.api.routes.retrain import retrain_bp
+from visual_memory.api.routes.settings_route import settings_bp
 
 _API_KEY = os.environ.get("API_KEY", "")
 
@@ -27,6 +29,8 @@ def create_app():
     app.register_blueprint(remember_bp)
     app.register_blueprint(scan_bp)
     app.register_blueprint(feedback_bp)
+    app.register_blueprint(retrain_bp)
+    app.register_blueprint(settings_bp)
 
     from visual_memory.api.pipelines import warm_all
     warm_all()

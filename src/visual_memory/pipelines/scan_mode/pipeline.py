@@ -1,5 +1,7 @@
 from collections import OrderedDict
 from pathlib import Path
+import torch
+import torch.nn.functional as F
 from visual_memory.config import Settings
 from visual_memory.engine.embedding import make_combined_embedding
 from visual_memory.engine.model_registry import registry
@@ -27,6 +29,13 @@ class ScanPipeline:
         self._head_trained = self._head.load(_head_path)
         self._head.eval()
 
+        # learning state - readable/settable at runtime via set_enable_learning / set_head_weight
+        self._enable_learning: bool = _settings.enable_learning
+        self._head_weight: float    = _settings.projection_head_weight
+        self._head_ramp_at: int     = _settings.projection_head_ramp_at
+        # updated by reload_head() after each successful /retrain; drives auto-scaling blend
+        self._triplet_count: int    = 0
+
         self.db = DatabaseStore(db_path if db_path is not None else Path(_settings.db_path))
         items = self.db.get_all_items()
         self.database_embeddings = [(item["label"], item["combined_embedding"]) for item in items]
@@ -45,6 +54,53 @@ class ScanPipeline:
         if entry is None:
             return None
         return entry.get(label)
+
+    def reload_head(self) -> bool:
+        """Re-read projection head weights from disk after a retrain.
+
+        Returns True if weights were loaded, False if the file does not exist.
+        """
+        _head_path = Path(_settings.projection_head_path)
+        self._head_trained = self._head.load(_head_path)
+        self._head.eval()
+        return self._head_trained
+
+    def set_enable_learning(self, enabled: bool) -> None:
+        """Toggle whether the projection head is applied during scan at runtime."""
+        self._enable_learning = enabled
+
+    def set_head_weight(self, weight: float, ramp_at: int) -> None:
+        """Update the head blend weight ceiling and ramp target at runtime.
+
+        weight  - max blend fraction (0.0 = never use head, 1.0 = full projection)
+        ramp_at - triplet count at which weight is fully reached
+        """
+        self._head_weight = float(weight)
+        self._head_ramp_at = int(ramp_at)
+
+    def _apply_head(self, emb: torch.Tensor) -> torch.Tensor:
+        """Blend raw embedding with projected embedding according to current weight.
+
+        Alpha ramps linearly from 0 to _head_weight as _triplet_count reaches
+        _head_ramp_at, then stays at _head_weight.  This gives the head more
+        influence automatically as the user accumulates feedback data.
+
+        Returns emb unchanged when learning is off or no weights are loaded.
+        """
+        if not self._head_trained or not self._enable_learning:
+            return emb
+        alpha = min(
+            self._head_weight,
+            self._head_weight * self._triplet_count / max(self._head_ramp_at, 1),
+        )
+        if alpha <= 0.0:
+            return emb
+        with torch.no_grad():
+            projected = self._head.project(emb)
+        if alpha >= 1.0:
+            return projected
+        blended = (1.0 - alpha) * emb + alpha * projected
+        return F.normalize(blended, dim=1)
 
     def run(self, query_image, scan_id: str | None = None, focal_length_px: float | None = None):
         """
@@ -65,6 +121,9 @@ class ScanPipeline:
         crops = [crop_object(query_image, box) for box in boxes]
         img_embs = self.img_embedder.batch_embed(crops)  # (N, 1024) — one forward pass
 
+        # project DB embeddings once for all boxes this scan call
+        projected_db = [(p, self._apply_head(e)) for p, e in self.database_embeddings]
+
         matches = []
 
         for i, (box, score) in enumerate(zip(boxes, scores)):
@@ -77,12 +136,7 @@ class ScanPipeline:
                 text_emb = self.text_embedder.embed_text(ocr_text) if ocr_text else None
             combined = make_combined_embedding(img_emb, text_emb)
 
-            if self._head_trained:
-                projected_query = self._head.project(combined)
-                projected_db = [(p, self._head.project(e)) for p, e in self.database_embeddings]
-            else:
-                projected_query = combined
-                projected_db = self.database_embeddings
+            projected_query = self._apply_head(combined)
 
             match_path, similarity = find_match(
                 projected_query,
