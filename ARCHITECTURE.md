@@ -131,7 +131,9 @@ src/visual_memory/
 │       ├── health.py                   # GET /health
 │       ├── remember.py                 # POST /remember
 │       ├── scan.py                     # POST /scan
-│       └── feedback.py                 # POST /feedback
+│       ├── feedback.py                 # POST /feedback
+│       ├── retrain.py                  # POST /retrain
+│       └── settings_route.py           # GET /settings, PATCH /settings
 └── tests/                             # Test scripts + test data
     ├── scripts/                        # Runnable .py test scripts
     ├── input_images/                   # Object test images
@@ -157,9 +159,14 @@ src/visual_memory/
 - Each match (depth enabled): `{"label": str, "similarity": float, "distance_ft": float, "direction": str, "narration": str, "ocr_text": str (optional)}`
 - Each match (depth disabled): `{"label": str, "similarity": float, "box": list, "ocr_text": str (optional)}`
 - `reload_database()` - re-fetches all items from DB; call after /remember adds an entry
+- `reload_head() -> bool` - re-reads projection head weights from disk after /retrain; returns True if loaded
+- `set_enable_learning(bool)` - toggle projection head application at runtime (called by PATCH /settings)
+- `set_head_weight(weight, ramp_at)` - update blend ceiling and ramp target at runtime
 - `get_cached_embeddings(scan_id, label) -> (anchor_emb, query_emb) | None`
-- Database raw base embeddings stored; ProjectionHead applied on-the-fly at match time
-- `_head_trained=False` (no weights file) -> projection is a strict no-op, zero pipeline cost
+- `_apply_head(emb) -> emb` - blends raw and projected embedding; alpha ramps 0->weight as `_triplet_count` reaches `_head_ramp_at`
+- `_triplet_count` - set by /retrain after training; drives automatic weight scaling
+- Database raw base embeddings stored; ProjectionHead applied on-the-fly at match time; DB projected once per `run()` call (outside box loop)
+- `_head_trained=False` (no weights file) -> `_apply_head` is a no-op, zero pipeline cost
 
 ### `config/settings.py` - `Settings`
 - Single dataclass, all ML tuning params in one place
@@ -169,6 +176,7 @@ src/visual_memory/
 - OCR: `ocr_backend` ("paddle"), `ocr_languages`, `ocr_min_confidence` (0.3), `text_similarity_threshold` (0.4)
 - Toggles (env-overridable): `enable_depth` (`ENABLE_DEPTH`), `enable_ocr` (`ENABLE_OCR`), `enable_dedup` (`ENABLE_DEDUP`)
 - Personalization: `projection_head_path` ("models/projection_head.pt"), `projection_head_dim` (1536)
+- Learning: `enable_learning` (`ENABLE_LEARNING`), `min_feedback_for_training` (10), `projection_head_weight` (1.0), `projection_head_ramp_at` (50), `projection_head_epochs` (20)
 - API: `api_host` ("127.0.0.1"), `api_port` (5000)
 
 ### `engine/object_detection/prompt_based.py` - `GroundingDinoDetector`
@@ -443,6 +451,7 @@ Single worker is required - model state is process-local.
 - `API_KEY=<secret>` - enforce `X-API-Key` header on all routes except `/health` (opt-in; unset = no auth)
 - `ENABLE_DEPTH=0` - skip Depth Pro (~2GB VRAM savings)
 - `ENABLE_OCR=0` - skip PaddleOCR
+- `ENABLE_LEARNING=0` - disable projection head application in scan (also patchable at runtime via PATCH /settings)
 - `api_host` / `api_port` controlled via `settings.py` (defaults: 127.0.0.1:5000)
 
 Models are loaded once at startup via `warm_all()` in `create_app()`. Upload cap: 50MB.
@@ -502,12 +511,45 @@ On success, ScanPipeline reloads its in-memory database so the new item is immed
 
 ### POST /feedback
 **Input:** JSON body - `scan_id` (string), `label` (string), `feedback` ("correct" | "wrong")
-**Response:** `{"recorded": true, "label": "wallet", "feedback": "correct"}`
+**Response:** `{"recorded": true, "label": "wallet", "feedback": "correct", "triplets": 12, "min_for_training": 10}`
 **404** if `scan_id` not in cache (last 50 scan results cached in memory).
 
 `scan_id` maps to (anchor_emb, query_emb) cached by ScanPipeline during the scan call.
 Calls `FeedbackStore.record_positive()` or `record_negative()`.
-Train projection head after collecting feedback: `python -m visual_memory.learning.trainer`
+`triplets` and `min_for_training` in the response let the client decide when to call /retrain.
+
+### POST /retrain
+**Input:** none
+**Response (not enough data):** `{"trained": false, "reason": "insufficient_data", "triplets": 3, "min_required": 10}`
+**Response (success):** `{"trained": true, "triplets": 15, "final_loss": 0.0421, "head_weight": 0.30}`
+
+Loads all triplets from FeedbackStore, trains the ProjectionHead for `projection_head_epochs` epochs,
+saves weights to `models/projection_head.pt`, and reloads the head in ScanPipeline - new weights
+are active immediately on the next /scan.
+`head_weight` is the effective blend alpha at the current triplet count (ramps toward `projection_head_weight`).
+Training is synchronous and blocks the request (see TODO: async retrain for server deployment).
+
+### GET /settings
+**Response:**
+```json
+{
+  "enable_learning": true,
+  "min_feedback_for_training": 10,
+  "projection_head_weight": 1.0,
+  "projection_head_ramp_at": 50,
+  "projection_head_epochs": 20,
+  "head_trained": false,
+  "triplet_count": 0,
+  "feedback_counts": {"positives": 5, "negatives": 3, "triplets": 3}
+}
+```
+
+### PATCH /settings
+**Input:** JSON body with any subset of: `enable_learning` (bool), `min_feedback_for_training` (int >= 1),
+`projection_head_weight` (float 0.0-1.0), `projection_head_ramp_at` (int >= 1), `projection_head_epochs` (int >= 1).
+**Response:** full settings state (same schema as GET /settings), or `{"errors": {...}}` with 400 on type/range errors.
+
+Changes are applied in-memory only - they do not survive a server restart (see TODO: persist settings to DB).
 
 ---
 
@@ -568,8 +610,10 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - `run_tests.py` passes (March 2026): remember:detect, scan:match, text_recognition x2 (DEPTH=0 skips estimator)
 - `learning/` module complete: ProjectionHead, ProjectionTrainer, FeedbackStore - all tested CPU-only
 - `test_projection_head.py` passes: identity-at-init, triplet loss, store roundtrip, training convergence
-- ProjectionHead wired into ScanPipeline - no-op until `models/projection_head.pt` exists; raw embeddings always stored
-- Flask API implemented: POST /remember, POST /scan, POST /feedback, GET /health
+- ProjectionHead wired into ScanPipeline with auto-scaling blend (`_apply_head`); no-op until `models/projection_head.pt` exists
+- Flask API: POST /remember, POST /scan, POST /feedback, POST /retrain, GET /settings, PATCH /settings, GET /health
+- /retrain trains ProjectionHead from FeedbackStore and hot-reloads weights into ScanPipeline; guarded by `min_feedback_for_training`
+- /settings exposes runtime toggles (enable_learning, projection_head_weight, etc.) without restart
 - Database: SQLite via DatabaseStore; both pipelines persist/query embeddings
 - ScanPipeline reloads DB after /remember; scan_id embedding cache for /feedback (last 50)
 - OCR backend: PaddleOCR-VL-1.5 (`ocr_backend = "paddle"`)
@@ -591,6 +635,21 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 ### Database
 - [ ] `user_state` table: store serialized ProjectionHead weights per user db (currently loaded from file only)
 - [ ] `ScanPipeline.__init__` - load projection_head BLOB from user_state on init if present
+
+### Learning / Personalization
+- [ ] Async /retrain - training blocks the request thread (seconds to minutes depending on triplet count); move to a background thread with a GET /retrain/status polling endpoint before server deployment
+- [ ] Persist runtime settings overrides (enable_learning, projection_head_weight, etc.) to DB so they survive restarts; currently in-memory only
+- [ ] Test suite: add `test_learning_pipeline.py` covering FeedbackStore roundtrip, triplet loading, trainer convergence, `_apply_head` blending at various triplet counts, `reload_head`, and full /feedback -> /retrain -> /settings endpoint flow
+
+---
+
+## Server Transition Notes
+
+Steps needed before deploying to a Linux/NVIDIA server (can be completed by an agent in ~5 min each):
+
+1. **Async /retrain** - wrap training in `threading.Thread`, store status in a module-level dict, add `GET /retrain/status` route returning `{"running": bool, "last_result": {...}}`. Change `/retrain` to start the thread and return `{"started": true}` immediately.
+2. **Persist settings** - add a `user_settings` table to `DatabaseStore` (columns: key TEXT, value TEXT). On `PATCH /settings`, write to DB. On `ScanPipeline.__init__` and `create_app()`, read from DB and apply via the same setters used by the route.
+3. **Move FeedbackStore to DB** - `FeedbackStore.record_positive/record_negative` currently write `.pt` files to `feedback/`. Replace with `INSERT INTO feedback (label, type, anchor_blob, query_blob, timestamp)` in the user DB. Update `load_triplets()` to `SELECT` and deserialize. This removes a flat-file dependency and enables per-user feedback isolation.
 
 ---
 

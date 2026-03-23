@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 
-from visual_memory.api.pipelines import get_scan_pipeline, get_feedback_store
+from visual_memory.api.pipelines import get_scan_pipeline, get_feedback_store, get_settings
 
 feedback_bp = Blueprint("feedback", __name__)
 
@@ -34,4 +34,11 @@ def feedback():
     else:
         store.record_negative(anchor_emb, query_emb, label)
 
-    return jsonify({"recorded": True, "label": label, "feedback": fb})
+    counts = store.count()
+    return jsonify({
+        "recorded": True,
+        "label": label,
+        "feedback": fb,
+        "triplets": counts["triplets"],
+        "min_for_training": get_settings().min_feedback_for_training,
+    })

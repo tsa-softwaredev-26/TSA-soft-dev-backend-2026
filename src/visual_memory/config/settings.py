@@ -43,6 +43,19 @@ class Settings:
     projection_head_path: str = "models/projection_head.pt"
     projection_head_dim: int = 1536
 
+    # Learning / online feedback training
+    # enable_learning: apply projection head during scan (can be toggled via PATCH /settings)
+    enable_learning: bool = field(default_factory=lambda: os.environ.get("ENABLE_LEARNING", "1") != "0")
+    # min triplets (pos+neg pairs) required before /retrain will proceed
+    min_feedback_for_training: int = 10
+    # max blend weight between raw embedding (0.0) and projected embedding (1.0)
+    # acts as a ceiling; actual weight ramps up automatically with triplet count
+    projection_head_weight: float = 1.0
+    # triplet count at which projection_head_weight is fully reached (linear ramp from 0)
+    projection_head_ramp_at: int = 50
+    # training epochs for each /retrain call
+    projection_head_epochs: int = 20
+
     # Database
     db_path: str = "data/memory.db"
 

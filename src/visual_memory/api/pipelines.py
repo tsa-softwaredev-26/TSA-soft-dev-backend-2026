@@ -37,6 +37,11 @@ def get_feedback_store():
     return _feedback_store
 
 
+def get_settings():
+    """Return the module-level Settings instance for read/write by API routes."""
+    return _settings
+
+
 def warm_all():
     """Load all pipeline singletons at startup to avoid first-request latency."""
     get_remember_pipeline()
