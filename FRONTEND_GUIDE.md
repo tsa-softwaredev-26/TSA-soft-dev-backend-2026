@@ -176,9 +176,34 @@ Example: `GET /crop?scan_id=a3f9c2b1...&index=1`
 
 ---
 
+### GET /items
+
+List all taught objects. Use this to fetch item details before confirming a deletion - see voice delete flow below.
+
+**Request:** query params
+
+| Param | Type | Required | Notes |
+|-------|------|----------|-------|
+| `label` | string | no | Filter to a single label. Omit to return all items. |
+
+**Response:**
+```json
+{
+  "items": [
+    { "id": 3, "label": "wallet", "confidence": 0.87, "ocr_text": "RFID Blocking", "timestamp": 1742700000.0 },
+    { "id": 1, "label": "house keys", "confidence": 0.91, "ocr_text": "", "timestamp": 1742600000.0 }
+  ],
+  "count": 2
+}
+```
+
+Results are ordered most-recently-taught first. Multiple rows with the same label means the user taught the object more than once - all rows are removed by `DELETE /items/<label>`.
+
+---
+
 ### DELETE /items/<label>
 
-Permanently remove a taught object from memory. After deletion the object will no longer be detected in future scans. Call this on voice command (e.g., "delete this") while the user is on a scan result - pass the `label` of the current match.
+Permanently remove a taught object from memory. After deletion the object will no longer be detected in future scans.
 
 **Request:** no body
 
@@ -187,7 +212,7 @@ Permanently remove a taught object from memory. After deletion the object will n
 { "deleted": true, "label": "wallet", "count": 1 }
 ```
 
-`count` is the number of database rows removed (multiple teach attempts for the same label are all erased). **404** if no item with that label exists.
+`count` is the number of database rows removed. **404** if no item with that label exists.
 
 The scan pipeline reloads immediately - no restart needed.
 
@@ -276,38 +301,6 @@ Record whether a scan result was correct or wrong. This powers the personalizati
 ```
 
 **404** if `scan_id` is not found. The backend caches the last 50 scan results. Don't delay feedback more than 50 scans.
-
-When `triplets >= min_for_training`, call `/retrain` to apply the accumulated feedback.
-
----
-
-### POST /retrain
-
-Retrain the personalization model on accumulated feedback. Weights are hot-loaded into the scan pipeline immediately - no restart needed.
-
-**Request:** no body
-
-**Response (not enough data):**
-```json
-{
-  "trained": false,
-  "reason": "insufficient_data",
-  "triplets": 3,
-  "min_required": 10
-}
-```
-
-**Response (success):**
-```json
-{
-  "trained": true,
-  "triplets": 15,
-  "final_loss": 0.0421,
-  "head_weight": 0.30
-}
-```
-
-Note: training is synchronous and may take several seconds. Plan for a loading state. (Async retrain is a planned backend improvement.)
 
 ---
 
@@ -411,26 +404,23 @@ Update user preferences. Persisted to the database. All fields optional.
 
 ---
 
-## Scan -> Feedback -> Retrain Flow
+## Scan -> Feedback Flow
 
-The full personalization loop:
+After each scan the user can optionally confirm or deny matches. This powers the personalization system - the backend retrains automatically overnight once enough feedback accumulates.
 
 ```
 1. POST /scan
    - Store scan_id and the matches array
 
 2. User swipes through matches
-   - For each match, surface confirm/deny UI
+   - For each match, allow confirm/deny (voice or gesture)
    - POST /feedback with scan_id + label + "correct"/"wrong"
-   - Response tells you triplets and min_for_training
 
-3. When triplets >= min_for_training
-   - Show a "Ready to improve" prompt
-   - POST /retrain on user confirmation (or automatically)
-   - On success, next /scan uses updated model weights
+3. Retraining happens automatically server-side - no user action needed
+   - Next /scan uses updated model weights transparently
 ```
 
-The model starts as identity (no effect) and gradually adapts. `head_weight` in the retrain response shows how much influence the personalized model currently has (ramps up as more feedback accumulates, capped at 1.0).
+The model starts as identity (no effect on scan accuracy) and gradually adapts as feedback accumulates. The frontend does not need to trigger retraining.
 
 ---
 
@@ -449,9 +439,10 @@ Read narration[i] aloud as user lands on each item.
 **Voice: "delete this"**
 ```
 1. User is on match[i] (label = "wallet")
-2. Show confirmation: "Are you sure you want to forget wallet?"
-3. User confirms -> DELETE /items/wallet
-4. Item permanently removed from memory; will not appear in future scans
+2. GET /items?label=wallet -> returns item details (taught date, confidence)
+3. Announce: "Are you sure you want to forget wallet? Taught 3 days ago."
+4. User confirms -> DELETE /items/wallet
+5. Item permanently removed; will not appear in future scans
 ```
 
 ---

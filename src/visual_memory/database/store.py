@@ -115,6 +115,30 @@ class DatabaseStore:
             })
         return items
 
+    def get_items_metadata(self, label: Optional[str] = None) -> list[dict]:
+        """Return item rows without embedding blobs - for listing and confirmation UI."""
+        if label is not None:
+            rows = self._conn.execute(
+                "SELECT id, label, confidence, ocr_text, timestamp FROM items "
+                "WHERE label = ? ORDER BY timestamp DESC",
+                (label,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT id, label, confidence, ocr_text, timestamp FROM items "
+                "ORDER BY timestamp DESC"
+            ).fetchall()
+        result = []
+        for row_id, lbl, confidence, ocr_text, timestamp in rows:
+            result.append({
+                "id": row_id,
+                "label": lbl,
+                "confidence": round(confidence, 4) if confidence else None,
+                "ocr_text": ocr_text or "",
+                "timestamp": timestamp,
+            })
+        return result
+
     def get_label_embeddings(self) -> list[dict]:
         """Return one label embedding per unique label (most recent row per label)."""
         rows = self._conn.execute(
