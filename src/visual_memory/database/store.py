@@ -132,6 +132,12 @@ class DatabaseStore:
         self._conn.commit()
         return cur.rowcount > 0
 
+    def delete_items_by_label(self, label: str) -> int:
+        """Delete all items with the given label. Returns number of deleted rows."""
+        cur = self._conn.execute("DELETE FROM items WHERE label = ?", (label,))
+        self._conn.commit()
+        return cur.rowcount
+
     # ---- user_state table ----
 
     def save_projection_head(self, state_dict: dict) -> None:
