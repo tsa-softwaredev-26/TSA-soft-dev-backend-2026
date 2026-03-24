@@ -3,7 +3,7 @@ from uuid import uuid4
 from flask import Blueprint, request, jsonify
 from PIL import Image
 
-from visual_memory.api.pipelines import get_scan_pipeline
+from visual_memory.api.pipelines import get_scan_pipeline, get_database
 
 scan_bp = Blueprint("scan", __name__)
 
@@ -35,6 +35,15 @@ def scan():
         result = pipeline.run(image, scan_id=scan_id, focal_length_px=focal_length_px)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
+
+    db = get_database()
+    for match in result.get("matches", []):
+        db.add_sighting(
+            label=match["label"],
+            direction=match.get("direction"),
+            distance_ft=match.get("distance_ft"),
+            similarity=match.get("similarity"),
+        )
 
     result["scan_id"] = scan_id
     return jsonify(result)
