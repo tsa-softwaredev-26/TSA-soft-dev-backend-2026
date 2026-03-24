@@ -335,25 +335,6 @@ Pass from Android camera API. iPhone 15 Plus reference: `f_mm=6.24`, `sensor_wid
 
 ---
 
-## Narration Output
-
-```
-High confidence (similarity >= 0.6):              "Wallet ahead, 2 feet away."
-Below high confidence (similarity_threshold-0.6): "May be a wallet slightly right, focus to verify."
-Below similarity_threshold (default 0.2):         no match returned
-```
-
-### Direction Logic (5-zone)
-```python
-if nx < -0.5:  return "to your left"
-if nx < -0.15: return "slightly left"
-if nx < 0.15:  return "ahead"
-if nx < 0.5:   return "slightly right"
-return                "to your right"
-```
-
----
-
 ## Benchmarks
 
 Full system evaluation across retrieval, detection, and depth estimation.
@@ -472,100 +453,9 @@ Single worker is required - model state is process-local.
 
 Models are loaded once at startup via `warm_all()` in `create_app()`. Upload cap: 50MB.
 
-### GET /health
-**Response:** `{"status": "ok"}` - always 200, no auth required.
+**Endpoints:** GET /health, POST /remember, POST /scan, POST /feedback, POST /retrain, GET /settings, PATCH /settings, GET /user-settings, PATCH /user-settings.
 
-### POST /remember
-**Input:** multipart form - `image` (file), `prompt` (string)
-**Response (detection succeeded):**
-```json
-{
-  "success": true,
-  "message": "Object detected and embedded successfully.",
-  "result": {
-    "label": "wallet",
-    "confidence": 0.87,
-    "box": [120, 200, 340, 410],
-    "ocr_text": "RFID Blocking",
-    "ocr_confidence": 0.91
-  }
-}
-```
-**Response (no detection):** `{"success": false, "message": "No object detected.", "result": null}`
-
-On success, ScanPipeline reloads its in-memory database so the new item is immediately visible to /scan.
-
-### POST /scan
-**Input:** multipart form - `image` (file), `focal_length_px` (float, optional - 0 disables depth)
-**Response (depth enabled):**
-```json
-{
-  "scan_id": "a3f9...",
-  "matches": [
-    {
-      "label": "wallet",
-      "similarity": 0.72,
-      "distance_ft": 2.3,
-      "direction": "ahead",
-      "narration": "Wallet ahead, 2 feet away.",
-      "ocr_text": "RFID Blocking"
-    }
-  ],
-  "count": 1
-}
-```
-**Response (depth disabled / `ENABLE_DEPTH=0`):**
-```json
-{
-  "scan_id": "a3f9...",
-  "matches": [{ "label": "wallet", "similarity": 0.72, "box": [...], "ocr_text": "RFID Blocking" }],
-  "count": 1
-}
-```
-`scan_id` is a UUID hex string. Pass it to /feedback to record corrections.
-`ocr_text` present only when OCR extracted text. `narration` / `distance_ft` / `direction` only when depth enabled.
-
-### POST /feedback
-**Input:** JSON body - `scan_id` (string), `label` (string), `feedback` ("correct" | "wrong")
-**Response:** `{"recorded": true, "label": "wallet", "feedback": "correct", "triplets": 12, "min_for_training": 10}`
-**404** if `scan_id` not in cache (last 50 scan results cached in memory).
-
-`scan_id` maps to (anchor_emb, query_emb) cached by ScanPipeline during the scan call.
-Calls `FeedbackStore.record_positive()` or `record_negative()`.
-`triplets` and `min_for_training` in the response let the client decide when to call /retrain.
-
-### POST /retrain
-**Input:** none
-**Response (not enough data):** `{"trained": false, "reason": "insufficient_data", "triplets": 3, "min_required": 10}`
-**Response (success):** `{"trained": true, "triplets": 15, "final_loss": 0.0421, "head_weight": 0.30}`
-
-Loads all triplets from FeedbackStore, trains the ProjectionHead for `projection_head_epochs` epochs,
-saves weights to `models/projection_head.pt`, and reloads the head in ScanPipeline - new weights
-are active immediately on the next /scan.
-`head_weight` is the effective blend alpha at the current triplet count (ramps toward `projection_head_weight`).
-Training is synchronous and blocks the request (see TODO: async retrain for server deployment).
-
-### GET /settings
-**Response:**
-```json
-{
-  "enable_learning": true,
-  "min_feedback_for_training": 10,
-  "projection_head_weight": 1.0,
-  "projection_head_ramp_at": 50,
-  "projection_head_epochs": 20,
-  "head_trained": false,
-  "triplet_count": 0,
-  "feedback_counts": {"positives": 5, "negatives": 3, "triplets": 3}
-}
-```
-
-### PATCH /settings
-**Input:** JSON body with any subset of: `enable_learning` (bool), `min_feedback_for_training` (int >= 1),
-`projection_head_weight` (float 0.0-1.0), `projection_head_ramp_at` (int >= 1), `projection_head_epochs` (int >= 1).
-**Response:** full settings state (same schema as GET /settings), or `{"errors": {...}}` with 400 on type/range errors.
-
-Changes are applied in-memory only - they do not survive a server restart (see TODO: persist settings to DB).
+See `FRONTEND_GUIDE.md` for full request/response schemas, field reference, and integration patterns.
 
 ---
 
