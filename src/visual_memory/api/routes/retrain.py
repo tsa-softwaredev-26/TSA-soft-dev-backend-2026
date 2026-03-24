@@ -2,7 +2,7 @@ from pathlib import Path
 
 from flask import Blueprint, jsonify
 
-from visual_memory.api.pipelines import get_feedback_store, get_scan_pipeline, get_settings
+from visual_memory.api.pipelines import get_database, get_feedback_store, get_scan_pipeline, get_settings
 from visual_memory.learning import ProjectionTrainer
 from visual_memory.utils import get_logger
 
@@ -46,6 +46,7 @@ def retrain():
 
     head_path = Path(settings.projection_head_path)
     trainer.save(head_path)
+    get_database().save_projection_head(pipeline._head.state_dict())
 
     pipeline.reload_head()
     pipeline._triplet_count = triplet_count

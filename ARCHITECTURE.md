@@ -162,7 +162,8 @@ src/visual_memory/
 - Each match (depth enabled): `{"label": str, "similarity": float, "distance_ft": float, "direction": str, "narration": str, "ocr_text": str (optional)}`
 - Each match (depth disabled): `{"label": str, "similarity": float, "box": list, "ocr_text": str (optional)}`
 - `reload_database()` - re-fetches all items from DB; call after /remember adds an entry
-- `reload_head() -> bool` - re-reads projection head weights from disk after /retrain; returns True if loaded
+- `_load_head() -> bool` - loads projection head: DB first (`user_state.projection_head`), file fallback; used by `__init__` and `reload_head()`
+- `reload_head() -> bool` - re-reads projection head (DB first, file fallback) after /retrain; returns True if loaded
 - `set_enable_learning(bool)` - toggle projection head application at runtime (called by PATCH /settings)
 - `set_head_weight(weight, ramp_at)` - update blend ceiling and ramp target at runtime
 - `get_cached_embeddings(scan_id, label) -> (anchor_emb, query_emb) | None`
@@ -648,8 +649,8 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - [ ] `str | Path` type hints in pipeline files require Python 3.10+; `pyproject.toml` allows 3.8+ (pre-existing, low priority)
 
 ### Database
-- [ ] `user_state` table: store serialized ProjectionHead weights per user db (currently loaded from file only)
-- [ ] `ScanPipeline.__init__` - load projection_head BLOB from user_state on init if present
+- [x] `user_state` table: store serialized ProjectionHead weights per user in DB; `/retrain` saves to DB after training
+- [x] `ScanPipeline._load_head()` - loads projection head from DB first, falls back to file; used by `__init__` and `reload_head()`
 
 ### Learning / Personalization
 - [ ] Async /retrain - training blocks the request thread (seconds to minutes depending on triplet count); move to a background thread with a GET /retrain/status polling endpoint before server deployment
