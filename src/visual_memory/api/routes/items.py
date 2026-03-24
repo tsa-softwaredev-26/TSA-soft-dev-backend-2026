@@ -21,3 +21,52 @@ def delete_item(label):
         return jsonify({"error": "not found"}), 404
     get_scan_pipeline().reload_database()
     return jsonify({"deleted": True, "label": label, "count": count})
+
+
+@items_bp.post("/items/<label>/rename")
+def rename_item(label):
+    """
+    Rename all items stored under <label> to a new label.
+
+    Body (JSON):
+        new_label (str, required)
+        force     (bool, optional, default false)
+
+    If new_label already exists and force=false, returns 409 with
+    {"conflict": true, ...} so the client can ask the user to confirm,
+    then resend with force=true to overwrite.
+    """
+    data = request.get_json(silent=True) or {}
+    new_label = (data.get("new_label") or "").strip()
+    if not new_label:
+        return jsonify({"error": "missing field: new_label"}), 400
+    if new_label == label:
+        return jsonify({"error": "new_label is the same as the current label"}), 400
+
+    force = bool(data.get("force", False))
+    db = get_database()
+
+    if not db.get_items_metadata(label=label):
+        return jsonify({"error": "not found"}), 404
+
+    conflict_items = db.get_items_metadata(label=new_label)
+    if conflict_items and not force:
+        return jsonify({
+            "conflict": True,
+            "message": (
+                f'A memory named "{new_label}" already exists '
+                f"({len(conflict_items)} item(s)). "
+                "Send with force=true to overwrite it."
+            ),
+            "existing_count": len(conflict_items),
+        }), 409
+
+    result = db.rename_label(label, new_label)
+    get_scan_pipeline().reload_database()
+    return jsonify({
+        "renamed": True,
+        "old_label": label,
+        "new_label": new_label,
+        "count": result["renamed"],
+        "replaced": result["replaced"],
+    })

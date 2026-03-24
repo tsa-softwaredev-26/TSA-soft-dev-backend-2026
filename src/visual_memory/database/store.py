@@ -151,6 +151,24 @@ class DatabaseStore:
                 result.append({"label": label, "embedding": self._blob_to_tensor(blob)})
         return result
 
+    def rename_label(self, old_label: str, new_label: str) -> dict:
+        """
+        Rename all items from old_label to new_label.
+
+        Deletes any existing items with new_label first (caller must handle
+        conflict checking / force logic before calling this).
+
+        Returns {"renamed": int, "replaced": int}.
+        """
+        cur = self._conn.execute("DELETE FROM items WHERE label = ?", (new_label,))
+        replaced = cur.rowcount
+        cur = self._conn.execute(
+            "UPDATE items SET label = ? WHERE label = ?", (new_label, old_label)
+        )
+        renamed = cur.rowcount
+        self._conn.commit()
+        return {"renamed": renamed, "replaced": replaced}
+
     def get_label_avg_confidence(self, label: str) -> Optional[float]:
         """Average detection confidence for all previous teaches of this label. None if no history."""
         row = self._conn.execute(
