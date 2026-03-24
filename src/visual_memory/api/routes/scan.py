@@ -1,3 +1,4 @@
+from pathlib import Path
 from uuid import uuid4
 
 from flask import Blueprint, request, jsonify
@@ -6,6 +7,8 @@ from PIL import Image
 from visual_memory.api.pipelines import get_scan_pipeline, get_database
 
 scan_bp = Blueprint("scan", __name__)
+
+_SCANS_DIR = Path(__file__).resolve().parents[4] / "scans"
 
 
 @scan_bp.post("/scan")
@@ -37,13 +40,21 @@ def scan():
         return jsonify({"error": str(exc)}), 500
 
     db = get_database()
-    for match in result.get("matches", []):
-        db.add_sighting(
+    for i, match in enumerate(result.get("matches", [])):
+        crop_path = None
+        crop = pipeline.get_cached_crop(scan_id, i)
+        if crop is not None:
+            _SCANS_DIR.mkdir(exist_ok=True)
+            crop_path = str(_SCANS_DIR / f"{scan_id}_{i}.jpg")
+            crop.save(crop_path, format="JPEG", quality=85)
+        sighting_id = db.add_sighting(
             label=match["label"],
             direction=match.get("direction"),
             distance_ft=match.get("distance_ft"),
             similarity=match.get("similarity"),
+            crop_path=crop_path,
         )
+        match["sighting_id"] = sighting_id
 
     result["scan_id"] = scan_id
     return jsonify(result)

@@ -55,6 +55,7 @@ weights/
 
 # Personalization feedback data
 feedback/
+scans/
 
 # Logs
 logs/

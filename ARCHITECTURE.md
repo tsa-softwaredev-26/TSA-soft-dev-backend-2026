@@ -137,7 +137,8 @@ src/visual_memory/
 │       ├── retrain.py                  # POST /retrain
 │       ├── settings_route.py           # GET /settings, PATCH /settings (ML tuning)
 │       ├── user_settings_route.py      # GET /user-settings, PATCH /user-settings (user prefs)
-│       └── find.py                     # GET /find - last-seen location query (Ask Mode)
+│       ├── find.py                     # GET /find - last-seen location query (Ask Mode)
+│       └── sightings.py                # DELETE /sightings/<id> - remove a false-positive sighting
 └── tests/                             # Test scripts + test data
     ├── scripts/                        # Runnable .py test scripts
     ├── input_images/                   # Object test images
@@ -454,7 +455,7 @@ Single worker is required - model state is process-local.
 
 Models are loaded once at startup via `warm_all()` in `create_app()`. Upload cap: 50MB.
 
-**Endpoints:** GET /health, POST /remember, POST /scan, POST /feedback, POST /retrain, GET /settings, PATCH /settings, GET /user-settings, PATCH /user-settings, GET /find.
+**Endpoints:** GET /health, POST /remember, POST /scan, POST /feedback, POST /retrain, GET /settings, PATCH /settings, GET /user-settings, PATCH /user-settings, GET /find, DELETE /sightings/<id>.
 
 See `FRONTEND_GUIDE.md` for full request/response schemas, field reference, and integration patterns.
 
@@ -542,7 +543,10 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 ### Database
 - [x] `user_state` table: store serialized ProjectionHead weights per user in DB; `/retrain` saves to DB after training
 - [x] `ScanPipeline._load_head()` - loads projection head from DB first, falls back to file; used by `__init__` and `reload_head()`
-- [x] `sightings` table: every successful `/scan` match writes label, timestamp, direction, distance_ft, similarity; `GET /find?label=<q>` queries it
+- [x] `sightings` table: every successful `/scan` match writes label, timestamp, direction, distance_ft, similarity, crop_path; `GET /find?label=<q>` queries it; `DELETE /sightings/<id>` removes a false-positive
+- [ ] Fuzzy label search in `/find`: embed the query string via CLIPTextEmbedder (available as `get_scan_pipeline().text_embedder`), embed each label from `get_known_labels()`, return labels above cosine similarity threshold - handles "wallet" matching "my brown wallet" etc.
+- [ ] History-aware sightings retrieval: add time-range params to `/find` (`since`, `before`), recency-weighted ranking; sightings are retained indefinitely by design (personal spatial memory, not a recent-activity log) - prune only after search quality is optimized
+
 
 ### Learning / Personalization
 - [ ] Async /retrain - training blocks the request thread (seconds to minutes depending on triplet count); move to a background thread with a GET /retrain/status polling endpoint before server deployment
