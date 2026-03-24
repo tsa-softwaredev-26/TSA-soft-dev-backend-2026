@@ -58,6 +58,12 @@ class DatabaseStore:
             self._conn.commit()
         except Exception:
             pass  # column already exists
+        # migrate existing items tables that predate label_embedding
+        try:
+            self._conn.execute("ALTER TABLE items ADD COLUMN label_embedding BLOB")
+            self._conn.commit()
+        except Exception:
+            pass  # column already exists
 
     # ---- serialization helpers ----
 
@@ -80,15 +86,17 @@ class DatabaseStore:
         image_path: str = "",
         confidence: float = 0.0,
         timestamp: Optional[float] = None,
+        label_embedding: Optional[torch.Tensor] = None,
     ) -> int:
         if timestamp is None:
             timestamp = time.time()
         blob = self._tensor_to_blob(combined_embedding)
+        label_blob = self._tensor_to_blob(label_embedding) if label_embedding is not None else None
         cur = self._conn.execute(
             "INSERT INTO items "
-            "(label, combined_embedding, ocr_text, image_path, confidence, timestamp) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (label, blob, ocr_text or "", image_path or "", confidence, timestamp),
+            "(label, combined_embedding, ocr_text, image_path, confidence, timestamp, label_embedding) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (label, blob, ocr_text or "", image_path or "", confidence, timestamp, label_blob),
         )
         self._conn.commit()
         return cur.lastrowid
@@ -106,6 +114,23 @@ class DatabaseStore:
                 "ocr_text": ocr_text or "",
             })
         return items
+
+    def get_label_embeddings(self) -> list[dict]:
+        """Return one label embedding per unique label (most recent row per label)."""
+        rows = self._conn.execute(
+            "SELECT label, label_embedding FROM items WHERE id IN "
+            "(SELECT MAX(id) FROM items GROUP BY label) AND label_embedding IS NOT NULL"
+        ).fetchall()
+        result = []
+        for label, blob in rows:
+            if blob:
+                result.append({"label": label, "embedding": self._blob_to_tensor(blob)})
+        return result
+
+    def delete_item(self, item_id: int) -> bool:
+        cur = self._conn.execute("DELETE FROM items WHERE id = ?", (item_id,))
+        self._conn.commit()
+        return cur.rowcount > 0
 
     # ---- user_state table ----
 
