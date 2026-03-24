@@ -52,6 +52,12 @@ class DatabaseStore:
             self._conn.commit()
         except Exception:
             pass  # column already exists
+        # migrate existing sightings tables that predate crop_path
+        try:
+            self._conn.execute("ALTER TABLE sightings ADD COLUMN crop_path TEXT")
+            self._conn.commit()
+        except Exception:
+            pass  # column already exists
 
     # ---- serialization helpers ----
 
@@ -151,21 +157,22 @@ class DatabaseStore:
         direction: Optional[str] = None,
         distance_ft: Optional[float] = None,
         similarity: Optional[float] = None,
+        crop_path: Optional[str] = None,
         timestamp: Optional[float] = None,
     ) -> int:
         if timestamp is None:
             timestamp = time.time()
         cur = self._conn.execute(
-            "INSERT INTO sightings (label, timestamp, direction, distance_ft, similarity) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (label, timestamp, direction, distance_ft, similarity),
+            "INSERT INTO sightings (label, timestamp, direction, distance_ft, similarity, crop_path) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (label, timestamp, direction, distance_ft, similarity, crop_path),
         )
         self._conn.commit()
         return cur.lastrowid
 
     def get_last_sighting(self, label: str) -> Optional[dict]:
         row = self._conn.execute(
-            "SELECT id, label, timestamp, direction, distance_ft, similarity "
+            "SELECT id, label, timestamp, direction, distance_ft, similarity, crop_path "
             "FROM sightings WHERE label = ? ORDER BY timestamp DESC LIMIT 1",
             (label,),
         ).fetchone()
@@ -176,13 +183,13 @@ class DatabaseStore:
     def get_sightings(self, label: Optional[str] = None, limit: int = 20) -> list[dict]:
         if label is not None:
             rows = self._conn.execute(
-                "SELECT id, label, timestamp, direction, distance_ft, similarity "
+                "SELECT id, label, timestamp, direction, distance_ft, similarity, crop_path "
                 "FROM sightings WHERE label = ? ORDER BY timestamp DESC LIMIT ?",
                 (label, limit),
             ).fetchall()
         else:
             rows = self._conn.execute(
-                "SELECT id, label, timestamp, direction, distance_ft, similarity "
+                "SELECT id, label, timestamp, direction, distance_ft, similarity, crop_path "
                 "FROM sightings ORDER BY timestamp DESC LIMIT ?",
                 (limit,),
             ).fetchall()
@@ -195,9 +202,14 @@ class DatabaseStore:
         ).fetchall()
         return [r[0] for r in rows]
 
+    def delete_sighting(self, sighting_id: int) -> bool:
+        cur = self._conn.execute("DELETE FROM sightings WHERE id = ?", (sighting_id,))
+        self._conn.commit()
+        return cur.rowcount > 0
+
     @staticmethod
     def _sighting_row_to_dict(row: tuple) -> dict:
-        sid, label, timestamp, direction, distance_ft, similarity = row
+        sid, label, timestamp, direction, distance_ft, similarity, crop_path = row
         return {
             "id": sid,
             "label": label,
@@ -205,6 +217,7 @@ class DatabaseStore:
             "direction": direction,
             "distance_ft": distance_ft,
             "similarity": similarity,
+            "crop_path": crop_path,
         }
 
     # ---- lifecycle ----
