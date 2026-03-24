@@ -103,7 +103,6 @@ iPhone 15 Plus reference: `f_mm=6.24`, `sensor_width=8.64mm` -> `focal_length_px
       "narration": "Wallet to your left, 2.3 feet away.",
       "distance_ft": 2.3,
       "box": [12, 44, 210, 380],
-      "sighting_id": 41,
       "ocr_text": "RFID Blocking"
     },
     {
@@ -114,7 +113,6 @@ iPhone 15 Plus reference: `f_mm=6.24`, `sensor_width=8.64mm` -> `focal_length_px
       "narration": "May be house keys to your right, focus to verify.",
       "distance_ft": 4.1,
       "box": [640, 100, 820, 300],
-      "sighting_id": 42,
       "ocr_text": null
     }
   ]
@@ -126,13 +124,12 @@ iPhone 15 Plus reference: `f_mm=6.24`, `sensor_width=8.64mm` -> `focal_length_px
 | Field | Always present | Notes |
 |-------|---------------|-------|
 | `scan_id` | yes | UUID hex - pass to `/feedback` and `/crop` |
-| `label` | yes | Object name as taught |
+| `label` | yes | Object name as taught - pass to `DELETE /items/<label>` to forget it |
 | `similarity` | yes | Cosine similarity score, 0-1 |
 | `confidence` | yes | `"high"` / `"medium"` / `"low"` - see thresholds below |
 | `direction` | yes | One of 5 zones - see below |
 | `narration` | yes | Ready-to-speak string |
 | `box` | yes | `[x1, y1, x2, y2]` in pixels |
-| `sighting_id` | yes | DB id - pass to `DELETE /sightings/<id>` to remove a false positive |
 | `distance_ft` | only with depth | Metric depth in feet |
 | `ocr_text` | only when found | Text extracted from the object |
 
@@ -179,18 +176,20 @@ Example: `GET /crop?scan_id=a3f9c2b1...&index=1`
 
 ---
 
-### DELETE /sightings/<id>
+### DELETE /items/<label>
 
-Remove a false-positive sighting so it does not appear in `/find` results. Call this when the user dismisses a scan match as wrong - `sighting_id` is returned in each match from `/scan`.
+Permanently remove a taught object from memory. After deletion the object will no longer be detected in future scans. Call this on voice command (e.g., "delete this") while the user is on a scan result - pass the `label` of the current match.
 
 **Request:** no body
 
 **Response:**
 ```json
-{ "deleted": true, "id": 41 }
+{ "deleted": true, "label": "wallet", "count": 1 }
 ```
 
-**404** if the sighting ID does not exist.
+`count` is the number of database rows removed (multiple teach attempts for the same label are all erased). **404** if no item with that label exists.
+
+The scan pipeline reloads immediately - no restart needed.
 
 ---
 
@@ -435,25 +434,43 @@ The model starts as identity (no effect) and gradually adapts. `head_weight` in 
 
 ---
 
-## Scan -> Sightings -> Find (Ask Mode)
+## Scan Mode UX
 
-Every successful scan match is automatically saved as a sighting. Ask Mode queries that history:
+The `matches` array is ordered left-to-right spatially. Navigate it like a paged list:
+
+```
+POST /scan -> matches: [wallet, keys, charger]
+                         ^
+                    user swipes left/right through indexes
+
+Read narration[i] aloud as user lands on each item.
+```
+
+**Voice: "delete this"**
+```
+1. User is on match[i] (label = "wallet")
+2. Show confirmation: "Are you sure you want to forget wallet?"
+3. User confirms -> DELETE /items/wallet
+4. Item permanently removed from memory; will not appear in future scans
+```
+
+---
+
+## Scan -> Find (Ask Mode)
+
+Every successful scan match is automatically recorded. Ask Mode queries that history:
 
 ```
 1. POST /scan
-   - Each match includes a sighting_id
+   - Matches are saved to sighting history automatically
 
-2. User swipes through matches
-   - False positive? Call DELETE /sightings/<sighting_id> immediately
-   - This removes it from Ask Mode history before it pollutes spatial memory
-
-3. Later: GET /find?label=wallet
+2. Later: GET /find?label=wallet
    - Returns last known location with direction, distance, and human-readable time
    - Fuzzy match: "my wallet", "the wallet", "brown wallet" all resolve to "wallet"
-   - Use last_sighting.narration or build your own from direction + distance_ft + last_seen
+   - Build narration from: last_sighting.direction + last_sighting.distance_ft + last_sighting.last_seen
 
-4. GET /find (no label)
-   - Returns the most recent sighting per known object - good for a "where is everything" overview
+3. GET /find (no label)
+   - Returns the most recent sighting per known object - good for "where is everything"
 ```
 
 ---

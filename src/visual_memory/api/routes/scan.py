@@ -47,14 +47,13 @@ def scan():
             _SCANS_DIR.mkdir(exist_ok=True)
             crop_path = str(_SCANS_DIR / f"{scan_id}_{i}.jpg")
             crop.save(crop_path, format="JPEG", quality=85)
-        sighting_id = db.add_sighting(
+        db.add_sighting(
             label=match["label"],
             direction=match.get("direction"),
             distance_ft=match.get("distance_ft"),
             similarity=match.get("similarity"),
             crop_path=crop_path,
         )
-        match["sighting_id"] = sighting_id
 
     result["scan_id"] = scan_id
     return jsonify(result)
