@@ -6,7 +6,7 @@ from visual_memory.config import Settings
 from visual_memory.engine.embedding import make_combined_embedding
 from visual_memory.engine.model_registry import registry
 from visual_memory.learning import ProjectionHead
-from visual_memory.utils import crop_object, find_match, deduplicate_matches, get_logger
+from visual_memory.utils import crop_object, find_match, deduplicate_matches, get_logger, mean_luminance
 from visual_memory.database import DatabaseStore
 
 _settings = Settings()
@@ -151,6 +151,16 @@ class ScanPipeline:
         returns structured JSON dict
         """
         _focal = focal_length_px if focal_length_px is not None else self.focal_length_px
+
+        lum = mean_luminance(query_image)
+        if lum < _settings.darkness_threshold:
+            return {
+                "matches": [],
+                "count": 0,
+                "is_dark": True,
+                "darkness_level": round(lum, 2),
+                "message": "Image is too dark for detection. Enable the flashlight and retry.",
+            }
 
         boxes, scores = self.detector.detect_all(query_image)
 

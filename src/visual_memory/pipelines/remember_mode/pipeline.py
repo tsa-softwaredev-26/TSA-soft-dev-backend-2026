@@ -7,7 +7,7 @@ import pillow_heif
 from PIL import Image
 
 from visual_memory.config import Settings
-from visual_memory.utils import load_image, crop_object, get_logger
+from visual_memory.utils import load_image, crop_object, get_logger, mean_luminance
 from visual_memory.engine.embedding import make_combined_embedding
 from visual_memory.engine.model_registry import registry
 from visual_memory.database import DatabaseStore
@@ -149,15 +149,29 @@ class RememberPipeline:
 
         Returns:
             detected (bool), score (float), blur_score (float),
+            is_dark (bool), darkness_level (float),
             second_pass_prompt (str | None)
         """
         image = load_image(str(Path(image_path)))
+        lum = mean_luminance(image)
+        is_dark = lum < _settings.darkness_threshold
         blur = _blur_score(image)
+        if is_dark:
+            return {
+                "detected": False,
+                "score": 0.0,
+                "blur_score": blur,
+                "is_dark": True,
+                "darkness_level": round(lum, 2),
+                "second_pass_prompt": None,
+            }
         detection, second_pass_prompt = self._detect_with_fallback(image, prompt)
         return {
             "detected": detection is not None,
             "score": detection["score"] if detection else 0.0,
             "blur_score": blur,
+            "is_dark": False,
+            "darkness_level": round(lum, 2),
             "second_pass_prompt": second_pass_prompt,
         }
 
@@ -170,6 +184,19 @@ class RememberPipeline:
         image_path = Path(image_path)
         image = load_image(str(image_path))
 
+        # Darkness check - must come before any detection attempt
+        lum = mean_luminance(image)
+        if lum < _settings.darkness_threshold:
+            return {
+                "success": False,
+                "message": "Image is too dark for detection. Enable the flashlight and retry.",
+                "is_dark": True,
+                "darkness_level": round(lum, 2),
+                "blur_score": round(_blur_score(image), 2),
+                "is_blurry": False,
+                "result": None,
+            }
+
         # Sharpness check on the full image (before detection / crop)
         blur = _blur_score(image)
         is_blurry = blur < _settings.blur_sharpness_threshold
@@ -181,6 +208,8 @@ class RememberPipeline:
             return {
                 "success": False,
                 "message": "No object detected.",
+                "is_dark": False,
+                "darkness_level": round(lum, 2),
                 "blur_score": round(blur, 2),
                 "is_blurry": is_blurry,
                 "result": None,
@@ -247,6 +276,8 @@ class RememberPipeline:
             "detection_hint": _quality_hint(quality, is_blurry),
             "blur_score": round(blur, 2),
             "is_blurry": is_blurry,
+            "is_dark": False,
+            "darkness_level": round(lum, 2),
             "second_pass": second_pass_prompt is not None,
             "second_pass_prompt": second_pass_prompt,
             "box": box,

@@ -44,6 +44,12 @@ class Settings:
     # the first detection attempt returns nothing. Disable to save latency.
     detection_second_pass_enabled: bool = True
 
+    # Darkness detection (both modes).
+    # Mean grayscale luminance (0-255) below this value is considered too dark
+    # for reliable detection. 30 is conservative - only genuine dark rooms trigger
+    # this, not dim lighting. Typical dark room with no lights: mean 5-25.
+    darkness_threshold: float = 30.0
+
     # OCR (text recognition)
     ocr_backend: str = "paddle"
     ocr_languages: list = field(default_factory=lambda: ["en"])
