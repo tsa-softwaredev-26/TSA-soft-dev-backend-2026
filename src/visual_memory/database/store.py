@@ -58,6 +58,12 @@ class DatabaseStore:
             self._conn.commit()
         except Exception:
             pass  # column already exists
+        # migrate existing sightings tables that predate room_name
+        try:
+            self._conn.execute("ALTER TABLE sightings ADD COLUMN room_name TEXT")
+            self._conn.commit()
+        except Exception:
+            pass  # column already exists
         # migrate existing items tables that predate label_embedding
         try:
             self._conn.execute("ALTER TABLE items ADD COLUMN label_embedding BLOB")
@@ -153,7 +159,7 @@ class DatabaseStore:
 
     def rename_label(self, old_label: str, new_label: str) -> dict:
         """
-        Rename all items from old_label to new_label.
+        Rename all items and sightings from old_label to new_label.
 
         Deletes any existing items with new_label first (caller must handle
         conflict checking / force logic before calling this).
@@ -166,6 +172,10 @@ class DatabaseStore:
             "UPDATE items SET label = ? WHERE label = ?", (new_label, old_label)
         )
         renamed = cur.rowcount
+        # Keep sighting history intact under the new name
+        self._conn.execute(
+            "UPDATE sightings SET label = ? WHERE label = ?", (new_label, old_label)
+        )
         self._conn.commit()
         return {"renamed": renamed, "replaced": replaced}
 
@@ -241,21 +251,23 @@ class DatabaseStore:
         distance_ft: Optional[float] = None,
         similarity: Optional[float] = None,
         crop_path: Optional[str] = None,
+        room_name: Optional[str] = None,
         timestamp: Optional[float] = None,
     ) -> int:
         if timestamp is None:
             timestamp = time.time()
         cur = self._conn.execute(
-            "INSERT INTO sightings (label, timestamp, direction, distance_ft, similarity, crop_path) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (label, timestamp, direction, distance_ft, similarity, crop_path),
+            "INSERT INTO sightings "
+            "(label, timestamp, direction, distance_ft, similarity, crop_path, room_name) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (label, timestamp, direction, distance_ft, similarity, crop_path, room_name),
         )
         self._conn.commit()
         return cur.lastrowid
 
     def get_last_sighting(self, label: str) -> Optional[dict]:
         row = self._conn.execute(
-            "SELECT id, label, timestamp, direction, distance_ft, similarity, crop_path "
+            "SELECT id, label, timestamp, direction, distance_ft, similarity, crop_path, room_name "
             "FROM sightings WHERE label = ? ORDER BY timestamp DESC LIMIT 1",
             (label,),
         ).fetchone()
@@ -284,7 +296,7 @@ class DatabaseStore:
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         params.append(limit)
         rows = self._conn.execute(
-            f"SELECT id, label, timestamp, direction, distance_ft, similarity, crop_path "
+            f"SELECT id, label, timestamp, direction, distance_ft, similarity, crop_path, room_name "
             f"FROM sightings {where} ORDER BY timestamp DESC LIMIT ?",
             params,
         ).fetchall()
@@ -304,7 +316,7 @@ class DatabaseStore:
 
     @staticmethod
     def _sighting_row_to_dict(row: tuple) -> dict:
-        sid, label, timestamp, direction, distance_ft, similarity, crop_path = row
+        sid, label, timestamp, direction, distance_ft, similarity, crop_path, room_name = row
         return {
             "id": sid,
             "label": label,
@@ -313,6 +325,7 @@ class DatabaseStore:
             "distance_ft": distance_ft,
             "similarity": similarity,
             "crop_path": crop_path,
+            "room_name": room_name,
         }
 
     # ---- lifecycle ----
