@@ -1,3 +1,5 @@
+import base64
+import io
 from collections import OrderedDict
 from pathlib import Path
 import torch
@@ -13,6 +15,29 @@ _settings = Settings()
 _log = get_logger(__name__)
 
 _SCAN_CACHE_MAX = 50
+_CONFIDENCE_HIGH = 0.6   # mirrors estimator.CONFIDENCE_HIGH
+
+
+def _direction_from_box(bbox: list, img_w: int) -> str:
+    cx = (bbox[0] + bbox[2]) / 2
+    nx = (cx / img_w) * 2 - 1  # -1=far left, 1=far right
+    if nx < -0.5:  return "to your left"
+    if nx < -0.15: return "slightly left"
+    if nx < 0.15:  return "ahead"
+    if nx < 0.5:   return "slightly right"
+    return                "to your right"
+
+
+def _confidence_label(similarity: float) -> str:
+    if similarity >= 0.5:  return "high"
+    if similarity >= 0.35: return "medium"
+    return                        "low"
+
+
+def _encode_crop(crop) -> str:
+    buf = io.BytesIO()
+    crop.save(buf, format="JPEG", quality=85)
+    return base64.b64encode(buf.getvalue()).decode()
 
 
 class ScanPipeline:
@@ -175,6 +200,7 @@ class ScanPipeline:
                     "box": box,
                     "label": matched_label,
                     "similarity": similarity,
+                    "_crop": crops[i],
                 }
                 if ocr_text:
                     entry["ocr_text"] = ocr_text
@@ -190,14 +216,27 @@ class ScanPipeline:
         if not matches:
             return {"matches": [], "count": 0}
 
+        # Sort left to right by box center x (explicit spatial order for narration)
+        matches.sort(key=lambda m: (m["box"][0] + m["box"][2]) / 2)
+
         # ---- PASS 2: Depth (only once, only if enabled) ----
         if not _settings.enable_depth:
             output_matches = []
             for m in matches:
+                direction = _direction_from_box(m["box"], query_image.width)
+                sim = float(m["similarity"])
+                if sim >= _CONFIDENCE_HIGH:
+                    narration = f"{m['label'].capitalize()} {direction}."
+                else:
+                    narration = f"May be a {m['label']} {direction}, focus to verify."
                 out = {
                     "label": m["label"],
-                    "similarity": float(m["similarity"]),
+                    "similarity": sim,
+                    "confidence": _confidence_label(sim),
+                    "direction": direction,
+                    "narration": narration,
                     "box": m["box"],
+                    "crop_b64": _encode_crop(m["_crop"]),
                 }
                 if "ocr_text" in m:
                     out["ocr_text"] = m["ocr_text"]
@@ -223,9 +262,12 @@ class ScanPipeline:
                 out = {
                     "label": m["label"],
                     "similarity": float(m["similarity"]),
+                    "confidence": _confidence_label(float(m["similarity"])),
                     "distance_ft": float(distance_ft),
                     "direction": direction,
                     "narration": narration,
+                    "box": m["box"],
+                    "crop_b64": _encode_crop(m["_crop"]),
                 }
                 if "ocr_text" in m:
                     out["ocr_text"] = m["ocr_text"]
