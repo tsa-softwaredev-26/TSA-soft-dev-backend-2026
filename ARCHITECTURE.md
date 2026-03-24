@@ -236,6 +236,7 @@ Multi-image (POST /remember with `images[]`):
 - Detection quality (remember mode): `detection_quality_low_max` (0.40), `detection_quality_high_min` (0.65)
 - Image sharpness: `blur_sharpness_threshold` (100.0) - Laplacian variance below this = blurry
 - Second pass: `detection_second_pass_enabled` (True) - retry with reformulated prompts on failed detect
+- Darkness: `darkness_threshold` (30.0) - mean luminance below this = too dark; both modes; conservative, only genuine dark rooms (no lights on)
 - API: `api_host` ("127.0.0.1"), `api_port` (5000)
 
 ### `engine/object_detection/prompt_based.py` - `GroundingDinoDetector`
@@ -306,6 +307,11 @@ Multi-image (POST /remember with `images[]`):
 - `load_folder_images(folder)` - `List[(path, PIL Image)]`
 - `crop_object(image, box)` - cropped PIL Image
 
+### `utils/quality_utils.py`
+- `mean_luminance(image: PIL.Image) -> float` - mean grayscale pixel value (0-255); used by both pipelines for darkness detection
+- Pure numpy/PIL - no model loading, no extra deps
+- Shared between RememberPipeline and ScanPipeline via `utils` package export
+
 ### `utils/similarity_utils.py`
 - `cosine_similarity(t1, t2)` - scalar tensor
 - `find_match(query, database, threshold)` - `(path, score)` or `(None, 0.0)`
@@ -327,6 +333,7 @@ Multi-image (POST /remember with `images[]`):
 ```
 image_path + text prompt
     -> load_image()
+    -> mean_luminance(image)                    -> darkness check; return early if dark
     -> _blur_score(image)                       -> blur_score, is_blurry
     -> GroundingDinoDetector.detect(image, prompt)
         [if None] -> retry with _SECOND_PASS_TEMPLATES  -> detection or None
@@ -355,6 +362,7 @@ init:
     ProjectionHead.load("models/projection_head.pt") -> _head_trained (True/False)
 
 run(query_image):
+    -> mean_luminance(query_image)              -> darkness check; return early if dark
     -> YoloeDetector.detect_all()
     -> PASS 1: for each box -> crop -> embed (combined 1536-dim)
         -> if _head_trained: project query + all DB embeddings via ProjectionHead
