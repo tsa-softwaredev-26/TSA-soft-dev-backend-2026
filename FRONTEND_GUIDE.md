@@ -132,7 +132,6 @@ iPhone 15 Plus reference: `f_mm=6.24`, `sensor_width=8.64mm` -> `focal_length_px
 | `direction` | yes | One of 5 zones - see below |
 | `narration` | yes | Ready-to-speak string |
 | `box` | yes | `[x1, y1, x2, y2]` in pixels |
-| `crop_b64` | yes | Base64 JPEG of the detected object - decode and display/share directly |
 | `distance_ft` | only with depth | Metric depth in feet |
 | `ocr_text` | only when found | Text extracted from the object |
 
@@ -140,9 +139,9 @@ iPhone 15 Plus reference: `f_mm=6.24`, `sensor_width=8.64mm` -> `focal_length_px
 
 | Label | Similarity range | Narration style |
 |-------|-----------------|-----------------|
-| `"high"` | >= 0.5 | `"Wallet to your left, 2.3 feet away."` |
-| `"medium"` | 0.35 - 0.5 | `"May be a wallet to your left, focus to verify."` |
-| `"low"` | 0.2 - 0.35 | `"May be a wallet to your left, focus to verify."` |
+| `"high"` | >= 0.35 | `"Wallet to your left, 2.3 feet away."` |
+| `"medium"` | 0.25 - 0.35 | `"May be a wallet to your left, focus to verify."` |
+| `"low"` | 0.2 - 0.25 | `"May be a wallet to your left, focus to verify."` |
 
 **Direction zones:**
 
@@ -157,6 +156,25 @@ iPhone 15 Plus reference: `f_mm=6.24`, `sensor_width=8.64mm` -> `focal_length_px
 **Matches are always sorted left-to-right.** Read them out in array order for spatial narration.
 
 **When depth is disabled** (`ENABLE_DEPTH=0` server-side or `focal_length_px=0`): `distance_ft` is absent, narration omits distance but keeps direction. All other fields are still present.
+
+---
+
+### GET /crop
+
+Fetch the cropped image for a specific match by its index in the scan result array. Returns a raw JPEG. Call this only when the user navigates to that match - do not prefetch all crops.
+
+**Request:** query params
+
+| Param | Type | Required |
+|-------|------|----------|
+| `scan_id` | string | yes |
+| `index` | integer | yes - 0-based position in the `matches` array |
+
+**Response:** `image/jpeg` - the cropped region of the detected object.
+
+**404** if `scan_id` has expired (last 50 scans cached) or `index` is out of range.
+
+Example: `GET /crop?scan_id=a3f9c2b1...&index=1`
 
 ---
 

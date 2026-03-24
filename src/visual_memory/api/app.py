@@ -9,6 +9,7 @@ from visual_memory.api.routes.feedback import feedback_bp
 from visual_memory.api.routes.retrain import retrain_bp
 from visual_memory.api.routes.settings_route import settings_bp
 from visual_memory.api.routes.user_settings_route import user_settings_bp
+from visual_memory.api.routes.crop import crop_bp
 
 _API_KEY = os.environ.get("API_KEY", "")
 
@@ -33,6 +34,7 @@ def create_app():
     app.register_blueprint(retrain_bp)
     app.register_blueprint(settings_bp)
     app.register_blueprint(user_settings_bp)
+    app.register_blueprint(crop_bp)
 
     from visual_memory.api.pipelines import warm_all
     warm_all()
