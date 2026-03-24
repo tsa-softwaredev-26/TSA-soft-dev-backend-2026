@@ -138,7 +138,7 @@ src/visual_memory/
 │       ├── settings_route.py           # GET /settings, PATCH /settings (ML tuning)
 │       ├── user_settings_route.py      # GET /user-settings, PATCH /user-settings (user prefs)
 │       ├── find.py                     # GET /find - last-seen location query (Ask Mode)
-│       └── items.py                    # GET /items, DELETE /items/<label>
+│       └── items.py                    # GET /items, DELETE /items/<label>, POST /items/<label>/rename
 └── tests/                             # Test scripts + test data
     ├── scripts/                        # Runnable .py test scripts
     ├── input_images/                   # Object test images
@@ -168,6 +168,9 @@ src/visual_memory/
     "detection_hint": "human-readable guidance string",
     "blur_score": 143.7,
     "is_blurry": false,
+    "is_dark": false,
+    "darkness_level": 112.4,
+    "replaced_previous": false,
     "second_pass": false,
     "second_pass_prompt": null,
     "box": [x1, y1, x2, y2],
@@ -176,6 +179,11 @@ src/visual_memory/
   }
 }
 ```
+
+Teach behavior:
+- Label is always the user's original prompt string, not the GDINO-internal token (matters when second-pass prompts like "a wallet" are used).
+- Auto-replace: if any items with this label already exist, they are deleted before the new embedding is stored. No confirmation. `replaced_previous: true` in the result lets the frontend say "Updated existing memory" instead of "New memory saved".
+- Historical avg confidence is captured before the delete, so the quality tier is still informed by past teaches.
 
 Detection quality tiers:
 - When the label has prior teaches: score is normalized by historical avg confidence for that label, so inherently hard-to-detect labels are not penalized vs their baseline.

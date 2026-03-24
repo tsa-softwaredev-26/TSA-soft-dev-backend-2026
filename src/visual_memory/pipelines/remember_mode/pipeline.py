@@ -216,7 +216,9 @@ class RememberPipeline:
             }
 
         box = detection["box"]
-        label = detection["label"]
+        # Always use the user's original prompt as the canonical label so that
+        # second-pass reformulations ("a wallet") don't pollute the stored name.
+        label = prompt
         score = detection["score"]
 
         # Crop detected region
@@ -252,7 +254,11 @@ class RememberPipeline:
             label_embedding = self.text_embedder.embed_text(label)
 
         # Query historical average BEFORE writing the new item
-        avg_conf = self.db.get_label_avg_confidence(prompt)
+        avg_conf = self.db.get_label_avg_confidence(label)
+
+        # Auto-replace: remove any previous teaches for this label before storing
+        # the new one. Queried avg_conf already captured the history above.
+        replaced_count = self.db.delete_items_by_label(label)
 
         self.add_to_database(
             combined,
@@ -278,6 +284,7 @@ class RememberPipeline:
             "is_blurry": is_blurry,
             "is_dark": False,
             "darkness_level": round(lum, 2),
+            "replaced_previous": replaced_count > 0,
             "second_pass": second_pass_prompt is not None,
             "second_pass_prompt": second_pass_prompt,
             "box": box,
