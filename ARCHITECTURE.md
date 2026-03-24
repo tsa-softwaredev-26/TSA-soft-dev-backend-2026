@@ -138,7 +138,7 @@ src/visual_memory/
 │       ├── settings_route.py           # GET /settings, PATCH /settings (ML tuning)
 │       ├── user_settings_route.py      # GET /user-settings, PATCH /user-settings (user prefs)
 │       ├── find.py                     # GET /find - last-seen location query (Ask Mode)
-│       └── items.py                    # DELETE /items/<label> - permanently remove a taught object
+│       └── items.py                    # GET /items, DELETE /items/<label>
 └── tests/                             # Test scripts + test data
     ├── scripts/                        # Runnable .py test scripts
     ├── input_images/                   # Object test images
@@ -455,7 +455,7 @@ Single worker is required - model state is process-local.
 
 Models are loaded once at startup via `warm_all()` in `create_app()`. Upload cap: 50MB.
 
-**Endpoints:** GET /health, POST /remember, POST /scan, POST /feedback, POST /retrain, GET /settings, PATCH /settings, GET /user-settings, PATCH /user-settings, GET /find, DELETE /items/<label>.
+**Endpoints:** GET /health, POST /remember, POST /scan, POST /feedback, POST /retrain (internal - auto-triggered server-side), GET /settings, PATCH /settings, GET /user-settings, PATCH /user-settings, GET /find, GET /items, DELETE /items/<label>.
 
 See `FRONTEND_GUIDE.md` for full request/response schemas, field reference, and integration patterns.
 
