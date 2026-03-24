@@ -32,6 +32,7 @@ class RememberPipeline:
             image_path=metadata.get("image_path", ""),
             confidence=metadata.get("confidence", 0.0),
             timestamp=time.time(),
+            label_embedding=metadata.get("label_embedding"),
         )
 
     def run(self, image_path: str | Path, prompt: str):
@@ -89,6 +90,10 @@ class RememberPipeline:
         # Build combined embedding (image + text) for consistent matching
         combined = make_combined_embedding(embedding, text_embedding)
 
+        label_embedding = None
+        if self.text_embedder is not None:
+            label_embedding = self.text_embedder.embed_text(label)
+
         # Hook for database storage
         self.add_to_database(
             combined,
@@ -99,6 +104,7 @@ class RememberPipeline:
                 "timestamp": None,
                 "image_path": str(image_path),
                 "ocr_text": ocr_text,
+                "label_embedding": label_embedding,
             }
         )
 

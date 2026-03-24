@@ -103,7 +103,7 @@ iPhone 15 Plus reference: `f_mm=6.24`, `sensor_width=8.64mm` -> `focal_length_px
       "narration": "Wallet to your left, 2.3 feet away.",
       "distance_ft": 2.3,
       "box": [12, 44, 210, 380],
-      "crop_b64": "<base64-encoded JPEG>",
+      "sighting_id": 41,
       "ocr_text": "RFID Blocking"
     },
     {
@@ -114,7 +114,7 @@ iPhone 15 Plus reference: `f_mm=6.24`, `sensor_width=8.64mm` -> `focal_length_px
       "narration": "May be house keys to your right, focus to verify.",
       "distance_ft": 4.1,
       "box": [640, 100, 820, 300],
-      "crop_b64": "<base64-encoded JPEG>",
+      "sighting_id": 42,
       "ocr_text": null
     }
   ]
@@ -125,13 +125,14 @@ iPhone 15 Plus reference: `f_mm=6.24`, `sensor_width=8.64mm` -> `focal_length_px
 
 | Field | Always present | Notes |
 |-------|---------------|-------|
-| `scan_id` | yes | UUID hex - pass to `/feedback` |
+| `scan_id` | yes | UUID hex - pass to `/feedback` and `/crop` |
 | `label` | yes | Object name as taught |
 | `similarity` | yes | Cosine similarity score, 0-1 |
 | `confidence` | yes | `"high"` / `"medium"` / `"low"` - see thresholds below |
 | `direction` | yes | One of 5 zones - see below |
 | `narration` | yes | Ready-to-speak string |
 | `box` | yes | `[x1, y1, x2, y2]` in pixels |
+| `sighting_id` | yes | DB id - pass to `DELETE /sightings/<id>` to remove a false positive |
 | `distance_ft` | only with depth | Metric depth in feet |
 | `ocr_text` | only when found | Text extracted from the object |
 
@@ -175,6 +176,76 @@ Fetch the cropped image for a specific match by its index in the scan result arr
 **404** if `scan_id` has expired (last 50 scans cached) or `index` is out of range.
 
 Example: `GET /crop?scan_id=a3f9c2b1...&index=1`
+
+---
+
+### DELETE /sightings/<id>
+
+Remove a false-positive sighting so it does not appear in `/find` results. Call this when the user dismisses a scan match as wrong - `sighting_id` is returned in each match from `/scan`.
+
+**Request:** no body
+
+**Response:**
+```json
+{ "deleted": true, "id": 41 }
+```
+
+**404** if the sighting ID does not exist.
+
+---
+
+### GET /find
+
+Ask Mode - retrieve the last known location of a taught object. Searches by label with fuzzy semantic matching (so `"my wallet"` will match a label stored as `"wallet"`).
+
+**Request:** query params
+
+| Param | Type | Required | Notes |
+|-------|------|----------|-------|
+| `label` | string | no | Object to search for. Omit to get last sighting of every known object. |
+| `limit` | integer | no | Max sightings to return (1-100, default 1) |
+| `since` | float | no | Unix timestamp - only return sightings after this time |
+| `before` | float | no | Unix timestamp - only return sightings before this time |
+
+**Response (label found - exact or fuzzy match):**
+```json
+{
+  "label": "my wallet",
+  "found": true,
+  "matched_label": "wallet",
+  "last_sighting": {
+    "id": 41,
+    "label": "wallet",
+    "timestamp": 1742860412.3,
+    "last_seen": "3 minutes ago",
+    "direction": "to your left",
+    "distance_ft": 2.3,
+    "similarity": 0.72,
+    "crop_path": "/path/to/scans/abc123_0.jpg"
+  },
+  "sightings": [...]
+}
+```
+
+`matched_label` is only present when a fuzzy match was used (query did not exactly match any stored label).
+
+**Response (no label param - overview of all known objects):**
+```json
+{
+  "results": [
+    { "id": 41, "label": "wallet", "last_seen": "3 minutes ago", ... },
+    { "id": 38, "label": "house keys", "last_seen": "2 hours ago", ... }
+  ],
+  "count": 2
+}
+```
+
+Results are ordered most-recently-seen first.
+
+**Response (not found):**
+```json
+{ "label": "wallet", "found": false, "sightings": [] }
+```
 
 ---
 
@@ -361,6 +432,29 @@ The full personalization loop:
 ```
 
 The model starts as identity (no effect) and gradually adapts. `head_weight` in the retrain response shows how much influence the personalized model currently has (ramps up as more feedback accumulates, capped at 1.0).
+
+---
+
+## Scan -> Sightings -> Find (Ask Mode)
+
+Every successful scan match is automatically saved as a sighting. Ask Mode queries that history:
+
+```
+1. POST /scan
+   - Each match includes a sighting_id
+
+2. User swipes through matches
+   - False positive? Call DELETE /sightings/<sighting_id> immediately
+   - This removes it from Ask Mode history before it pollutes spatial memory
+
+3. Later: GET /find?label=wallet
+   - Returns last known location with direction, distance, and human-readable time
+   - Fuzzy match: "my wallet", "the wallet", "brown wallet" all resolve to "wallet"
+   - Use last_sighting.narration or build your own from direction + distance_ft + last_seen
+
+4. GET /find (no label)
+   - Returns the most recent sighting per known object - good for a "where is everything" overview
+```
 
 ---
 

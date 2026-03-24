@@ -29,22 +29,37 @@ def _format_sighting(row: dict) -> dict:
 
 
 def _fuzzy_label_match(query: str, threshold: float) -> list[str]:
-    """Return known labels whose text embedding is within `threshold` of the query."""
+    """Return known labels whose text embedding is within `threshold` of the query.
+
+    Uses stored label embeddings from DB when available; falls back to
+    embedding on the fly for labels that predate the label_embedding column.
+    """
     from visual_memory.api.pipelines import get_scan_pipeline
     from visual_memory.utils.similarity_utils import cosine_similarity
 
     db = get_database()
-    labels = db.get_known_labels()
-    if not labels:
-        return []
     pipeline = get_scan_pipeline()
     if pipeline.text_embedder is None:
         return []
+
     query_emb = pipeline.text_embedder.embed_text(query)
+
+    # Build label -> embedding map; stored embeddings take priority
+    stored = {row["label"]: row["embedding"] for row in db.get_label_embeddings()}
+    all_labels = db.get_known_labels()
+    label_embs: dict[str, object] = {}
+    for lbl in all_labels:
+        if lbl in stored:
+            label_embs[lbl] = stored[lbl]
+        else:
+            label_embs[lbl] = pipeline.text_embedder.embed_text(lbl)
+
+    if not label_embs:
+        return []
+
     matched: list[tuple[str, float]] = []
-    for lbl in labels:
-        lbl_emb = pipeline.text_embedder.embed_text(lbl)
-        sim = cosine_similarity(query_emb, lbl_emb).item()
+    for lbl, emb in label_embs.items():
+        sim = cosine_similarity(query_emb, emb).item()
         if sim >= threshold:
             matched.append((lbl, sim))
     matched.sort(key=lambda x: x[1], reverse=True)
