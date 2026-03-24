@@ -26,6 +26,24 @@ class Settings:
     # Narration (scan mode)
     narration_high_confidence: float = 0.6
 
+    # Detection quality tiers (remember mode, GroundingDINO score)
+    # When no label history: absolute thresholds apply.
+    # When label history exists: score is normalized by avg confidence, then tiered.
+    # score < detection_quality_low_max  -> "low"
+    # score < detection_quality_high_min -> "medium"
+    # score >= detection_quality_high_min -> "high"
+    detection_quality_low_max: float = 0.40
+    detection_quality_high_min: float = 0.65
+
+    # Image sharpness via Laplacian variance (remember mode).
+    # Values below this threshold are flagged as blurry.
+    # Typical range: 50 (very blurry) to 500+ (sharp). 100 is a good general threshold.
+    blur_sharpness_threshold: float = 100.0
+
+    # Second-pass detection (remember mode): retry with reformulated prompts when
+    # the first detection attempt returns nothing. Disable to save latency.
+    detection_second_pass_enabled: bool = True
+
     # OCR (text recognition)
     ocr_backend: str = "paddle"
     ocr_languages: list = field(default_factory=lambda: ["en"])

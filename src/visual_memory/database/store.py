@@ -151,6 +151,16 @@ class DatabaseStore:
                 result.append({"label": label, "embedding": self._blob_to_tensor(blob)})
         return result
 
+    def get_label_avg_confidence(self, label: str) -> Optional[float]:
+        """Average detection confidence for all previous teaches of this label. None if no history."""
+        row = self._conn.execute(
+            "SELECT AVG(confidence) FROM items WHERE label = ? AND confidence > 0",
+            (label,),
+        ).fetchone()
+        if row and row[0] is not None:
+            return float(row[0])
+        return None
+
     def delete_item(self, item_id: int) -> bool:
         cur = self._conn.execute("DELETE FROM items WHERE id = ?", (item_id,))
         self._conn.commit()

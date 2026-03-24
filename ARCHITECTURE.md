@@ -151,9 +151,47 @@ src/visual_memory/
 ## Module Reference
 
 ### `pipelines/remember_mode/pipeline.py` - `RememberPipeline`
-- `run(image_path: str | Path, prompt: str) -> dict`
-- Returns `{"success": bool, "message": str, "result": {"label": str, "confidence": float, "box": [x1,y1,x2,y2], "ocr_text": str, "ocr_confidence": float} | None}`
+- `run(image_path, prompt) -> dict` - full pipeline: detect -> embed -> OCR -> DB write
+- `detect_score(image_path, prompt) -> dict` - detection only, no embed or DB write; used by multi-image route to rank candidates
+- `_detect_with_fallback(image, prompt)` - returns `(detection, second_pass_prompt)`: tries original prompt first, then `_SECOND_PASS_TEMPLATES` if nothing found and `detection_second_pass_enabled=True`
 - `add_to_database(embedding, metadata)` - persists combined embedding to SQLite via DatabaseStore
+
+`run()` result shape:
+```json
+{
+  "success": true,
+  "message": "...",
+  "result": {
+    "label": "wallet",
+    "confidence": 0.52,
+    "detection_quality": "low | medium | high",
+    "detection_hint": "human-readable guidance string",
+    "blur_score": 143.7,
+    "is_blurry": false,
+    "second_pass": false,
+    "second_pass_prompt": null,
+    "box": [x1, y1, x2, y2],
+    "ocr_text": "",
+    "ocr_confidence": 0.0
+  }
+}
+```
+
+Detection quality tiers:
+- When the label has prior teaches: score is normalized by historical avg confidence for that label, so inherently hard-to-detect labels are not penalized vs their baseline.
+- Without history: absolute thresholds (`detection_quality_low_max`, `detection_quality_high_min`) apply.
+- Blur (`is_blurry`) is determined by Laplacian variance of the full image vs `blur_sharpness_threshold`.
+- `detection_hint` is a function of both quality tier and blur, giving the most actionable user-facing message.
+
+Second-pass detection:
+- Triggers only when the first `detector.detect()` call returns None.
+- Tries templates in `_SECOND_PASS_TEMPLATES`: `"a {prompt}"`, `"{prompt} object"`, `"close up of a {prompt}"`.
+- Result includes `second_pass: true` and `second_pass_prompt` so the client can log or surface it.
+- Planned: if all second-pass templates also fail, call Claude API (claude-haiku) with the image and label to suggest a reformulated prompt, then retry once more. This avoids teaching the user a label GDINO can never detect.
+
+Multi-image (POST /remember with `images[]`):
+- Frontend sends N frames (burst or sequential), backend runs `detect_score` on all, picks highest confidence, runs full pipeline only on the winner.
+- `images_tried` and `images_with_detection` added to response when multi-image path is taken.
 
 ### `pipelines/scan_mode/pipeline.py` - `ScanPipeline`
 - `__init__(focal_length_px: float, db_path: str | Path = None)` - loads models + fetches DB embeddings on init
@@ -195,6 +233,9 @@ src/visual_memory/
 - Toggles (env-overridable): `enable_depth` (`ENABLE_DEPTH`), `enable_ocr` (`ENABLE_OCR`), `enable_dedup` (`ENABLE_DEDUP`)
 - Personalization: `projection_head_path` ("models/projection_head.pt"), `projection_head_dim` (1536)
 - Learning: `enable_learning` (`ENABLE_LEARNING`), `min_feedback_for_training` (10), `projection_head_weight` (1.0), `projection_head_ramp_at` (50), `projection_head_epochs` (20)
+- Detection quality (remember mode): `detection_quality_low_max` (0.40), `detection_quality_high_min` (0.65)
+- Image sharpness: `blur_sharpness_threshold` (100.0) - Laplacian variance below this = blurry
+- Second pass: `detection_second_pass_enabled` (True) - retry with reformulated prompts on failed detect
 - API: `api_host` ("127.0.0.1"), `api_port` (5000)
 
 ### `engine/object_detection/prompt_based.py` - `GroundingDinoDetector`
@@ -286,14 +327,25 @@ src/visual_memory/
 ```
 image_path + text prompt
     -> load_image()
+    -> _blur_score(image)                       -> blur_score, is_blurry
     -> GroundingDinoDetector.detect(image, prompt)
+        [if None] -> retry with _SECOND_PASS_TEMPLATES  -> detection or None
+    -> [if still None] return failure + blur info
     -> crop_object(image, box)
-    -> TextRecognizer.recognize(crop)        -> OCR text
-    -> ImageEmbedder.embed(crop)              -> image embedding (1024-dim)
-    -> CLIPTextEmbedder.embed_text(ocr_text)  -> text embedding (512-dim)
-    -> make_combined_embedding()              -> combined (1536-dim)
-    -> add_to_database()                    <- stub, awaiting DB integration
+    -> db.get_label_avg_confidence(prompt)      -> avg_conf (historical baseline)
+    -> TextRecognizer.recognize(crop)           -> OCR text
+    -> ImageEmbedder.embed(crop)                -> image embedding (1024-dim)
+    -> CLIPTextEmbedder.embed_text(ocr_text)    -> text embedding (512-dim)
+    -> make_combined_embedding()                -> combined (1536-dim)
+    -> add_to_database()
+    -> _score_quality(score, avg_conf)          -> "low" | "medium" | "high"
+    -> _quality_hint(quality, is_blurry)        -> hint string
     -> return {"success": bool, "result": {...}}
+
+Multi-image path (POST /remember with images[]):
+    -> detect_score(each image)                 -> rank by score (no embed/DB)
+    -> pick best
+    -> run(best image)                          -> single DB write
 ```
 
 ### Scan Mode
