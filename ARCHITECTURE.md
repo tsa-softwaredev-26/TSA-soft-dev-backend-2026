@@ -196,7 +196,7 @@ Second-pass detection:
 - Triggers only when the first `detector.detect()` call returns None.
 - Tries templates in `_SECOND_PASS_TEMPLATES`: `"a {prompt}"`, `"{prompt} object"`, `"close up of a {prompt}"`.
 - Result includes `second_pass: true` and `second_pass_prompt` so the client can log or surface it.
-- Planned: if all second-pass templates also fail, call Claude API (claude-haiku) with the image and label to suggest a reformulated prompt, then retry once more. This avoids teaching the user a label GDINO can never detect.
+- Planned: if all second-pass templates also fail, run a local lightweight LLM (Llama 3.2 1B via Ollama) to suggest alternative phrasings, then retry once. No API tokens; runs offline. Hook point: end of `_detect_with_fallback()`.
 
 Multi-image (POST /remember with `images[]`):
 - Frontend sends N frames (burst or sequential), backend runs `detect_score` on all, picks highest confidence, runs full pipeline only on the winner.
