@@ -24,11 +24,6 @@ class ScanPipeline:
         self.estimator       = registry.depth_estimator if _settings.enable_depth else None
         self.focal_length_px = focal_length_px
 
-        self._head = ProjectionHead(dim=_settings.projection_head_dim)
-        _head_path = Path(_settings.projection_head_path)
-        self._head_trained = self._head.load(_head_path)
-        self._head.eval()
-
         # learning state - readable/settable at runtime via set_enable_learning / set_head_weight
         self._enable_learning: bool = _settings.enable_learning
         self._head_weight: float    = _settings.projection_head_weight
@@ -37,11 +32,26 @@ class ScanPipeline:
         self._triplet_count: int    = 0
 
         self.db = DatabaseStore(db_path if db_path is not None else Path(_settings.db_path))
+
+        self._head = ProjectionHead(dim=_settings.projection_head_dim)
+        self._head_trained = self._load_head()
+        self._head.eval()
         items = self.db.get_all_items()
         self.database_embeddings = [(item["label"], item["combined_embedding"]) for item in items]
 
         # scan_id -> {label -> (anchor_emb, query_emb)} — capped at _SCAN_CACHE_MAX entries
         self._emb_cache: OrderedDict = OrderedDict()
+
+    def _load_head(self) -> bool:
+        """Load projection head weights: DB first, file fallback.
+
+        Returns True if weights were loaded from either source.
+        """
+        state_dict = self.db.load_projection_head()
+        if state_dict is not None:
+            self._head.load_state_dict(state_dict)
+            return True
+        return self._head.load(Path(_settings.projection_head_path))
 
     def reload_database(self):
         """Refresh in-memory database embeddings from the DB store."""
@@ -56,12 +66,11 @@ class ScanPipeline:
         return entry.get(label)
 
     def reload_head(self) -> bool:
-        """Re-read projection head weights from disk after a retrain.
+        """Re-read projection head weights (DB first, file fallback) after a retrain.
 
-        Returns True if weights were loaded, False if the file does not exist.
+        Returns True if weights were loaded from either source.
         """
-        _head_path = Path(_settings.projection_head_path)
-        self._head_trained = self._head.load(_head_path)
+        self._head_trained = self._load_head()
         self._head.eval()
         return self._head_trained
 
