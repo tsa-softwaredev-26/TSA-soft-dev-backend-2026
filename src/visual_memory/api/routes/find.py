@@ -1,4 +1,5 @@
 import time
+from typing import Optional
 
 from flask import Blueprint, request, jsonify
 
@@ -27,10 +28,44 @@ def _format_sighting(row: dict) -> dict:
     return out
 
 
+def _fuzzy_label_match(query: str, threshold: float) -> list[str]:
+    """Return known labels whose text embedding is within `threshold` of the query."""
+    from visual_memory.api.pipelines import get_scan_pipeline
+    from visual_memory.utils.similarity_utils import cosine_similarity
+
+    db = get_database()
+    labels = db.get_known_labels()
+    if not labels:
+        return []
+    pipeline = get_scan_pipeline()
+    if pipeline.text_embedder is None:
+        return []
+    query_emb = pipeline.text_embedder.embed_text(query)
+    matched: list[tuple[str, float]] = []
+    for lbl in labels:
+        lbl_emb = pipeline.text_embedder.embed_text(lbl)
+        sim = cosine_similarity(query_emb, lbl_emb).item()
+        if sim >= threshold:
+            matched.append((lbl, sim))
+    matched.sort(key=lambda x: x[1], reverse=True)
+    return [lbl for lbl, _ in matched]
+
+
+def _parse_float_param(value: str, name: str):
+    """Parse a float query param; return (float, None) or (None, error response)."""
+    try:
+        return float(value), None
+    except ValueError:
+        from flask import jsonify
+        return None, (jsonify({"error": f"{name} must be a Unix timestamp"}), 400)
+
+
 @find_bp.get("/find")
 def find():
     label = request.args.get("label", "").strip()
     limit_raw = request.args.get("limit", "1").strip()
+    since_raw = request.args.get("since", "").strip()
+    before_raw = request.args.get("before", "").strip()
 
     try:
         limit = int(limit_raw)
@@ -39,10 +74,21 @@ def find():
     except ValueError:
         return jsonify({"error": "limit must be an integer between 1 and 100"}), 400
 
+    since: Optional[float] = None
+    if since_raw:
+        since, err = _parse_float_param(since_raw, "since")
+        if err:
+            return err
+
+    before: Optional[float] = None
+    if before_raw:
+        before, err = _parse_float_param(before_raw, "before")
+        if err:
+            return err
+
     db = get_database()
 
     if not label:
-        # No label given - return the most recent sighting for each known label.
         labels = db.get_known_labels()
         results = []
         for lbl in labels:
@@ -51,14 +97,29 @@ def find():
                 results.append(_format_sighting(row))
         return jsonify({"results": results, "count": len(results)})
 
-    rows = db.get_sightings(label=label, limit=limit)
+    rows = db.get_sightings(label=label, limit=limit, since=since, before=before)
+
+    fuzzy_matched: Optional[str] = None
+    if not rows:
+        from visual_memory.api.pipelines import get_settings
+        settings = get_settings()
+        candidates = _fuzzy_label_match(label, settings.text_similarity_threshold)
+        if candidates:
+            fuzzy_matched = candidates[0]
+            rows = db.get_sightings(
+                label=fuzzy_matched, limit=limit, since=since, before=before
+            )
+
     if not rows:
         return jsonify({"label": label, "found": False, "sightings": []})
 
     sightings = [_format_sighting(r) for r in rows]
-    return jsonify({
+    out = {
         "label": label,
         "found": True,
         "last_sighting": sightings[0],
         "sightings": sightings,
-    })
+    }
+    if fuzzy_matched is not None:
+        out["matched_label"] = fuzzy_matched
+    return jsonify(out)

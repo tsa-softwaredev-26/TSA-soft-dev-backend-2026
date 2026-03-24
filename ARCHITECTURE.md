@@ -544,8 +544,8 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - [x] `user_state` table: store serialized ProjectionHead weights per user in DB; `/retrain` saves to DB after training
 - [x] `ScanPipeline._load_head()` - loads projection head from DB first, falls back to file; used by `__init__` and `reload_head()`
 - [x] `sightings` table: every successful `/scan` match writes label, timestamp, direction, distance_ft, similarity, crop_path; `GET /find?label=<q>` queries it; `DELETE /sightings/<id>` removes a false-positive
-- [ ] Fuzzy label search in `/find`: embed the query string via CLIPTextEmbedder (available as `get_scan_pipeline().text_embedder`), embed each label from `get_known_labels()`, return labels above cosine similarity threshold - handles "wallet" matching "my brown wallet" etc.
-- [ ] History-aware sightings retrieval: add time-range params to `/find` (`since`, `before`), recency-weighted ranking; sightings are retained indefinitely by design (personal spatial memory, not a recent-activity log) - prune only after search quality is optimized
+- [x] Fuzzy label search in `/find`: embed the query string via CLIPTextEmbedder (available as `get_scan_pipeline().text_embedder`), embed each label from `get_known_labels()`, return labels above cosine similarity threshold - handles "wallet" matching "my brown wallet" etc.
+- [x] History-aware sightings retrieval: add time-range params to `/find` (`since`, `before`), recency-weighted ranking; sightings are retained indefinitely by design (personal spatial memory, not a recent-activity log) - prune only after search quality is optimized
 
 
 ### Learning / Personalization
@@ -571,6 +571,12 @@ Steps needed before deploying to a Linux/NVIDIA server (can be completed by an a
 - **Bloat Prevention** - Duplicate entry detection, pruning unused entries, user confirmation before overwriting similar embeddings.
 - **HNSW index** - Marginal benefit below ~10k entries; defer until scale requires it.
 - **Pipeline batching** - ScanPipeline can call `batch_embed()` and `detect_all_batch()` instead of per-crop loops for full GPU utilization on the server.
+-   One thing to watch: the scans/ dir is created lazily on first scan result. If
+  the server doesn't have write permission at that path (e.g. read-only
+  container), the crop save will throw and bubble up through the route. For
+  production that directory path should come from a config value (env var or
+  settings.py) pointing to a writable location, not hardcoded relative to the
+  source file.
 
 ---
 

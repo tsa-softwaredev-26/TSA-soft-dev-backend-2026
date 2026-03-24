@@ -180,19 +180,31 @@ class DatabaseStore:
             return None
         return self._sighting_row_to_dict(row)
 
-    def get_sightings(self, label: Optional[str] = None, limit: int = 20) -> list[dict]:
+    def get_sightings(
+        self,
+        label: Optional[str] = None,
+        limit: int = 20,
+        since: Optional[float] = None,
+        before: Optional[float] = None,
+    ) -> list[dict]:
+        conditions: list[str] = []
+        params: list = []
         if label is not None:
-            rows = self._conn.execute(
-                "SELECT id, label, timestamp, direction, distance_ft, similarity, crop_path "
-                "FROM sightings WHERE label = ? ORDER BY timestamp DESC LIMIT ?",
-                (label, limit),
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT id, label, timestamp, direction, distance_ft, similarity, crop_path "
-                "FROM sightings ORDER BY timestamp DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
+            conditions.append("label = ?")
+            params.append(label)
+        if since is not None:
+            conditions.append("timestamp >= ?")
+            params.append(since)
+        if before is not None:
+            conditions.append("timestamp <= ?")
+            params.append(before)
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        params.append(limit)
+        rows = self._conn.execute(
+            f"SELECT id, label, timestamp, direction, distance_ft, similarity, crop_path "
+            f"FROM sightings {where} ORDER BY timestamp DESC LIMIT ?",
+            params,
+        ).fetchall()
         return [self._sighting_row_to_dict(r) for r in rows]
 
     def get_known_labels(self) -> list[str]:
