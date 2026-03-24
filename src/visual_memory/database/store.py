@@ -35,6 +35,16 @@ class DatabaseStore:
                 projection_head  BLOB,
                 user_settings    TEXT
             );
+            CREATE TABLE IF NOT EXISTS sightings (
+                id           INTEGER PRIMARY KEY,
+                label        TEXT    NOT NULL,
+                timestamp    REAL    NOT NULL,
+                direction    TEXT,
+                distance_ft  REAL,
+                similarity   REAL
+            );
+            CREATE INDEX IF NOT EXISTS sightings_label_ts
+                ON sightings (label, timestamp DESC);
         """)
         # migrate existing DBs that predate the user_settings column
         try:
@@ -132,6 +142,70 @@ class DatabaseStore:
             return json.loads(row[0])
         except (json.JSONDecodeError, TypeError):
             return None
+
+    # ---- sightings table ----
+
+    def add_sighting(
+        self,
+        label: str,
+        direction: Optional[str] = None,
+        distance_ft: Optional[float] = None,
+        similarity: Optional[float] = None,
+        timestamp: Optional[float] = None,
+    ) -> int:
+        if timestamp is None:
+            timestamp = time.time()
+        cur = self._conn.execute(
+            "INSERT INTO sightings (label, timestamp, direction, distance_ft, similarity) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (label, timestamp, direction, distance_ft, similarity),
+        )
+        self._conn.commit()
+        return cur.lastrowid
+
+    def get_last_sighting(self, label: str) -> Optional[dict]:
+        row = self._conn.execute(
+            "SELECT id, label, timestamp, direction, distance_ft, similarity "
+            "FROM sightings WHERE label = ? ORDER BY timestamp DESC LIMIT 1",
+            (label,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._sighting_row_to_dict(row)
+
+    def get_sightings(self, label: Optional[str] = None, limit: int = 20) -> list[dict]:
+        if label is not None:
+            rows = self._conn.execute(
+                "SELECT id, label, timestamp, direction, distance_ft, similarity "
+                "FROM sightings WHERE label = ? ORDER BY timestamp DESC LIMIT ?",
+                (label, limit),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT id, label, timestamp, direction, distance_ft, similarity "
+                "FROM sightings ORDER BY timestamp DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [self._sighting_row_to_dict(r) for r in rows]
+
+    def get_known_labels(self) -> list[str]:
+        """Return labels that have at least one sighting, most recently seen first."""
+        rows = self._conn.execute(
+            "SELECT label FROM sightings GROUP BY label ORDER BY MAX(timestamp) DESC"
+        ).fetchall()
+        return [r[0] for r in rows]
+
+    @staticmethod
+    def _sighting_row_to_dict(row: tuple) -> dict:
+        sid, label, timestamp, direction, distance_ft, similarity = row
+        return {
+            "id": sid,
+            "label": label,
+            "timestamp": timestamp,
+            "direction": direction,
+            "distance_ft": distance_ft,
+            "similarity": similarity,
+        }
 
     # ---- lifecycle ----
 

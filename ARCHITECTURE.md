@@ -136,7 +136,8 @@ src/visual_memory/
 │       ├── feedback.py                 # POST /feedback
 │       ├── retrain.py                  # POST /retrain
 │       ├── settings_route.py           # GET /settings, PATCH /settings (ML tuning)
-│       └── user_settings_route.py      # GET /user-settings, PATCH /user-settings (user prefs)
+│       ├── user_settings_route.py      # GET /user-settings, PATCH /user-settings (user prefs)
+│       └── find.py                     # GET /find - last-seen location query (Ask Mode)
 └── tests/                             # Test scripts + test data
     ├── scripts/                        # Runnable .py test scripts
     ├── input_images/                   # Object test images
@@ -453,7 +454,7 @@ Single worker is required - model state is process-local.
 
 Models are loaded once at startup via `warm_all()` in `create_app()`. Upload cap: 50MB.
 
-**Endpoints:** GET /health, POST /remember, POST /scan, POST /feedback, POST /retrain, GET /settings, PATCH /settings, GET /user-settings, PATCH /user-settings.
+**Endpoints:** GET /health, POST /remember, POST /scan, POST /feedback, POST /retrain, GET /settings, PATCH /settings, GET /user-settings, PATCH /user-settings, GET /find.
 
 See `FRONTEND_GUIDE.md` for full request/response schemas, field reference, and integration patterns.
 
@@ -541,6 +542,7 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 ### Database
 - [x] `user_state` table: store serialized ProjectionHead weights per user in DB; `/retrain` saves to DB after training
 - [x] `ScanPipeline._load_head()` - loads projection head from DB first, falls back to file; used by `__init__` and `reload_head()`
+- [x] `sightings` table: every successful `/scan` match writes label, timestamp, direction, distance_ft, similarity; `GET /find?label=<q>` queries it
 
 ### Learning / Personalization
 - [ ] Async /retrain - training blocks the request thread (seconds to minutes depending on triplet count); move to a background thread with a GET /retrain/status polling endpoint before server deployment
