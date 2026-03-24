@@ -138,7 +138,8 @@ src/visual_memory/
 │       ├── settings_route.py           # GET /settings, PATCH /settings (ML tuning)
 │       ├── user_settings_route.py      # GET /user-settings, PATCH /user-settings (user prefs)
 │       ├── find.py                     # GET /find - last-seen location query (Ask Mode)
-│       └── items.py                    # GET /items, DELETE /items/<label>, POST /items/<label>/rename
+│       ├── items.py                    # GET /items, DELETE /items/<label>, POST /items/<label>/rename
+│       └── sightings.py               # POST /sightings - user-confirmed location update
 └── tests/                             # Test scripts + test data
     ├── scripts/                        # Runnable .py test scripts
     ├── input_images/                   # Object test images
@@ -206,9 +207,10 @@ Multi-image (POST /remember with `images[]`):
 - `run(query_image: PIL.Image, scan_id: str | None = None, focal_length_px: float | None = None) -> dict`
 - `scan_id`: if provided, caches (anchor_emb, query_emb) per label for /feedback lookup
 - `focal_length_px`: per-call override; falls back to `self.focal_length_px` if None
-- Returns `{"matches": [...], "count": int}`
+- Returns `{"matches": [...], "count": int}` (plus `is_dark`, `darkness_level`, `message` on dark images)
 - Each match (depth enabled): `{"label": str, "similarity": float, "distance_ft": float, "direction": str, "narration": str, "ocr_text": str (optional)}`
 - Each match (depth disabled): `{"label": str, "similarity": float, "box": list, "ocr_text": str (optional)}`
+- Auto-sightings: every successful match calls `db.add_sighting(label, direction, similarity)` so `/find` works immediately without user confirmation. User-confirmed POST /sightings adds `room_name` and spatial data on top.
 - `reload_database()` - re-fetches all items from DB; call after /remember adds an entry
 - `_load_head() -> bool` - loads projection head: DB first (`user_state.projection_head`), file fallback; used by `__init__` and `reload_head()`
 - `reload_head() -> bool` - re-reads projection head (DB first, file fallback) after /retrain; returns True if loaded

@@ -213,6 +213,12 @@ class ScanPipeline:
                                 self._emb_cache.popitem(last=False)
                             self._emb_cache[scan_id] = {}
                         self._emb_cache[scan_id][matched_label] = (anchor_emb, projected_query)
+                direction_auto = _direction_from_box(box, query_image.width)
+                self.db.add_sighting(
+                    label=matched_label,
+                    direction=direction_auto,
+                    similarity=similarity,
+                )
                 entry = {
                     "box": box,
                     "label": matched_label,

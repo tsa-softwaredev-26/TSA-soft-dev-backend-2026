@@ -12,6 +12,7 @@ from visual_memory.api.routes.user_settings_route import user_settings_bp
 from visual_memory.api.routes.crop import crop_bp
 from visual_memory.api.routes.find import find_bp
 from visual_memory.api.routes.items import items_bp
+from visual_memory.api.routes.sightings import sightings_bp
 
 _API_KEY = os.environ.get("API_KEY", "")
 
@@ -39,6 +40,7 @@ def create_app():
     app.register_blueprint(crop_bp)
     app.register_blueprint(find_bp)
     app.register_blueprint(items_bp)
+    app.register_blueprint(sightings_bp)
 
     from visual_memory.api.pipelines import warm_all
     warm_all()
