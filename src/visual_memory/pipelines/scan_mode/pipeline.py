@@ -1,5 +1,3 @@
-import base64
-import io
 from collections import OrderedDict
 from pathlib import Path
 import torch
@@ -29,15 +27,9 @@ def _direction_from_box(bbox: list, img_w: int) -> str:
 
 
 def _confidence_label(similarity: float) -> str:
-    if similarity >= 0.5:  return "high"
-    if similarity >= 0.35: return "medium"
+    if similarity >= 0.35: return "high"
+    if similarity >= 0.25: return "medium"
     return                        "low"
-
-
-def _encode_crop(crop) -> str:
-    buf = io.BytesIO()
-    crop.save(buf, format="JPEG", quality=85)
-    return base64.b64encode(buf.getvalue()).decode()
 
 
 class ScanPipeline:
@@ -66,6 +58,8 @@ class ScanPipeline:
 
         # scan_id -> {label -> (anchor_emb, query_emb)} — capped at _SCAN_CACHE_MAX entries
         self._emb_cache: OrderedDict = OrderedDict()
+        # scan_id -> [PIL Image, ...] in left-to-right match order — for /crop by index
+        self._crop_cache: OrderedDict = OrderedDict()
 
     def _load_head(self) -> bool:
         """Load projection head weights: DB first, file fallback.
@@ -82,6 +76,19 @@ class ScanPipeline:
         """Refresh in-memory database embeddings from the DB store."""
         items = self.db.get_all_items()
         self.database_embeddings = [(item["label"], item["combined_embedding"]) for item in items]
+
+    def get_cached_crop(self, scan_id: str, index: int):
+        """Return the PIL Image crop at the given match index, or None."""
+        crops = self._crop_cache.get(scan_id)
+        if crops is None or index < 0 or index >= len(crops):
+            return None
+        return crops[index]
+
+    def _store_crops(self, scan_id: str, crops: list) -> None:
+        if scan_id not in self._crop_cache:
+            if len(self._crop_cache) >= _SCAN_CACHE_MAX:
+                self._crop_cache.popitem(last=False)
+        self._crop_cache[scan_id] = crops
 
     def get_cached_embeddings(self, scan_id: str, label: str):
         """Return (anchor_emb, query_emb) for a previous scan result, or None."""
@@ -222,6 +229,7 @@ class ScanPipeline:
         # ---- PASS 2: Depth (only once, only if enabled) ----
         if not _settings.enable_depth:
             output_matches = []
+            output_crops = []
             for m in matches:
                 direction = _direction_from_box(m["box"], query_image.width)
                 sim = float(m["similarity"])
@@ -236,16 +244,19 @@ class ScanPipeline:
                     "direction": direction,
                     "narration": narration,
                     "box": m["box"],
-                    "crop_b64": _encode_crop(m["_crop"]),
                 }
                 if "ocr_text" in m:
                     out["ocr_text"] = m["ocr_text"]
                 output_matches.append(out)
+                output_crops.append(m["_crop"])
+            if scan_id is not None:
+                self._store_crops(scan_id, output_crops)
             return {"matches": output_matches, "count": len(output_matches)}
 
         depth_map = self.estimator.estimate(query_image, focal_length_px=_focal)
 
         output_matches = []
+        output_crops = []
 
         for m in matches:
             distance_ft = self.estimator.get_depth_at_bbox(depth_map, m["box"])
@@ -267,11 +278,14 @@ class ScanPipeline:
                     "direction": direction,
                     "narration": narration,
                     "box": m["box"],
-                    "crop_b64": _encode_crop(m["_crop"]),
                 }
                 if "ocr_text" in m:
                     out["ocr_text"] = m["ocr_text"]
                 output_matches.append(out)
+                output_crops.append(m["_crop"])
+
+        if scan_id is not None:
+            self._store_crops(scan_id, output_crops)
 
         return {
             "matches": output_matches,
