@@ -6,7 +6,7 @@ from visual_memory.config import Settings
 from visual_memory.engine.embedding import make_combined_embedding
 from visual_memory.engine.model_registry import registry
 from visual_memory.learning import ProjectionHead
-from visual_memory.utils import crop_object, find_match, deduplicate_matches, get_logger, mean_luminance
+from visual_memory.utils import crop_object, find_match, deduplicate_matches, get_logger, mean_luminance, estimate_text_likelihood
 from visual_memory.database import DatabaseStore
 
 _settings = Settings()
@@ -179,9 +179,11 @@ class ScanPipeline:
 
         for i, (box, score) in enumerate(zip(boxes, scores)):
             img_emb = img_embs[i:i+1]  # (1, 1024)
+            text_likelihood = estimate_text_likelihood(crops[i])
             ocr_text = ""
             text_emb = None
-            if self.text_recognizer is not None:
+            if (self.text_recognizer is not None
+                    and text_likelihood >= _settings.ocr_text_likelihood_threshold):
                 ocr_result = self.text_recognizer.recognize(crops[i])
                 ocr_text = ocr_result["text"]
                 text_emb = self.text_embedder.embed_text(ocr_text) if ocr_text else None
@@ -201,6 +203,7 @@ class ScanPipeline:
                     "event": "scan_text_match",
                     "label": matched_label,
                     "similarity": round(similarity, 4),
+                    "text_likelihood": round(text_likelihood, 3),
                     "ocr_text_length": len(ocr_text),
                 })
                 if scan_id is not None:
@@ -223,6 +226,7 @@ class ScanPipeline:
                     "box": box,
                     "label": matched_label,
                     "similarity": similarity,
+                    "text_likelihood": round(text_likelihood, 3),
                     "_crop": crops[i],
                 }
                 if ocr_text:
@@ -259,6 +263,7 @@ class ScanPipeline:
                     "confidence": _confidence_label(sim),
                     "direction": direction,
                     "narration": narration,
+                    "text_likelihood": m["text_likelihood"],
                     "box": m["box"],
                 }
                 if "ocr_text" in m:
@@ -293,6 +298,7 @@ class ScanPipeline:
                     "distance_ft": float(distance_ft),
                     "direction": direction,
                     "narration": narration,
+                    "text_likelihood": m["text_likelihood"],
                     "box": m["box"],
                 }
                 if "ocr_text" in m:

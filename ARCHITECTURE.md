@@ -609,6 +609,7 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - [ ] Wire `detect_batch()` into RememberPipeline if multi-prompt remember is added
 - [ ] Remove `engine/embedding/projection_head/` empty dir (leftover from earlier experiment)
 - [ ] `str | Path` type hints in pipeline files require Python 3.10+; `pyproject.toml` allows 3.8+ (pre-existing, low priority)
+- [ ] OCR text likelihood threshold tuning: current default 0.10 was chosen heuristically; calibrate against a labelled set of crops with/without text to confirm false-negative rate is acceptable. See `quality_utils.estimate_text_likelihood()`.
 
 ### Database
 - [x] `user_state` table: store serialized ProjectionHead weights per user in DB; `/retrain` saves to DB after training
@@ -618,11 +619,16 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - [x] Fuzzy label search in `/find`: embed the query string via CLIPTextEmbedder (available as `get_scan_pipeline().text_embedder`), embed each label from `get_known_labels()`, return labels above cosine similarity threshold - handles "wallet" matching "my brown wallet" etc.
 - [x] History-aware sightings retrieval: add time-range params to `/find` (`since`, `before`), recency-weighted ranking; sightings are retained indefinitely by design (personal spatial memory, not a recent-activity log) - prune only after search quality is optimized
 
-
 ### Learning / Personalization
-- [ ] Async /retrain - training blocks the request thread (seconds to minutes depending on triplet count); move to a background thread with a GET /retrain/status polling endpoint before server deployment
+- [x] Async /retrain - training runs in a background thread; POST /retrain returns `{"started": true}` immediately; GET /retrain/status polls progress
 - [ ] Persist runtime settings overrides (enable_learning, projection_head_weight, etc.) to DB so they survive restarts; currently in-memory only
+- [ ] Move FeedbackStore from flat .pt files to SQLite - INSERT/SELECT in user DB; removes file dependency, enables per-user isolation. See ARCHITECTURE.md Server Transition Notes.
 - [ ] Test suite: add `test_learning_pipeline.py` covering FeedbackStore roundtrip, triplet loading, trainer convergence, `_apply_head` blending at various triplet counts, `reload_head`, and full /feedback -> /retrain -> /settings endpoint flow
+
+### Deployment
+- [x] gunicorn entry point (`wsgi.py`), systemd unit (`deploy/spaitra.service`), env template (`deploy/env.example`)
+- [x] Full Debian setup guide: `DEPLOY.md` (system deps, CUDA, HuggingFace auth, srv.us tunnel)
+- [x] gunicorn added to `pyproject.toml` dependencies
 
 ---
 
