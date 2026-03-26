@@ -22,9 +22,20 @@ class PaddleOCRRecognizer(BaseTextRecognizer):
     """
 
     def __init__(self) -> None:
+        import torch
         from paddleocr import PaddleOCRVL
-        self.pipeline = PaddleOCRVL()
-        _log.info({"event": "paddle_init", "status": "ready"})
+        # PaddlePaddle supports CUDA and CPU; MPS is not available.
+        device = "gpu" if torch.cuda.is_available() else "cpu"
+        try:
+            self.pipeline = PaddleOCRVL(device=device)
+            _log.info({"event": "paddle_init", "status": "ready", "device": device})
+        except Exception:
+            if device != "cpu":
+                _log.warning({"event": "paddle_init", "status": "gpu_failed_fallback_cpu"})
+                self.pipeline = PaddleOCRVL(device="cpu")
+                _log.info({"event": "paddle_init", "status": "ready", "device": "cpu"})
+            else:
+                raise
 
     def recognize(self, image: Image.Image) -> dict:
         """Run OCR on a PIL Image. Returns {"text", "confidence", "segments"}."""
