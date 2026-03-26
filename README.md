@@ -23,7 +23,7 @@ cd TSA-soft-dev-backend-2026
 python -m venv venv
 source venv/bin/activate
 pip install -e .
-huggingface-cli login
+hf auth login
 python setup_weights.py
 ```
 

@@ -72,14 +72,14 @@ cd TSA-soft-dev-backend-2026
 python -m venv venv
 source venv/bin/activate
 pip install -e .
-huggingface-cli login
+hf auth login
 python setup_weights.py
 ```
 
 `pip install -e .` installs all dependencies including depth-pro from GitHub.
 `setup_weights.py` downloads Depth Pro (~2GB), YOLOE (~80MB), CLIP (~180MB),
 DINOv3 (~1.2GB), and GroundingDINO (~900MB). DINOv3 and GroundingDINO are gated
-on HuggingFace - request access and run `huggingface-cli login` first.
+on HuggingFace - request access and run `hf auth login` first.
 `DepthEstimator` resolves the checkpoint path at import time using `Path(__file__)`.
 
 ### Server Deployment

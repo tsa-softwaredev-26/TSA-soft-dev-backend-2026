@@ -18,7 +18,7 @@
 #   3. Install the package and download weights:
 #      pip install -e . && pip install gunicorn
 #      python setup_weights.py
-#      huggingface-cli login   # needed for gated DINOv3 + GDINO models
+#      hf auth login   # needed for gated DINOv3 + GDINO models
 #
 #   4. Configure environment:
 #      cp deploy/env.example .env
