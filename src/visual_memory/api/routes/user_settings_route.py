@@ -9,7 +9,7 @@ user_settings_bp = Blueprint("user_settings", __name__)
 _PATCHABLE = {
     "performance_mode": str,
     "voice_speed": float,
-    "auto_update_location": bool,
+    "scan_update_location": bool,
     "learning_enabled": bool,
     "button_layout": str,
 }
@@ -22,7 +22,7 @@ def get_user_settings_route():
     Response: {
         "performance_mode": "fast" | "balanced" | "accurate",
         "voice_speed": float,
-        "auto_update_location": bool,
+        "scan_update_location": bool,
         "learning_enabled": bool,
         "button_layout": "default" | "swapped",
         "performance_config": {"depth_enabled": bool, "target_latency": float}
@@ -38,7 +38,7 @@ def patch_user_settings():
     Accepted fields (all optional):
         performance_mode      str   - "fast" | "balanced" | "accurate"
         voice_speed           float - 0.5 to 2.0
-        auto_update_location  bool  - prompt to update location after found
+        scan_update_location  bool  - prompt to update location after found
         learning_enabled      bool  - collect feedback and adapt with use
         button_layout         str   - "default" | "swapped" (stub)
 
