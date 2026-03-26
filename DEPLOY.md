@@ -72,46 +72,28 @@ python3.11 -m venv venv
 source venv/bin/activate
 ```
 
-Install PyTorch - pick one based on your CUDA version:
-```bash
-# CUDA 12.x:
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-
-# CUDA 11.8:
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-
-# CPU-only:
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-```
-
-Verify PyTorch sees the GPU before continuing:
-```bash
-python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
-# Expected: True  <your GPU name>
-```
-
 Install the package and gunicorn:
 ```bash
 pip install -e .
 pip install gunicorn
 ```
 
-**GPU PaddlePaddle (strongly recommended on GPU servers):**
-
-PaddlePaddle GPU packages are not on PyPI. Install from the official Paddle index:
+**GPU servers:** run the helper script to auto-detect your CUDA version and install
+the matching PyTorch and PaddlePaddle GPU packages:
 ```bash
-# CUDA 12.x (drivers 12.0 and above):
-pip install paddlepaddle-gpu==3.0.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu123/
-
-# CUDA 11.8:
-pip install paddlepaddle-gpu==3.0.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu118/
+bash deploy/install_gpu_deps.sh
 ```
 
-Verify: `python -c "import paddle; paddle.utils.run_check()"`
-Expected: "PaddlePaddle is installed successfully! Let's start deep learning with PaddlePaddle now."
+The script reads `nvidia-smi`, selects CUDA 11 or 12 indexes automatically, installs
+both packages, and verifies both can see the GPU. It will print an error and exit if
+drivers are missing. The CPU paddle installed by `pip install -e .` is replaced by
+the GPU version.
 
-The CPU paddle installed by `pip install -e .` is automatically replaced by the above.
-On CPU-only servers, skip this block entirely - PaddleOCR will run on CPU (3-18s/image).
+**CPU-only servers:** install PyTorch CPU and skip PaddlePaddle GPU:
+```bash
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# PaddleOCR will run on CPU (3-18s per image crop) - no further action needed.
+```
 
 ---
 
