@@ -50,6 +50,12 @@ class Settings:
     # this, not dim lighting. Typical dark room with no lights: mean 5-25.
     darkness_threshold: float = 30.0
 
+    # OCR text pre-check: normalized edge density threshold below which OCR is
+    # skipped entirely on a crop. 0.0 = always run OCR, 1.0 = never run.
+    # Range 0.0-1.0; 0.10 skips smooth/plain-colored crops while catching
+    # most product labels, packaging, and text-bearing surfaces.
+    ocr_text_likelihood_threshold: float = 0.10
+
     # OCR (text recognition)
     ocr_backend: str = "paddle"
     ocr_languages: list = field(default_factory=lambda: ["en"])

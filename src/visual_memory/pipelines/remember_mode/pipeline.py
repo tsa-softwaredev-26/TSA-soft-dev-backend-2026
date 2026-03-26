@@ -7,7 +7,7 @@ import pillow_heif
 from PIL import Image
 
 from visual_memory.config import Settings
-from visual_memory.utils import load_image, crop_object, get_logger, mean_luminance
+from visual_memory.utils import load_image, crop_object, get_logger, mean_luminance, estimate_text_likelihood
 from visual_memory.engine.embedding import make_combined_embedding
 from visual_memory.engine.model_registry import registry
 from visual_memory.database import DatabaseStore
@@ -227,11 +227,14 @@ class RememberPipeline:
         # Create image embedding
         embedding = self.img_embedder.embed(cropped)
 
-        # OCR: extract text from the crop (skipped if enable_ocr=False)
+        # OCR: extract text from the crop (skipped if enable_ocr=False or below
+        # text likelihood threshold - saves 3-18s per image on plain objects)
+        text_likelihood = estimate_text_likelihood(cropped)
         ocr_text = ""
         ocr_confidence = 0.0
         text_embedding = None
-        if self.text_recognizer is not None:
+        if (self.text_recognizer is not None
+                and text_likelihood >= _settings.ocr_text_likelihood_threshold):
             ocr_result = self.text_recognizer.recognize(cropped)
             ocr_text = ocr_result["text"]
             ocr_confidence = ocr_result["confidence"]
@@ -241,6 +244,8 @@ class RememberPipeline:
         _log.info({
             "event": "remember_ocr",
             "label": label,
+            "text_likelihood": round(text_likelihood, 3),
+            "ocr_ran": self.text_recognizer is not None and text_likelihood >= _settings.ocr_text_likelihood_threshold,
             "ocr_text_length": len(ocr_text),
             "ocr_confidence": round(ocr_confidence, 4),
             "has_text_embedding": text_embedding is not None,
@@ -288,6 +293,7 @@ class RememberPipeline:
             "second_pass": second_pass_prompt is not None,
             "second_pass_prompt": second_pass_prompt,
             "box": box,
+            "text_likelihood": round(text_likelihood, 3),
             "ocr_text": ocr_text,
             "ocr_confidence": round(ocr_confidence, 4),
         }

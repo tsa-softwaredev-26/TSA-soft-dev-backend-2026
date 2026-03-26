@@ -38,37 +38,103 @@ Health check. No auth required.
 
 Teach the app a new object. Detects the object in the image, embeds it, and saves it to the database. The new item is immediately visible to `/scan` after this returns.
 
-**Request:** `multipart/form-data`
+**Single image - request:** `multipart/form-data`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `image` | file | yes |
+| `image` | file | yes (single frame) |
 | `prompt` | string | yes - e.g. `"wallet"`, `"house keys"` |
+
+**Multi-image (recommended) - request:** `multipart/form-data`
+
+Send 2-5 frames captured in quick succession (~500ms apart). Backend picks the frame with the highest-confidence detection and returns a single result.
+
+| Field | Type | Required |
+|-------|------|----------|
+| `images[]` | file[] | yes (2-5 frames) |
+| `prompt` | string | yes |
 
 **Response (success):**
 ```json
 {
   "success": true,
   "message": "Object detected and embedded successfully.",
+  "images_tried": 4,
+  "images_with_detection": 3,
   "result": {
     "label": "wallet",
     "confidence": 0.87,
+    "detection_quality": "high",
+    "detection_hint": "Detection confidence is high.",
+    "blur_score": 143.7,
+    "is_blurry": false,
+    "is_dark": false,
+    "darkness_level": 112.4,
+    "replaced_previous": false,
+    "second_pass": false,
+    "second_pass_prompt": null,
+    "text_likelihood": 0.62,
     "box": [120, 200, 340, 410],
     "ocr_text": "RFID Blocking",
-    "ocr_confidence": 0.91
+    "ocr_confidence": 1.0
   }
 }
 ```
 
-**Response (no detection):**
+**Response (failure - too dark):**
 ```json
-{ "success": false, "message": "No object detected.", "result": null }
+{
+  "success": false,
+  "message": "Image is too dark for detection. Enable the flashlight and retry.",
+  "is_dark": true,
+  "darkness_level": 12.4,
+  "blur_score": 5.1,
+  "is_blurry": false,
+  "result": null
+}
 ```
 
-Notes:
-- `ocr_text` and `ocr_confidence` are only present when OCR found text on the object.
-- `box` is `[x1, y1, x2, y2]` in pixels.
-- If detection fails, prompt the user to move closer or try again.
+**Response (failure - no detection):**
+```json
+{
+  "success": false,
+  "message": "No object detected.",
+  "is_dark": false,
+  "darkness_level": 87.3,
+  "blur_score": 48.2,
+  "is_blurry": true,
+  "result": null
+}
+```
+
+**Result field reference:**
+
+| Field | Notes |
+|-------|-------|
+| `detection_quality` | `"low"` / `"medium"` / `"high"` based on GroundingDINO confidence |
+| `detection_hint` | Human-readable advice string - surface verbatim when quality is low or medium |
+| `blur_score` | Laplacian variance; > 100 is sharp |
+| `is_blurry` | true when `blur_score < 100` |
+| `is_dark` | true when mean luminance < 30 - check this FIRST before other signals |
+| `darkness_level` | Mean grayscale 0-255 |
+| `replaced_previous` | true if a prior teach for this label was overwritten - say "Updated [label]" |
+| `second_pass` | true if detection only succeeded with a reformulated prompt |
+| `text_likelihood` | 0.0-1.0 heuristic estimate of text on the object; > 0.3 = OCR was likely run |
+| `ocr_text` | Raw extracted text (empty string when none found or OCR skipped) |
+| `images_tried` | Only present in multi-image mode |
+| `images_with_detection` | Only present in multi-image mode |
+
+**Frontend signals:**
+
+| Signal | Recommended UX |
+|--------|---------------|
+| `is_dark: true` | PRIORITY: enable flashlight; speak "It's too dark - turning on flashlight" |
+| `detection_quality: "low"` | Show warning; speak `detection_hint` verbatim |
+| `detection_quality: "medium"` | Soft prompt; surface `detection_hint` |
+| `is_blurry: true` + `is_dark: false` | "Hold steady and try again" |
+| `replaced_previous: true` | Say "Updated [label]" not "[label] saved" |
+| `text_likelihood > 0.3` | Show "Text label detected on this item" |
+| `success: false` + `is_dark: false` + `is_blurry: false` | "Try a different angle, better lighting, or a more specific label" |
 
 ---
 
@@ -112,10 +178,21 @@ iPhone 15 Plus reference: `f_mm=6.24`, `sensor_width=8.64mm` -> `focal_length_px
       "direction": "to your right",
       "narration": "May be house keys to your right, focus to verify.",
       "distance_ft": 4.1,
-      "box": [640, 100, 820, 300],
-      "ocr_text": null
+      "text_likelihood": 0.05,
+      "box": [640, 100, 820, 300]
     }
   ]
+}
+```
+
+**Dark scene response** (check `is_dark` at top level, not inside matches):
+```json
+{
+  "matches": [],
+  "count": 0,
+  "is_dark": true,
+  "darkness_level": 8.2,
+  "message": "Image is too dark for detection. Enable the flashlight and retry."
 }
 ```
 
@@ -124,13 +201,15 @@ iPhone 15 Plus reference: `f_mm=6.24`, `sensor_width=8.64mm` -> `focal_length_px
 | Field | Always present | Notes |
 |-------|---------------|-------|
 | `scan_id` | yes | UUID hex - pass to `/feedback` and `/crop` |
+| `is_dark` | top level only | true when scene is too dark; check before processing matches |
 | `label` | yes | Object name as taught - pass to `DELETE /items/<label>` to forget it |
 | `similarity` | yes | Cosine similarity score, 0-1 |
 | `confidence` | yes | `"high"` / `"medium"` / `"low"` - see thresholds below |
 | `direction` | yes | One of 5 zones - see below |
 | `narration` | yes | Ready-to-speak string |
+| `text_likelihood` | yes | 0.0-1.0 heuristic; > 0.3 means the item has a text label and OCR ran |
 | `box` | yes | `[x1, y1, x2, y2]` in pixels |
-| `distance_ft` | only with depth | Metric depth in feet |
+| `distance_ft` | only with depth | Metric depth in feet; absent when `ENABLE_DEPTH=0` or `focal_length_px=0` |
 | `ocr_text` | only when found | Text extracted from the object |
 
 **Confidence thresholds:**
@@ -388,7 +467,7 @@ Update user preferences. Persisted to the database. All fields optional.
 {
   "performance_mode": "fast",
   "voice_speed": 1.2,
-  "auto_update_location": false,
+  "scan_update_location": false,
   "learning_enabled": true,
   "button_layout": "default"
 }
@@ -397,6 +476,138 @@ Update user preferences. Persisted to the database. All fields optional.
 `learning_enabled` is propagated to the scan pipeline immediately (no restart needed).
 
 **400** on type or range errors. Response includes `{"errors": {...}}` with per-field messages.
+
+---
+
+### POST /sightings
+
+Record the location of detected objects. Dual-use: called from remember mode (just taught - where is it?) and scan mode (objects detected - what room?). `room_name` is normalized before storage ("In The Kitchen" -> "kitchen").
+
+**Request:** `application/json`
+
+```json
+{
+  "room_name": "kitchen",
+  "sightings": [
+    { "label": "wallet", "direction": "to your left", "distance_ft": 3.2, "similarity": 0.61 }
+  ]
+}
+```
+
+`direction`, `distance_ft`, and `similarity` are optional - omit them in remember mode.
+`room_name` is optional - omit when room is unknown.
+
+**Response:**
+```json
+{ "saved": 1, "labels": ["wallet"], "room_name": "kitchen" }
+```
+
+`room_name` in the response is the normalized form stored in the database.
+
+**Remember mode flow:**
+```
+POST /remember  ->  success  ->  ask "Where is this?"
+User says "in the kitchen"
+POST /sightings  {"room_name": "kitchen", "sightings": [{"label": "wallet"}]}
+```
+
+**Scan mode flow:**
+```
+POST /scan  ->  matches  ->  ask "Update location? What room?"
+User says "bedroom"
+POST /sightings  {"room_name": "bedroom", "sightings": [all matches + spatial data]}
+```
+
+Auto-sightings: /scan automatically records a sighting (direction only, no room_name) for every match. GET /find works without a POST /sightings call; POST /sightings enriches it with the room name.
+
+---
+
+### POST /items/<label>/rename
+
+Rename a stored memory. Two-step flow to handle conflicts.
+
+**Step 1 - without force:**
+```
+POST /items/wallet/rename
+Content-Type: application/json
+{"new_label": "My Wallet"}
+```
+
+**Response (200 - success):**
+```json
+{"renamed": true, "old_label": "wallet", "new_label": "My Wallet", "count": 1, "replaced": 0}
+```
+
+**Response (409 - conflict):**
+```json
+{"conflict": true, "message": "A memory named \"My Wallet\" already exists (1 item(s)). Send with force=true to overwrite it.", "existing_count": 1}
+```
+
+**Step 2 - user confirms overwrite, send with force:**
+```json
+{"new_label": "My Wallet", "force": true}
+```
+
+**Other error responses:**
+- `404` - old label not found
+- `400` - `new_label` missing or same as current label
+
+**UX flow:**
+1. User swipes left on a memory - reveal Rename / Delete
+2. Tap Rename -> show text input pre-filled with current label
+3. User edits -> POST without force
+4. If 409: alert "Replace existing '[new_label]'?" -> resend with force=true
+5. On success: update the list in-place
+
+---
+
+### POST /retrain
+
+Start personalization model training in the background. Returns immediately; poll `/retrain/status` for results.
+
+**Response (training started):**
+```json
+{"started": true, "triplets": 15}
+```
+
+**Response (already running):**
+```json
+{"started": false, "reason": "already_running"}
+```
+
+**Response (not enough feedback):**
+```json
+{"started": false, "reason": "insufficient_data", "triplets": 3, "min_required": 10}
+```
+
+---
+
+### GET /retrain/status
+
+Poll training progress.
+
+**Response:**
+```json
+{
+  "running": false,
+  "last_result": {
+    "trained": true,
+    "triplets": 15,
+    "final_loss": 0.012345,
+    "head_weight": 0.3
+  },
+  "error": null
+}
+```
+
+`last_result` is null until the first successful training run. `error` is null unless training failed with an exception. `running: true` means training is currently in progress.
+
+**Typical poll flow:**
+```
+POST /retrain  ->  {"started": true}
+poll GET /retrain/status every 5s until running: false
+show result or error
+```
 
 ---
 
@@ -412,11 +623,11 @@ After each scan the user can optionally confirm or deny matches. This powers the
    - For each match, allow confirm/deny (voice or gesture)
    - POST /feedback with scan_id + label + "correct"/"wrong"
 
-3. Retraining happens automatically server-side - no user action needed
+3. Retraining - POST /retrain to start; GET /retrain/status to poll
    - Next /scan uses updated model weights transparently
 ```
 
-The model starts as identity (no effect on scan accuracy) and gradually adapts as feedback accumulates. The frontend does not need to trigger retraining.
+The model starts as identity (no effect on scan accuracy) and gradually adapts as feedback accumulates. Training is async - POST /retrain starts it in the background, poll GET /retrain/status for results. The frontend does not need to trigger retraining automatically; it can be surfaced as a manual "Improve accuracy" action once enough feedback exists.
 
 ---
 

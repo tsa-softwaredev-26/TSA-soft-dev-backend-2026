@@ -8,19 +8,33 @@ version = "0.1.0"
 description = "Visual memory system with object detection for TSA Software Development app"
 requires-python = ">=3.8"
 dependencies = [
+    # Core ML
     "torch>=2.0.0",
+    "torchvision>=0.15.0",
     "transformers>=4.56.0",
+    "huggingface_hub>=0.26.0",
+    "numpy>=1.24.0",
+    # Image processing
     "pillow>=9.0.0",
     "pillow-heif>=0.10.0",
+    # Detection models
     "ultralytics>=8.0.0",
-    "huggingface_hub>=0.26.0",
-    "depth-pro @ git+https://github.com/apple/ml-depth-pro.git",
-    "paddleocr>=3.2.0",
     "einops",
     "addict",
     "easydict",
+    # Depth estimation (Apple Depth Pro)
+    "depth-pro @ git+https://github.com/apple/ml-depth-pro.git",
+    # OCR
+    "paddleocr>=3.2.0",
+    # API server
     "flask>=3.0.0",
+    "gunicorn>=21.0.0",
 ]
+
+# Note: paddlepaddle (CPU) is installed by pip install -e .
+# For GPU servers, replace it after install:
+#   pip install paddlepaddle-gpu==3.0.0        (CUDA 11.x)
+#   pip install paddlepaddle-gpu==3.0.0.post120 (CUDA 12.x)
 
 [project.scripts]
 remember-mode = "visual_memory.pipelines.remember_mode.main:main"
