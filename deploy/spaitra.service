@@ -1,0 +1,23 @@
+[Unit]
+Description=Spaitra Visual Memory API
+After=network.target
+
+[Service]
+Type=simple
+User=spaitra
+Group=spaitra
+WorkingDirectory=/opt/spaitra
+EnvironmentFile=/opt/spaitra/.env
+ExecStart=/opt/spaitra/venv/bin/gunicorn \
+    -w 1 \
+    -b 127.0.0.1:5000 \
+    --timeout 120 \
+    --access-logfile - \
+    wsgi:application
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
