@@ -10,9 +10,10 @@
 #      pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 #      # CPU-only fallback (no GPU): pip install torch torchvision
 #
-#   2. Install paddlepaddle-gpu instead of CPU paddle (match your CUDA version):
-#      pip install paddlepaddle-gpu==3.0.0
-#      # CPU-only fallback: pip install paddlepaddle==3.0.0
+#   2. Install paddlepaddle-gpu instead of CPU paddle (requires Paddle index):
+#      # CUDA 12.x: pip install paddlepaddle-gpu==3.0.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu123/
+#      # CUDA 11.8: pip install paddlepaddle-gpu==3.0.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu118/
+#      # CPU-only: skip this step (CPU paddlepaddle installed by pip install -e .)
 #
 #   3. Install the package and download weights:
 #      pip install -e . && pip install gunicorn
