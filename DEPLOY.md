@@ -1,12 +1,11 @@
 # Spaitra Backend - Deployment Guide
 
-Target: Debian 12 (Bookworm) or 13 (Trixie), Python 3.11, optional NVIDIA GPU.
-Public access via srv.us tunnel pointing to gunicorn on localhost:5000.
+Target: Debian 12+ (Bookworm/Trixie), Python 3.11, optional NVIDIA GPU.
+Public access via srv.us tunnel to gunicorn on localhost:5000.
 
-This guide is for server deployment only. For local development and running tests,
-see the Local Development section in README.md.
+This guide covers server deployment only. For local development, see README.md.
 
-All steps below are manual. Run them in order on a fresh server.
+All steps are manual. Run them in order.
 
 ---
 
@@ -15,25 +14,23 @@ All steps below are manual. Run them in order on a fresh server.
 ```bash
 apt-get update && apt-get install -y \
     python3.11 python3.11-venv python3.11-dev \
-    git gh build-essential wget curl \
+    git gh build-essential curl \
     libglib2.0-0 libsm6 libxrender1 libxext6 libgomp1 \
     libjpeg-dev libpng-dev libtiff-dev libwebp-dev \
     ffmpeg
 ```
 
-**GPU note:** CUDA drivers must already be installed before continuing.
-Verify with `nvidia-smi`. Most GPU VPS providers offer CUDA-preloaded images -
-select one at provisioning time. For manual driver installation, use NVIDIA's
-runfile installer at developer.nvidia.com/cuda-downloads (select "runfile (local)"
-for your Debian version). Do not use the NVIDIA apt repository on Debian 12+;
-the SHA1-signed keyring is rejected by current Debian policy.
+**GPU servers:** CUDA drivers must be installed before continuing - check with
+`nvidia-smi`. Most GPU VPS providers offer CUDA-preloaded images; select one at
+provisioning time. If you need to install drivers manually, use the NVIDIA runfile
+installer (developer.nvidia.com/cuda-downloads, select "runfile"). Do not use the
+NVIDIA apt repo on Debian 12+; its signing key is rejected by current Debian policy.
 
 ---
 
-## 2. Service User and Directory
+## 2. Service User
 
 ```bash
-# As root:
 adduser --system --group --home /opt/spaitra spaitra
 mkdir -p /opt/spaitra
 chown spaitra:spaitra /opt/spaitra
@@ -43,26 +40,23 @@ chown spaitra:spaitra /opt/spaitra
 
 ## 3. GitHub Access
 
-The repo is private. Use an SSH deploy key (recommended) or a Personal Access Token.
+The repo is private. Use an SSH deploy key (recommended) or a PAT.
 
 ### Option A - SSH Deploy Key (recommended)
 
-A deploy key is scoped to one repo, read-only, has no expiry, and requires no
-external tooling after setup.
+Scoped to one repo, read-only, no expiry.
 
 ```bash
-# As spaitra user:
 su - spaitra -s /bin/bash
 mkdir -p ~/.ssh && chmod 700 ~/.ssh
 ssh-keygen -t ed25519 -C "spaitra-server" -f ~/.ssh/deploy_key -N ""
 cat ~/.ssh/deploy_key.pub
 ```
 
-Copy the printed public key. Add it to the repo on GitHub:
-- Go to: github.com/tsa-softwaredev-26/TSA-soft-dev-backend-2026 -> Settings -> Deploy keys
-- Click "Add deploy key", paste the key, leave "Allow write access" unchecked
+Add the printed public key to GitHub:
+- github.com/tsa-softwaredev-26/TSA-soft-dev-backend-2026 -> Settings -> Deploy keys -> Add deploy key
+- Leave "Allow write access" unchecked
 
-Configure SSH to use this key for GitHub:
 ```bash
 cat >> ~/.ssh/config <<'EOF'
 Host github.com
@@ -70,80 +64,65 @@ Host github.com
     StrictHostKeyChecking accept-new
 EOF
 chmod 600 ~/.ssh/config
-```
 
-Test the connection:
-```bash
+# Verify before cloning:
 ssh -T git@github.com
-# Expected: "Hi tsa-softwaredev-26/TSA-soft-dev-backend-2026! You've successfully authenticated..."
 ```
 
-Clone using SSH:
+Clone:
 ```bash
 cd /opt/spaitra
 git clone git@github.com:tsa-softwaredev-26/TSA-soft-dev-backend-2026.git .
 ```
 
----
+### Option B - Personal Access Token
 
-### Option B - Personal Access Token (PAT)
+1. github.com -> Settings -> Developer settings -> Personal access tokens -> Tokens (classic)
+2. Generate new token, select `repo` scope, set an expiry
+3. Copy the token - it will not be shown again
 
-Use this if you cannot add deploy keys to the repo (e.g. insufficient permissions).
-
-**Create a PAT:**
-1. Go to: github.com -> Settings -> Developer settings -> Personal access tokens -> Tokens (classic)
-2. Click "Generate new token (classic)"
-3. Select the `repo` scope, set an expiry date
-4. Copy the token immediately - it will not be shown again
-
-**Authenticate gh CLI as the spaitra user:**
 ```bash
 su - spaitra -s /bin/bash
-echo "YOUR_PAT_HERE" | gh auth login --with-token --hostname github.com
+echo "YOUR_PAT" | gh auth login --with-token --hostname github.com
 gh auth status
-```
-
-Clone:
-```bash
 cd /opt/spaitra
 gh repo clone tsa-softwaredev-26/TSA-soft-dev-backend-2026 .
 ```
 
 ---
 
-## 4. Python Setup
+## 4. Python Environment
+
+All `pip` commands below run inside the activated venv. Do not use a system-wide pip.
 
 ```bash
-# As spaitra user (if not already):
-su - spaitra -s /bin/bash
+# As spaitra user:
 cd /opt/spaitra
 python3.11 -m venv venv
 source venv/bin/activate
-```
 
-Install the package and gunicorn:
-```bash
 pip install -e .
 pip install gunicorn
 ```
 
-**GPU servers:** run the helper script to auto-detect your CUDA version and install
-the matching PyTorch and PaddlePaddle GPU packages:
+**GPU servers:** run the helper script - it reads `nvidia-smi`, picks the right
+PyTorch and PaddlePaddle wheel indexes for your CUDA version, installs both, and
+verifies both can see the GPU:
+
 ```bash
 bash deploy/install_gpu_deps.sh
 ```
 
-The script reads `nvidia-smi`, selects the CUDA 11 or 12 index automatically,
-installs both packages, and verifies both can see the GPU. It will exit with an
-error if drivers are missing or the version is unsupported.
+If your CUDA version is not handled, the script exits with an error and links to
+the official package indexes to find the right command manually.
 
-The CPU paddle installed by `pip install -e .` is replaced by the GPU version.
+**CPU-only servers:** install the CPU PyTorch wheel (smaller download, no CUDA):
 
-**CPU-only servers:** install PyTorch CPU and skip PaddlePaddle GPU:
 ```bash
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-# PaddleOCR runs on CPU (3-18s per image crop) - no further action needed.
 ```
+
+PaddleOCR will run on CPU at 3-18s per image crop. No other action needed.
 
 ---
 
@@ -151,45 +130,42 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
 Two models require accepting a license on huggingface.co before they will download:
 
-- `facebook/dinov3-vits16-pretrain-lvd1689m` (image embedder)
-- `IDEA-Research/grounding-dino-base` (remember mode detector)
+- facebook/dinov3-vits16-pretrain-lvd1689m (image embedder)
+- IDEA-Research/grounding-dino-base (remember mode detector)
 
-Accept both licenses, then authenticate:
+Accept both licenses, then log in:
+
 ```bash
 hf auth login
-# Paste a HuggingFace token with read access when prompted
-# Get one at: huggingface.co/settings/tokens
 ```
+
+Get a token at huggingface.co/settings/tokens (read access is sufficient).
 
 ---
 
-## 6. Download Model Weights
+## 6. Model Weights
 
 ```bash
 python setup_weights.py
 ```
 
-Downloads `checkpoints/depth_pro.pt` (~2GB) and YOLOE weights (~80MB).
-DINOv3 (~1.2GB) and GroundingDINO (~900MB) download from HuggingFace on first
-startup. Total disk required: ~5GB. First cold start takes 10-30 min.
+Downloads Depth Pro (~2GB) and YOLOE (~80MB). DINOv3 (~1.2GB) and GroundingDINO
+(~900MB) download from HuggingFace on first startup. Total: ~5GB disk, 10-30 min.
 
 ---
 
-## 7. Environment Configuration
+## 7. Environment
 
 ```bash
 cp deploy/env.example .env
-nano .env
+nano .env  # set API_KEY at minimum
 ```
-
-Set `API_KEY` to a strong random secret. All routes except `/health` require the
-`X-API-Key` header to match this value.
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `API_KEY` | (none) | Required in production. |
-| `ENABLE_DEPTH` | `1` | Depth Pro requires ~2GB VRAM. All models together need ~4GB VRAM per worker. Set `0` on CPU-only or <4GB VRAM servers. |
-| `ENABLE_OCR` | `1` | Set `0` to disable PaddleOCR (faster startup). |
+| `API_KEY` | (none) | All routes except /health require `X-API-Key` header. |
+| `ENABLE_DEPTH` | `1` | Depth Pro needs ~2GB VRAM. All models together: ~4GB VRAM per worker. Set `0` on CPU-only or <4GB VRAM. |
+| `ENABLE_OCR` | `1` | Set `0` to skip PaddleOCR entirely. |
 | `ENABLE_LEARNING` | `1` | Set `0` to disable projection head. |
 
 ---
@@ -202,31 +178,29 @@ cp /opt/spaitra/deploy/spaitra.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable spaitra
 systemctl start spaitra
-
-# Watch startup logs (model downloads happen here on first run):
 journalctl -u spaitra -f
 ```
 
-Service is ready when logs show `{"event": "warm_all_complete", ...}`.
+Ready when logs show `{"event": "warm_all_complete", ...}`.
 
-Test: `curl http://127.0.0.1:5000/health`
-Expected: `{"status": "ok"}`
+```bash
+curl http://127.0.0.1:5000/health
+# {"status": "ok"}
+```
 
-The service runs 2 gunicorn workers by default so that health checks and fast
-requests do not block behind slow inference. Each worker loads all models
-independently (~4GB VRAM each with `ENABLE_DEPTH=1`). On servers with <8GB VRAM
-or CPU-only, edit `spaitra.service` and set `-w 1`, then
+The service runs 2 workers so health checks do not block during slow inference.
+Each worker loads all models independently (~4GB VRAM each with `ENABLE_DEPTH=1`).
+On servers with <8GB VRAM, edit `spaitra.service` to set `-w 1`, then
 `systemctl daemon-reload && systemctl restart spaitra`.
 
 ---
 
 ## 9. srv.us Tunnel
 
-Install the srv.us client per their documentation, then create a second service
-so the tunnel restarts automatically:
+Create a second systemd service so the tunnel restarts automatically:
 
-```ini
-# /etc/systemd/system/spaitra-tunnel.service
+```bash
+cat > /etc/systemd/system/spaitra-tunnel.service <<'EOF'
 [Unit]
 Description=Spaitra srv.us tunnel
 After=spaitra.service
@@ -241,13 +215,11 @@ RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
-```
-
-```bash
+EOF
 systemctl enable --now spaitra-tunnel
 ```
 
-The public HTTPS URL printed by srv.us is the base URL for the iOS frontend.
+The public HTTPS URL srv.us prints is the base URL for the iOS frontend.
 
 ---
 
@@ -255,13 +227,10 @@ The public HTTPS URL printed by srv.us is the base URL for the iOS frontend.
 
 ```bash
 su - spaitra -s /bin/bash
-cd /opt/spaitra
-source venv/bin/activate
+cd /opt/spaitra && source venv/bin/activate
 git pull
 pip install -e .
 exit
-
-# As root:
 systemctl restart spaitra
 ```
 
@@ -274,48 +243,46 @@ systemctl restart spaitra
 journalctl -u spaitra --no-pager -n 100
 ```
 
-Common causes:
-- Missing `.env` - run `cp deploy/env.example .env` and set `API_KEY`
-- HuggingFace auth missing - run `hf auth login` as the spaitra user
-- PyTorch/CUDA version mismatch - rerun `bash deploy/install_gpu_deps.sh`
-- Disk full - model downloads need ~5GB free in `/opt/spaitra`
+- Missing `.env`: `cp deploy/env.example .env` and set `API_KEY`
+- HuggingFace auth: run `hf auth login` as the spaitra user
+- GPU packages wrong: rerun `bash deploy/install_gpu_deps.sh`
+- Disk full: need ~5GB free in `/opt/spaitra`
 
-**SSH deploy key: "Permission denied (publickey)":**
-- Check the key is added to the repo deploy keys on GitHub
-- Run `ssh -vT git@github.com` to see which key is being offered
-- Confirm `/opt/spaitra/.ssh/config` has the `IdentityFile` pointing to `deploy_key`
+**SSH key rejected:**
+- Check the key is in GitHub repo deploy keys
+- `ssh -vT git@github.com` shows which key is being offered
+- Confirm `~/.ssh/config` has `IdentityFile /opt/spaitra/.ssh/deploy_key`
 
-**HuggingFace 403 on model download:**
-- Check token is valid: `huggingface-cli whoami`
-- Confirm you accepted the license for each gated model on huggingface.co
+**HuggingFace 403:**
+- `hf whoami` to verify the token is valid
+- Confirm you accepted each gated model's license on huggingface.co
 
-**PaddlePaddle GPU not working:**
+**PaddlePaddle not using GPU:**
 ```bash
 python -c "import paddle; print(paddle.device.get_device())"
-# Should print: gpu:0
-# If it prints cpu: GPU package did not install; rerun deploy/install_gpu_deps.sh
+# Should print gpu:0 - if it prints cpu, rerun deploy/install_gpu_deps.sh
 ```
 
-**gunicorn timeout / 503:**
-- Increase `--timeout` in `deploy/spaitra.service` (default 120s; model warm-up can exceed this)
-- After editing: `systemctl daemon-reload && systemctl restart spaitra`
+**VRAM OOM with 2 workers:**
+- Set `-w 1` in `spaitra.service` or `ENABLE_DEPTH=0` in `.env`
+- `systemctl daemon-reload && systemctl restart spaitra`
 
-**Out of VRAM with 2 workers:**
-- Set `-w 1` in `deploy/spaitra.service`, or set `ENABLE_DEPTH=0` in `.env`
-- After editing service file: `systemctl daemon-reload && systemctl restart spaitra`
+**gunicorn timeout:**
+- Increase `--timeout` in `spaitra.service` (default 120s; warm-up can exceed this)
+- `systemctl daemon-reload && systemctl restart spaitra`
 
 ---
 
-## Directory Layout (after setup)
+## Directory Layout
 
 ```
 /opt/spaitra/
-├── .env                        # secrets and feature flags
-├── .ssh/deploy_key             # SSH deploy key (Option A only)
-├── venv/                       # Python virtualenv
-├── checkpoints/depth_pro.pt    # downloaded by setup_weights.py (~2GB)
-├── data/memory.db              # SQLite database (created on first run)
-├── models/                     # projection head weights (created on first /retrain)
-├── logs/app.log                # JSON lines application log
-└── src/visual_memory/...       # source code
+├── .env
+├── .ssh/deploy_key             # Option A only
+├── venv/
+├── checkpoints/depth_pro.pt   # ~2GB, from setup_weights.py
+├── data/memory.db             # created on first run
+├── models/                    # created on first /retrain
+├── logs/app.log
+└── src/visual_memory/
 ```
