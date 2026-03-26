@@ -64,23 +64,28 @@ Semantic memory retrieval.
 
 ## Setup
 
-Request access to both gated models on Hugging Face, then git clone and run setup:
-- [IDEA-Research/grounding-dino-base](https://huggingface.co/IDEA-Research/grounding-dino-base)
-- [facebook/dinov3-vitl16-pretrain-lvd1689m](https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m)
-
+### Local Development
 
 ```bash
+gh repo clone tsa-softwaredev-26/TSA-soft-dev-backend-2026
+cd TSA-soft-dev-backend-2026
 python -m venv venv
 source venv/bin/activate
-python -m pip install --upgrade pip
 pip install -e .
-hf auth login
+huggingface-cli login
 python setup_weights.py
 ```
 
 `pip install -e .` installs all dependencies including depth-pro from GitHub.
-`setup_weights.py` downloads all five model sources: Depth Pro (~2GB), YOLOE (~80MB via urllib), CLIP text encoder (~180MB), DINOv3 (~1.2GB), and GroundingDINO (~900MB). Gated models (DINOv3, GroundingDINO) require a HuggingFace token - run `huggingface-cli login` first.
+`setup_weights.py` downloads Depth Pro (~2GB), YOLOE (~80MB), CLIP (~180MB),
+DINOv3 (~1.2GB), and GroundingDINO (~900MB). DINOv3 and GroundingDINO are gated
+on HuggingFace - request access and run `huggingface-cli login` first.
 `DepthEstimator` resolves the checkpoint path at import time using `Path(__file__)`.
+
+### Server Deployment
+
+See [DEPLOY.md](DEPLOY.md) for the full server setup guide (Debian, systemd,
+gunicorn, GPU PaddlePaddle, srv.us tunnel).
 
 ---
 
