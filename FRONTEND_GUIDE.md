@@ -358,15 +358,11 @@ User preferences. These are persisted in the database.
 **Response:**
 ```json
 {
-  "performance_mode": "balanced",
+  "performance_mode": "balanced", # fast = no depth, no ocr, balanced = depth, ocr included w/ base models, accurate = base + better models
   "voice_speed": 1.0,
-  "auto_update_location": false,
-  "learning_enabled": true,
-  "button_layout": "default",
-  "performance_config": {
-    "depth_enabled": true,
-    "target_latency": 3.0
-  }
+  "scan_update_location": true, #asks user where they are after a scan mode detection, updates all
+  "learning_enabled": true, # train personalized model from user feedback
+  "button_layout": "default", # default or swapped
 }
 ```
 
