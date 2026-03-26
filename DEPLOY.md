@@ -156,7 +156,7 @@ Two models require accepting a license on huggingface.co before they will downlo
 
 Accept both licenses, then authenticate:
 ```bash
-huggingface-cli login
+hf auth login
 # Paste a HuggingFace token with read access when prompted
 # Get one at: huggingface.co/settings/tokens
 ```
@@ -276,7 +276,7 @@ journalctl -u spaitra --no-pager -n 100
 
 Common causes:
 - Missing `.env` - run `cp deploy/env.example .env` and set `API_KEY`
-- HuggingFace auth missing - run `huggingface-cli login` as the spaitra user
+- HuggingFace auth missing - run `hf auth login` as the spaitra user
 - PyTorch/CUDA version mismatch - rerun `bash deploy/install_gpu_deps.sh`
 - Disk full - model downloads need ~5GB free in `/opt/spaitra`
 

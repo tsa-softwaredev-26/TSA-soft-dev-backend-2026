@@ -11,7 +11,7 @@ Downloads:
   - GroundingDINO base (~900MB)    -> HuggingFace cache  [requires HF login]
 
 Gated models require accepting the license on huggingface.co and running:
-    huggingface-cli login
+    hf auth login
 """
 import sys
 import urllib.request
@@ -94,7 +94,7 @@ def _download_hf_model(repo_id: str, size_hint: str, gated: bool = False):
             print(
                 f"\nERROR: {repo_id} is a gated model.\n"
                 f"  1. Accept the license at https://huggingface.co/{repo_id}\n"
-                f"  2. Run: huggingface-cli login\n"
+                f"  2. Run: hf auth login\n"
                 f"  3. Re-run this script.\n"
             )
         else:
@@ -108,7 +108,7 @@ def main():
     if not _check_hf_auth():
         print(
             "WARNING: No HuggingFace token found. Gated models will fail.\n"
-            "  Run `huggingface-cli login` before this script.\n"
+            "  Run `hf auth login` before this script.\n"
         )
 
     print("[1/5] Depth Pro checkpoint")
