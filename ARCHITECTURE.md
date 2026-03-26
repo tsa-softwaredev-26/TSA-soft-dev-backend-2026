@@ -79,9 +79,8 @@ python setup_weights.py
 ```
 
 `pip install -e .` installs all dependencies including depth-pro from GitHub.
-`setup_weights.py` downloads the Depth Pro checkpoint (~2GB) and YOLOE weights into the project root.
+`setup_weights.py` downloads all five model sources: Depth Pro (~2GB), YOLOE (~80MB via urllib), CLIP text encoder (~180MB), DINOv3 (~1.2GB), and GroundingDINO (~900MB). Gated models (DINOv3, GroundingDINO) require a HuggingFace token - run `huggingface-cli login` first.
 `DepthEstimator` resolves the checkpoint path at import time using `Path(__file__)`.
-DINOv3 (`facebook/dinov3-vitl16-pretrain-lvd1689m`, gated - request access on HuggingFace) and CLIP text encoder (`openai/clip-vit-base-patch32`) are downloaded automatically on first use via `transformers`.
 
 ---
 
@@ -114,7 +113,7 @@ src/visual_memory/
 ├── learning/
 │   ├── projection_head.py             # ProjectionHead (residual linear, identity at init)
 │   ├── trainer.py                     # ProjectionTrainer + triplet_loss (CLI: python -m visual_memory.learning.trainer)
-│   └── feedback_store.py              # FeedbackStore (.pt file persistence, DB-ready interface)
+│   └── feedback_store.py              # FeedbackStore (SQLite-backed via DatabaseStore.feedback table)
 │
 ├── benchmarks/
 │   ├── full_benchmark.py              # 7-phase system benchmark (retrieval, detection, depth)
@@ -228,7 +227,7 @@ Multi-image (POST /remember with `images[]`):
 - Loaded once at process start via `get_user_settings()` which calls `get_database()`
 - `PerformanceMode`: FAST | BALANCED | ACCURATE (string enum)
 - `PerformanceConfig.for_mode(mode)` - returns `{depth_enabled, target_latency}` for each mode
-- `UserSettings` fields: `performance_mode` (BALANCED), `voice_speed` (1.0, range 0.5-2.0), `auto_update_location` (False), `learning_enabled` (True), `button_layout` ("default" | "swapped", stub)
+- `UserSettings` fields: `performance_mode` (BALANCED), `voice_speed` (1.0, range 0.5-2.0), `scan_update_location` (False), `learning_enabled` (True), `button_layout` ("default" | "swapped", stub)
 - `save(db)` / `load(db)` - DB round-trip with safe defaults on missing/corrupt row
 - `to_dict()` - serializes for API response; includes derived `performance_config` block
 - Exposed via GET /user-settings, PATCH /user-settings
@@ -302,12 +301,12 @@ Multi-image (POST /remember with `images[]`):
 - CLI: `python -m visual_memory.learning.trainer [--feedback-dir feedback/] [--output models/projection_head.pt] [--epochs 20] [--lr 1e-4]`
 
 ### `learning/feedback_store.py` - `FeedbackStore`
-- `FeedbackStore(store_dir=Path("feedback"))` - creates dir on init
-- `record_positive(anchor_emb, query_emb, label)` - saves `.pt` file (type="positive")
-- `record_negative(anchor_emb, query_emb, label)` - saves `.pt` file (type="negative")
-- `load_triplets() -> List[(anchor, positive, negative)]` - pairs each positive with each negative per label
-- `count() -> dict` - `{"positives": int, "negatives": int, "triplets": int}`
-- DB contract and Flask endpoint contract documented in module docstring
+- `FeedbackStore(db: DatabaseStore)` - thin wrapper; all persistence delegated to `DatabaseStore.feedback` table
+- `record_positive(anchor_emb, query_emb, label)` - calls `db.add_feedback(label, "positive", ...)`
+- `record_negative(anchor_emb, query_emb, label)` - calls `db.add_feedback(label, "negative", ...)`
+- `load_triplets() -> List[(anchor, positive, negative)]` - calls `db.load_feedback_triplets()`; pairs each positive with each negative per label (cartesian product)
+- `count() -> dict` - calls `db.count_feedback()`; `{"positives": int, "negatives": int, "triplets": int}`
+- Triplet count is per-label cartesian product, computed in SQL via GROUP BY to avoid loading all blobs
 
 ### `utils/device_utils.py`
 - `get_device() -> str` - returns "cuda", "mps", or "cpu" in priority order; used by all engine modules
@@ -319,6 +318,7 @@ Multi-image (POST /remember with `images[]`):
 
 ### `utils/quality_utils.py`
 - `mean_luminance(image: PIL.Image) -> float` - mean grayscale pixel value (0-255); used by both pipelines for darkness detection
+- `estimate_text_likelihood(image: PIL.Image) -> float` - normalized Laplacian edge density on a 128x128 greyscale resize; returns 0.0-1.0; ~2ms; used as OCR pre-check to skip PaddleOCR on plain-color crops (threshold `ocr_text_likelihood_threshold=0.10` in settings.py)
 - Pure numpy/PIL - no model loading, no extra deps
 - Shared between RememberPipeline and ScanPipeline via `utils` package export
 
@@ -350,7 +350,8 @@ image_path + text prompt
     -> [if still None] return failure + blur info
     -> crop_object(image, box)
     -> db.get_label_avg_confidence(prompt)      -> avg_conf (historical baseline)
-    -> TextRecognizer.recognize(crop)           -> OCR text
+    -> estimate_text_likelihood(crop)           -> text_likelihood (skip OCR if < threshold)
+    -> TextRecognizer.recognize(crop)           -> OCR text  (skipped if text_likelihood low)
     -> ImageEmbedder.embed(crop)                -> image embedding (1024-dim)
     -> CLIPTextEmbedder.embed_text(ocr_text)    -> text embedding (512-dim)
     -> make_combined_embedding()                -> combined (1536-dim)
@@ -368,8 +369,8 @@ Multi-image path (POST /remember with images[]):
 ### Scan Mode
 ```
 init:
-    database_dir -> load_folder_images() -> embed each -> database_embeddings[]
-    ProjectionHead.load("models/projection_head.pt") -> _head_trained (True/False)
+    db.get_all_items() -> database_embeddings[]     (SQLite; raw combined embeddings)
+    _load_head() -> _head_trained (True/False)      (DB first, file fallback)
 
 run(query_image):
     -> mean_luminance(query_image)              -> darkness check; return early if dark
@@ -525,7 +526,7 @@ Single worker is required - model state is process-local.
 
 Models are loaded once at startup via `warm_all()` in `create_app()`. Upload cap: 50MB.
 
-**Endpoints:** GET /health, POST /remember, POST /scan, POST /feedback, POST /retrain (internal - auto-triggered server-side), GET /settings, PATCH /settings, GET /user-settings, PATCH /user-settings, GET /find, GET /items, DELETE /items/<label>.
+**Endpoints:** GET /health, POST /remember, POST /scan, POST /feedback, POST /retrain, GET /retrain/status, GET /settings, PATCH /settings, GET /user-settings, PATCH /user-settings, GET /find, GET /items, DELETE /items/<label>, POST /items/<label>/rename, POST /sightings.
 
 See `FRONTEND_GUIDE.md` for full request/response schemas, field reference, and integration patterns.
 
@@ -581,22 +582,24 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 
 ---
 
-## Current State
+## Current State (March 26, 2026)
 
 - Core engine complete and tested (depth, detection, embedding, OCR)
 - Both pipelines produce structured JSON dicts; combined 1536-dim embeddings (DINOv3 + CLIP text)
-- `run_tests.py` passes (March 2026): remember:detect, scan:match, text_recognition x2 (DEPTH=0 skips estimator)
-- `learning/` module complete: ProjectionHead, ProjectionTrainer, FeedbackStore - all tested CPU-only
+- `run_tests.py` passes: remember:detect, scan:match, text_recognition x2 (DEPTH=0 skips estimator)
+- `learning/` module complete: ProjectionHead, ProjectionTrainer, FeedbackStore (SQLite) - all tested CPU-only
 - `test_projection_head.py` passes: identity-at-init, triplet loss, store roundtrip, training convergence
-- ProjectionHead wired into ScanPipeline with auto-scaling blend (`_apply_head`); no-op until `models/projection_head.pt` exists
-- Flask API: POST /remember, POST /scan, POST /feedback, POST /retrain, GET /settings, PATCH /settings, GET /health
-- /retrain trains ProjectionHead from FeedbackStore and hot-reloads weights into ScanPipeline; guarded by `min_feedback_for_training`
-- /settings exposes runtime toggles (enable_learning, projection_head_weight, etc.) without restart
-- Database: SQLite via DatabaseStore; both pipelines persist/query embeddings
-- ScanPipeline reloads DB after /remember; scan_id embedding cache for /feedback (last 50)
+- ProjectionHead wired into ScanPipeline with auto-scaling blend (`_apply_head`); no-op until weights exist
+- Flask API: all endpoints live (remember, scan, feedback, retrain, settings, user-settings, find, items, sightings)
+- /retrain is async (threading.Thread); GET /retrain/status for polling
+- /settings and ML setting overrides survive restarts (persisted to `user_state.ml_settings`, restored by `warm_all()`)
+- FeedbackStore migrated to SQLite feedback table; flat .pt file approach removed
+- Database: SQLite via DatabaseStore; items, sightings, feedback, user_state, ml_settings all in one file
+- OCR pre-check: `estimate_text_likelihood()` skips PaddleOCR for plain-color crops (~2ms vs 3-18s)
 - OCR backend: PaddleOCR-VL-1.5 (`ocr_backend = "paddle"`)
 - Image embedder: DINOv3 ViT-S/16 (`facebook/dinov3-vits16-pretrain-lvd1689m`, gated on HuggingFace)
 - Text embedder: CLIP text encoder only (`openai/clip-vit-base-patch32`, 512-dim, ~180MB)
+- Deployment: `deploy/setup_server.sh` automates full Debian server setup; `deploy/spaitra.service` for systemd
 
 ---
 
@@ -612,33 +615,25 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - [ ] OCR text likelihood threshold tuning: current default 0.10 was chosen heuristically; calibrate against a labelled set of crops with/without text to confirm false-negative rate is acceptable. See `quality_utils.estimate_text_likelihood()`.
 
 ### Database
-- [x] `user_state` table: store serialized ProjectionHead weights per user in DB; `/retrain` saves to DB after training
-- [x] `ScanPipeline._load_head()` - loads projection head from DB first, falls back to file; used by `__init__` and `reload_head()`
-- [x] `sightings` table: every successful `/scan` match writes label, timestamp, direction, distance_ft, similarity, crop_path; `GET /find?label=<q>` queries it
-- [x] `DELETE /items/<label>` - permanently removes a taught object from memory; scan pipeline reloads immediately
-- [x] Fuzzy label search in `/find`: embed the query string via CLIPTextEmbedder (available as `get_scan_pipeline().text_embedder`), embed each label from `get_known_labels()`, return labels above cosine similarity threshold - handles "wallet" matching "my brown wallet" etc.
-- [x] History-aware sightings retrieval: add time-range params to `/find` (`since`, `before`), recency-weighted ranking; sightings are retained indefinitely by design (personal spatial memory, not a recent-activity log) - prune only after search quality is optimized
+- [ ] `DatabaseStore` methods `save_ml_settings` / `load_ml_settings` merge only changed keys on write - currently the PATCH /settings handler saves the full settings snapshot, which is fine for single-user but would need per-user scoping for multi-user.
 
 ### Learning / Personalization
-- [x] Async /retrain - training runs in a background thread; POST /retrain returns `{"started": true}` immediately; GET /retrain/status polls progress
-- [ ] Persist runtime settings overrides (enable_learning, projection_head_weight, etc.) to DB so they survive restarts; currently in-memory only
-- [ ] Move FeedbackStore from flat .pt files to SQLite - INSERT/SELECT in user DB; removes file dependency, enables per-user isolation. See ARCHITECTURE.md Server Transition Notes.
-- [ ] Test suite: add `test_learning_pipeline.py` covering FeedbackStore roundtrip, triplet loading, trainer convergence, `_apply_head` blending at various triplet counts, `reload_head`, and full /feedback -> /retrain -> /settings endpoint flow
+- [ ] Test suite: add `test_learning_pipeline.py` covering FeedbackStore DB roundtrip, triplet loading, trainer convergence, `_apply_head` blending at various triplet counts, `reload_head`, and full /feedback -> /retrain -> /settings endpoint flow
+- [ ] CLI trainer (`python -m visual_memory.learning.trainer`) still reads from legacy `feedback/` dir; update to accept a `--db-path` arg that reads from SQLite feedback table instead
 
 ### Deployment
-- [x] gunicorn entry point (`wsgi.py`), systemd unit (`deploy/spaitra.service`), env template (`deploy/env.example`)
-- [x] Full Debian setup guide: `DEPLOY.md` (system deps, CUDA, HuggingFace auth, srv.us tunnel)
-- [x] gunicorn added to `pyproject.toml` dependencies
+- [ ] `scans/` crop save directory is lazily created relative to CWD; should come from a config value or env var for production (write permission not guaranteed in containers)
 
 ---
 
 ## Server Transition Notes
 
-Steps needed before deploying to a Linux/NVIDIA server (can be completed by an agent in ~5 min each):
+All server-transition items are complete as of March 2026.
 
-1. **Async /retrain** - wrap training in `threading.Thread`, store status in a module-level dict, add `GET /retrain/status` route returning `{"running": bool, "last_result": {...}}`. Change `/retrain` to start the thread and return `{"started": true}` immediately.
-2. **Persist ML settings** - PATCH /settings currently writes to an in-memory Settings instance only. On `PATCH /settings`, also write changed fields to DB (e.g., a `settings` TEXT column in `user_state`). On startup, read from DB and apply via the same setters. (User prefs already persisted via `user_state.user_settings`.)
-3. **Move FeedbackStore to DB** - `FeedbackStore.record_positive/record_negative` currently write `.pt` files to `feedback/`. Replace with `INSERT INTO feedback (label, type, anchor_blob, query_blob, timestamp)` in the user DB. Update `load_triplets()` to `SELECT` and deserialize. This removes a flat-file dependency and enables per-user feedback isolation.
+1. [x] **Async /retrain** - `threading.Thread` with module-level `_status` dict; `GET /retrain/status` returns `{"running": bool, "last_result": {...}}`.
+2. [x] **Persist ML settings** - `PATCH /settings` saves full ML settings snapshot to `user_state.ml_settings` (JSON); `warm_all()` calls `_apply_persisted_ml_settings()` at startup.
+3. [x] **FeedbackStore -> SQLite** - `feedback` table in DatabaseStore; `FeedbackStore` is now a thin wrapper; flat `.pt` file approach removed.
+4. [x] **Automated server setup** - `deploy/setup_server.sh` automates all DEPLOY.md steps (apt, user, venv, HF login, weights, systemd, optional tunnel).
 
 ---
 
