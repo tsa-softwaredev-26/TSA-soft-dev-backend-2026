@@ -45,6 +45,17 @@ class DatabaseStore:
             );
             CREATE INDEX IF NOT EXISTS sightings_label_ts
                 ON sightings (label, timestamp DESC);
+            CREATE TABLE IF NOT EXISTS feedback (
+                id            INTEGER PRIMARY KEY,
+                user_id       INTEGER NOT NULL DEFAULT 1,
+                label         TEXT    NOT NULL,
+                feedback_type TEXT    NOT NULL,
+                anchor_blob   BLOB    NOT NULL,
+                query_blob    BLOB    NOT NULL,
+                timestamp     REAL    NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS feedback_label
+                ON feedback (label, feedback_type);
         """)
         # migrate existing DBs that predate the user_settings column
         try:
@@ -67,6 +78,12 @@ class DatabaseStore:
         # migrate existing items tables that predate label_embedding
         try:
             self._conn.execute("ALTER TABLE items ADD COLUMN label_embedding BLOB")
+            self._conn.commit()
+        except Exception:
+            pass  # column already exists
+        # migrate existing user_state tables that predate ml_settings
+        try:
+            self._conn.execute("ALTER TABLE user_state ADD COLUMN ml_settings TEXT")
             self._conn.commit()
         except Exception:
             pass  # column already exists
@@ -241,6 +258,98 @@ class DatabaseStore:
             return json.loads(row[0])
         except (json.JSONDecodeError, TypeError):
             return None
+
+    def save_ml_settings(self, data: dict) -> None:
+        import json
+        self._conn.execute(
+            "INSERT INTO user_state (id, ml_settings) VALUES (1, ?)"
+            " ON CONFLICT(id) DO UPDATE SET ml_settings = excluded.ml_settings",
+            (json.dumps(data),),
+        )
+        self._conn.commit()
+
+    def load_ml_settings(self) -> Optional[dict]:
+        import json
+        row = self._conn.execute(
+            "SELECT ml_settings FROM user_state WHERE id = 1"
+        ).fetchone()
+        if row is None or row[0] is None:
+            return None
+        try:
+            return json.loads(row[0])
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    # ---- feedback table ----
+
+    def add_feedback(
+        self,
+        label: str,
+        feedback_type: str,
+        anchor_emb: torch.Tensor,
+        query_emb: torch.Tensor,
+        timestamp: Optional[float] = None,
+    ) -> int:
+        if timestamp is None:
+            timestamp = time.time()
+        cur = self._conn.execute(
+            "INSERT INTO feedback (label, feedback_type, anchor_blob, query_blob, timestamp) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                label,
+                feedback_type,
+                self._tensor_to_blob(anchor_emb),
+                self._tensor_to_blob(query_emb),
+                timestamp,
+            ),
+        )
+        self._conn.commit()
+        return cur.lastrowid
+
+    def load_feedback_triplets(self) -> list:
+        """Pair each positive with each negative per label -> (anchor, positive, negative)."""
+        rows = self._conn.execute(
+            "SELECT label, feedback_type, anchor_blob, query_blob, timestamp "
+            "FROM feedback ORDER BY timestamp ASC"
+        ).fetchall()
+
+        by_label: dict = {}
+        for label, ftype, anchor_blob, query_blob, ts in rows:
+            if label not in by_label:
+                by_label[label] = {"positive": [], "negative": []}
+            anchor = self._blob_to_tensor(anchor_blob)
+            query = self._blob_to_tensor(query_blob)
+            by_label[label][ftype].append((ts, anchor, query))
+
+        triplets = []
+        for groups in by_label.values():
+            positives = groups["positive"]
+            negatives = groups["negative"]
+            if not positives or not negatives:
+                continue
+            for _, anc_p, q_p in positives:
+                for _, _anc_n, q_n in negatives:
+                    triplets.append((anc_p, q_p, q_n))
+        return triplets
+
+    def count_feedback(self) -> dict:
+        row = self._conn.execute(
+            "SELECT "
+            "  SUM(CASE WHEN feedback_type = 'positive' THEN 1 ELSE 0 END), "
+            "  SUM(CASE WHEN feedback_type = 'negative' THEN 1 ELSE 0 END) "
+            "FROM feedback"
+        ).fetchone()
+        positives = row[0] or 0
+        negatives = row[1] or 0
+        # triplets = cartesian product of pos x neg per label
+        label_rows = self._conn.execute(
+            "SELECT label, "
+            "  SUM(CASE WHEN feedback_type = 'positive' THEN 1 ELSE 0 END) AS p, "
+            "  SUM(CASE WHEN feedback_type = 'negative' THEN 1 ELSE 0 END) AS n "
+            "FROM feedback GROUP BY label"
+        ).fetchall()
+        triplets = sum(p * n for _, p, n in label_rows)
+        return {"positives": positives, "negatives": negatives, "triplets": triplets}
 
     # ---- sightings table ----
 

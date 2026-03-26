@@ -2,8 +2,6 @@
 
 Models are multi-GB; loaded once at process start and reused across requests.
 """
-from pathlib import Path
-
 from visual_memory.config import Settings
 
 _settings = Settings()
@@ -44,7 +42,7 @@ def get_feedback_store():
     global _feedback_store
     if _feedback_store is None:
         from visual_memory.learning.feedback_store import FeedbackStore
-        _feedback_store = FeedbackStore(Path("feedback"))
+        _feedback_store = FeedbackStore(get_database())
     return _feedback_store
 
 
@@ -67,3 +65,28 @@ def warm_all():
     get_remember_pipeline()
     get_scan_pipeline()
     get_feedback_store()
+    _apply_persisted_ml_settings()
+
+
+def _apply_persisted_ml_settings():
+    """Restore ML settings saved via PATCH /settings from previous runs."""
+    saved = get_database().load_ml_settings()
+    if not saved:
+        return
+    s = get_settings()
+    pipeline = get_scan_pipeline()
+    _PATCHABLE_TYPES = {
+        "enable_learning": bool,
+        "min_feedback_for_training": int,
+        "projection_head_weight": float,
+        "projection_head_ramp_at": int,
+        "projection_head_epochs": int,
+    }
+    for key, cast in _PATCHABLE_TYPES.items():
+        if key in saved:
+            try:
+                setattr(s, key, cast(saved[key]))
+            except (TypeError, ValueError):
+                pass
+    pipeline.set_enable_learning(s.enable_learning)
+    pipeline.set_head_weight(s.projection_head_weight, s.projection_head_ramp_at)

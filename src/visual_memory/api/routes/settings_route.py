@@ -1,11 +1,11 @@
 from flask import Blueprint, request, jsonify
 
-from visual_memory.api.pipelines import get_feedback_store, get_scan_pipeline, get_settings
+from visual_memory.api.pipelines import get_database, get_feedback_store, get_scan_pipeline, get_settings
 
 settings_bp = Blueprint("settings", __name__)
 
 # Fields the frontend is allowed to update at runtime via PATCH /settings.
-# Persisted in-memory only; see ARCHITECTURE.md TODO for DB persistence.
+# Persisted to DB (user_state.ml_settings) and restored on startup via warm_all().
 _PATCHABLE = {
     "enable_learning": bool,
     "min_feedback_for_training": int,
@@ -98,6 +98,14 @@ def patch_settings():
         pipeline.set_enable_learning(s.enable_learning)
     if "projection_head_weight" in applied or "projection_head_ramp_at" in applied:
         pipeline.set_head_weight(s.projection_head_weight, s.projection_head_ramp_at)
+
+    get_database().save_ml_settings({
+        "enable_learning": s.enable_learning,
+        "min_feedback_for_training": s.min_feedback_for_training,
+        "projection_head_weight": s.projection_head_weight,
+        "projection_head_ramp_at": s.projection_head_ramp_at,
+        "projection_head_epochs": s.projection_head_epochs,
+    })
 
     # return full state after applying changes
     return get_settings_route()
