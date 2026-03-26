@@ -8,8 +8,11 @@ User=spaitra
 Group=spaitra
 WorkingDirectory=/opt/spaitra
 EnvironmentFile=/opt/spaitra/.env
+# -w 2: two workers handle concurrent requests (health check does not block during slow inference).
+# Each worker loads all models independently (~4GB VRAM each with ENABLE_DEPTH=1).
+# On servers with <8GB VRAM or CPU-only, lower to -w 1.
 ExecStart=/opt/spaitra/venv/bin/gunicorn \
-    -w 1 \
+    -w 2 \
     -b 127.0.0.1:5000 \
     --timeout 120 \
     --access-logfile - \

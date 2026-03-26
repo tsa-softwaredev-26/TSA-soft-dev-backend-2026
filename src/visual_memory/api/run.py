@@ -3,8 +3,8 @@
 # --- Debian server setup (run once after git clone) ---
 #
 #   adduser --system --group spaitra
-#   git clone <repo> /opt/spaitra && cd /opt/spaitra
-#   python3 -m venv venv && source venv/bin/activate
+#   git clone git@github.com:tsa-softwaredev-26/TSA-soft-dev-backend-2026.git /opt/spaitra
+#   cd /opt/spaitra && python3.11 -m venv venv && source venv/bin/activate
 #
 #   1. Install CUDA-enabled PyTorch (check CUDA version with: nvidia-smi):
 #      pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
