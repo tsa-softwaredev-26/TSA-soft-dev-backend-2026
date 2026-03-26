@@ -5,6 +5,22 @@ Public access via srv.us tunnel pointing to gunicorn on localhost:5000.
 
 ---
 
+## Automated Setup
+
+For a fresh Debian 12 server, the setup script automates all steps below:
+
+```bash
+# As root, from the cloned repo:
+bash deploy/setup_server.sh
+# Set TORCH_CUDA=cu121 (or cu118) for GPU servers:
+TORCH_CUDA=cu121 bash deploy/setup_server.sh
+```
+
+The script installs packages, creates the `spaitra` user, sets up the venv,
+prompts for HuggingFace login, downloads weights, and installs the systemd service.
+
+---
+
 ## 1. System Prerequisites
 
 ```bash
