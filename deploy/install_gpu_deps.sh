@@ -27,20 +27,21 @@ echo "Detected CUDA $CUDA_VER"
 
 # PyTorch wheel index - https://download.pytorch.org/whl/
 # Full list of available cu* indexes: https://download.pytorch.org/whl/
+PADDLE_VER="3.3.1"
+
 if   [ "$CUDA_MAJOR" -ge 13 ]; then
-    TORCH_INDEX="https://download.pytorch.org/whl/cu130"
+    PADDLE_INDEX="https://www.paddlepaddle.org.cn/packages/stable/cu130/"
+elif [ "$CUDA_MAJOR" -eq 12 ] && [ "$CUDA_MINOR" -ge 9 ]; then
+    PADDLE_INDEX="https://www.paddlepaddle.org.cn/packages/stable/cu129/"
 elif [ "$CUDA_MAJOR" -eq 12 ] && [ "$CUDA_MINOR" -ge 8 ]; then
-    TORCH_INDEX="https://download.pytorch.org/whl/cu128"
+    PADDLE_INDEX="https://www.paddlepaddle.org.cn/packages/stable/cu128/"
 elif [ "$CUDA_MAJOR" -eq 12 ] && [ "$CUDA_MINOR" -ge 6 ]; then
-    TORCH_INDEX="https://download.pytorch.org/whl/cu126"
-elif [ "$CUDA_MAJOR" -eq 12 ] && [ "$CUDA_MINOR" -ge 1 ]; then
-    TORCH_INDEX="https://download.pytorch.org/whl/cu124"
+    PADDLE_INDEX="https://www.paddlepaddle.org.cn/packages/stable/cu126/"
+elif [ "$CUDA_MAJOR" -eq 12 ]; then
+    PADDLE_INDEX="https://www.paddlepaddle.org.cn/packages/stable/cu126/"
 elif [ "$CUDA_MAJOR" -eq 11 ]; then
-    TORCH_INDEX="https://download.pytorch.org/whl/cu118"
-else
-    echo "ERROR: No known PyTorch wheel for CUDA $CUDA_VER."
-    echo "Check available indexes at: https://download.pytorch.org/whl/"
-    exit 1
+    PADDLE_VER="3.1.0"
+    PADDLE_INDEX="https://www.paddlepaddle.org.cn/packages/stable/cu118/"
 fi
 
 # PaddlePaddle GPU index - https://www.paddlepaddle.org.cn/packages/stable/

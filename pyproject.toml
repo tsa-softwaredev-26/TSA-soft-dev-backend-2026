@@ -33,8 +33,8 @@ dependencies = [
 
 # Note: paddlepaddle (CPU) is installed by pip install -e .
 # For GPU servers, replace it after install:
-#   pip install paddlepaddle-gpu==3.0.0        (CUDA 11.x)
-#   pip install paddlepaddle-gpu==3.0.0.post120 (CUDA 12.x)
+#   pip install paddlepaddle-gpu>=3.1.0        (CUDA 11.x)
+#   pip install paddlepaddle-gpu>=3.1.0.post120 (CUDA 12.x)
 
 [project.scripts]
 remember-mode = "visual_memory.pipelines.remember_mode.main:main"
