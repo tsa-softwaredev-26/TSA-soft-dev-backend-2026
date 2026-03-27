@@ -666,7 +666,12 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - [x] OCR service health probe - covered by GET /debug/state (checks OCR health on demand); startup check not wired but `/debug/state` gives the same information on request
 - [ ] Have fast mode in settings disable second pass detection in remember mode
 - [ ] `PATCH /debug/config` changes are not persisted - by design for a debug tool, but could be useful for persisting arbitrary threshold changes; consider adding a `persist: true` flag that calls `save_ml_settings()` after applying
+- [ ] Add a debug GET to query logs, including performance logs like temp, usage, critical/warning logs if any, etc.
 
+### Logs
+- [ ] Improve performance logs; add stuff like RAM usage, swap usage, VRAM usage, how often it has to unload models to save VRAM, VRAM swap occurences, runtimes, thermals (sensor), crash logs 
+- [ ] Give logs severity tags so logs can be filtered easily (could add parse logs CLI tool scrpts to sort for severity and certain topics)
+- [ ] Make logs automatically run from server, deletes old unimportant logs, keeps important logs for much longer
 ---
 
 ## Server Transition Notes
