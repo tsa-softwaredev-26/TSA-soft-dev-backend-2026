@@ -418,6 +418,46 @@ class DatabaseStore:
         ).fetchall()
         return [r[0] for r in rows]
 
+    def count_sightings(self) -> int:
+        row = self._conn.execute("SELECT COUNT(*) FROM sightings").fetchone()
+        return row[0] if row else 0
+
+    def clear_items(self) -> int:
+        cur = self._conn.execute("DELETE FROM items")
+        self._conn.commit()
+        return cur.rowcount
+
+    def clear_sightings(self) -> int:
+        cur = self._conn.execute("DELETE FROM sightings")
+        self._conn.commit()
+        return cur.rowcount
+
+    def clear_feedback(self) -> int:
+        cur = self._conn.execute("DELETE FROM feedback")
+        self._conn.commit()
+        return cur.rowcount
+
+    def clear_projection_head(self) -> None:
+        self._conn.execute(
+            "INSERT INTO user_state (id, projection_head) VALUES (1, NULL)"
+            " ON CONFLICT(id) DO UPDATE SET projection_head = NULL"
+        )
+        self._conn.commit()
+
+    def reset_ml_settings(self) -> None:
+        self._conn.execute(
+            "INSERT INTO user_state (id, ml_settings) VALUES (1, NULL)"
+            " ON CONFLICT(id) DO UPDATE SET ml_settings = NULL"
+        )
+        self._conn.commit()
+
+    def reset_user_settings_db(self) -> None:
+        self._conn.execute(
+            "INSERT INTO user_state (id, user_settings) VALUES (1, NULL)"
+            " ON CONFLICT(id) DO UPDATE SET user_settings = NULL"
+        )
+        self._conn.commit()
+
     def delete_sighting(self, sighting_id: int) -> bool:
         cur = self._conn.execute("DELETE FROM sightings WHERE id = ?", (sighting_id,))
         self._conn.commit()
