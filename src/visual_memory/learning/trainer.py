@@ -1,5 +1,4 @@
 """Triplet loss trainer for the projection head."""
-import argparse
 from pathlib import Path
 from typing import List, Tuple
 
@@ -71,33 +70,6 @@ class ProjectionTrainer:
         self.head.save(path)
 
 
-# ---- __main__ entry ----
-
-def _parse_args():
-    p = argparse.ArgumentParser(description="Train projection head from collected feedback")
-    p.add_argument("--feedback-dir", default="feedback", type=Path)
-    p.add_argument("--output", default="models/projection_head.pt", type=Path)
-    p.add_argument("--epochs", default=20, type=int)
-    p.add_argument("--lr", default=1e-4, type=float)
-    return p.parse_args()
-
-
-if __name__ == "__main__":
-    args = _parse_args()
-
-    store = FeedbackStore(store_dir=args.feedback_dir)
-    counts = store.count()
-    print(f"Feedback: {counts['positives']} positives, {counts['negatives']} negatives, {counts['triplets']} triplets")
-
-    triplets = store.load_triplets()
-    if not triplets:
-        print("No triplets available. Collect positive + negative feedback first.")
-        raise SystemExit(1)
-
-    head = ProjectionHead()
-    trainer = ProjectionTrainer(head, lr=args.lr)
-    final_loss = trainer.train(triplets, epochs=args.epochs)
-    trainer.save(args.output)
-
-    print(f"Training complete. Final loss: {final_loss:.4f}")
-    print(f"Saved: {args.output}")
+# Retraining is triggered via POST /retrain (HTTP API), not CLI.
+# The API endpoint enforces minimum feedback requirements and handles
+# DB access correctly. See visual_memory/api/routes/retrain.py.
