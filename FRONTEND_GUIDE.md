@@ -25,7 +25,7 @@ Upload cap: 50MB per request.
 
 ## What to Store Client-Side
 
-Before diving into flows, here is what state the client needs to track across calls.
+Here is what state the client needs to track across calls.
 
 **`scan_id`** - returned by every `POST /scan` response. Store it immediately. It is needed for:
 - `GET /crop` - fetch the cropped image of a match
@@ -46,8 +46,6 @@ The user wants the app to remember a new object. The flow is: capture -> POST /r
 ### Step 1: Capture
 
 Capture a burst of 3-5 frames in quick succession (~500ms apart) when the user initiates a teach. The backend picks the best frame automatically.
-
-Get close: 1-3 feet is reliable. 6 feet is not.
 
 ### Step 2: POST /remember
 
@@ -95,7 +93,7 @@ Content-Type: multipart/form-data
 ```json
 {
   "success": false,
-  "message": "Image is too dark for detection. Enable the flashlight and retry.",
+  "message": "Image is too dark for detection. Increase lighting or ask me to turn on the flashlight.",
   "is_dark": true,
   "darkness_level": 12.4,
   "blur_score": 5.1,
@@ -121,9 +119,9 @@ Content-Type: multipart/form-data
 
 Check signals in this order:
 
-**1. `is_dark: true`** - highest priority. Enable the flashlight immediately. Do not check other signals.
+**1. `is_dark: true`** - highest priority, detection quality drastically worsens in bad lighting. Allow the user to enable the flashlight with a voice command on the front end, or simply turn on the lights
 ```
-speak: "It's too dark - turning on flashlight"
+speak: "Image is too dark for detection. Increase lighting or ask me to turn on the flashlight.""
 ```
 
 **2. `success: false` + `is_dark: false`**
@@ -137,7 +135,7 @@ is_blurry: false -> "Could not detect - try a different angle, better lighting, 
 replaced_previous: true  -> say "Updated [label]"
 replaced_previous: false -> say "[label] saved"
 ```
-If `detection_quality` is `"low"` or `"medium"`, surface `detection_hint` verbatim as a soft warning. The object is saved regardless; the hint just tells the user a better photo would improve future scans.
+If `detection_quality` is `"low"` or `"medium"`, announce `detection_hint` as a soft warning. "Detected wallet with low confidence." The object is saved regardless; the hint just tells the user a better photo would improve future scans. They can redo if they want or move on.
 
 ### Step 4: Record location (optional)
 
@@ -177,13 +175,13 @@ Content-Type: multipart/form-data
 | Field | Type | Notes |
 |-------|------|-------|
 | `image` | file | The scene image |
-| `focal_length_px` | float | Optional - enables calibrated depth. Omit or send `0` to disable. |
+| `focal_length_px` | float | Enables calibrated depth, drastically improves accuracy. Omit or send `0` to disable. |
 
 **Focal length (for depth):**
 ```
 focal_length_px = (focalLengthMm / sensorWidthMm) * imageWidthPx
 ```
-iPhone 15 Plus: `f_mm=6.24, sensor_width=8.64mm` -> `focal_length_px = 3094.0`
+Example used in docs & benchmarks: iPhone 15 Plus -`f_mm=6.24, sensor_width=8.64mm` -> `focal_length_px = 3094.0`
 
 ### Step 2: Check for darkness
 
@@ -195,7 +193,7 @@ Before touching `matches`, check the top-level `is_dark` field:
   "count": 0,
   "is_dark": true,
   "darkness_level": 8.2,
-  "message": "Image is too dark for detection. Enable the flashlight and retry."
+  "message": "Image is too dark for detection. Increase lighting or ask me to turn on the flashlight."
 }
 ```
 
@@ -235,11 +233,11 @@ A normal scan response looks like:
 
 **Store `scan_id` immediately** - you need it for `/crop` and `/feedback`.
 
-`matches` is ordered left-to-right spatially. Read `narration` aloud for each match in array order. The narration string is already phrased for a blind user - speak it verbatim.
+`matches` is ordered left-to-right spatially. Read `narration` aloud for each match in array order. 
 
 `distance_ft` is only present when depth is enabled. When absent, narration still includes direction.
 
-**Direction zones:**
+**Direction zones:** (for debug reference, narration already reflects direction)
 
 | Value | Where in the frame |
 |-------|-------------------|
@@ -249,7 +247,7 @@ A normal scan response looks like:
 | `"slightly right"` | Right of center |
 | `"to your right"` | Far right (> 75%) |
 
-**Confidence tiers** (for UI styling only - narration already reflects confidence):
+**Confidence tiers** (for debug reference, narration already reflects confidence):
 
 | Value | Similarity range |
 |-------|-----------------|
@@ -259,13 +257,15 @@ A normal scan response looks like:
 
 ### Step 4: Fetch a crop (on demand)
 
-When the user focuses on a specific match, fetch its cropped image:
+The user can swipe left in right to navigate through matches in spatial order. When the user focuses on a specific match, fetch its cropped image:
 
 ```
 GET /crop?scan_id=a3f9c2b1d4e5f6a7&index=0
 ```
 
-`index` is the 0-based position in the `matches` array. Returns a raw JPEG. Do not prefetch - call this only when the user navigates to that match.
+`index` is the 0-based position in the `matches` array. Returns a raw JPEG. Do not prefetch; call this only when the user navigates to that match.
+
+The user can ask questions about the selected item or give feedback, use the scan_id to create the POST.
 
 Returns `404` if the `scan_id` has expired (older than the last 50 scans) or `index` is out of range.
 
@@ -298,13 +298,13 @@ Response:
 }
 ```
 
-`triplets` is the total training pairs collected so far. When `triplets >= min_for_training`, you can offer the user a "Improve accuracy" action (see Retraining below).
+`triplets` is the total training pairs collected so far. 
 
 `404` means the `scan_id` is no longer cached. Send feedback before the user does 50 more scans.
 
 ### Step 6: Update location (optional)
 
-After a scan, if the user names the room, record it for all matches at once:
+After a scan, if the user names the room, record it for all matches at once (except the ones that they gave negative feedback for):
 
 ```
 POST /sightings
@@ -322,48 +322,13 @@ Content-Type: application/json
 
 `direction`, `distance_ft`, and `similarity` come directly from the match objects. Omit `room_name` if the user does not name the room. The scan pipeline already records a basic sighting for every match automatically - this call enriches it with the room name.
 
-### Retraining (when the user requests it)
-
-Once enough feedback has accumulated, surface a manual "Improve accuracy" action. Do not trigger this automatically.
-
-```
-POST /retrain
-```
-
-Response:
-```json
-{ "started": true, "triplets": 15 }
-```
-
-If not enough data yet:
-```json
-{ "started": false, "reason": "insufficient_data", "triplets": 3, "min_required": 10 }
-```
-
-If already running:
-```json
-{ "started": false, "reason": "already_running" }
-```
-
-Poll for completion:
-```
-GET /retrain/status
-```
-```json
-{
-  "running": false,
-  "last_result": { "trained": true, "triplets": 15, "final_loss": 0.012, "head_weight": 0.3 },
-  "error": null
-}
-```
-
-Poll every 5 seconds until `running: false`. The next scan after training completes will automatically use the updated model - no restart needed.
+**Do NOT update room name for matches the user declined**
 
 ---
 
 ## Ask Mode
 
-The user asks "where did I leave my wallet?" Query the last known location by label. Fuzzy matching is built in - "my wallet", "the wallet", and "brown wallet" all resolve to "wallet".
+The user asks "where did I leave my wallet?" Query the last known location by label. Fuzzy matching is built in as a fallback - "my wallet", "the wallet", and "brown wallet" all resolve to "wallet".
 
 ```
 GET /find?label=wallet
@@ -623,7 +588,7 @@ image: <file>
 
 Returns `is_dark`, `is_blurry`, `luminance`, `blur_score` - the same values the pipeline uses to reject images. Use this when `/remember` or `/scan` silently rejects an image.
 
-### Smoke testing pipelines
+### Auto testing pipelines
 
 ```
 GET /debug/test-remember
@@ -670,6 +635,48 @@ Directly patches any primitive field in the backend settings. Not persisted acro
 
 ---
 
+
+---
+
+## Retraining 
+
+Debug retrain. Retrain normally happens on a cron schedule, run this to get immediate results
+
+```
+POST /retrain
+```
+
+Response:
+```json
+{ "started": true, "triplets": 15 }
+```
+
+If not enough data yet:
+```json
+{ "started": false, "reason": "insufficient_data", "triplets": 3, "min_required": 10 }
+```
+
+If already running:
+```json
+{ "started": false, "reason": "already_running" }
+```
+
+Poll for completion:
+```
+GET /retrain/status
+```
+```json
+{
+  "running": false,
+  "last_result": { "trained": true, "triplets": 15, "final_loss": 0.012, "head_weight": 0.3 },
+  "error": null
+}
+```
+
+Poll every 5 seconds until `running: false`. The next scan after training completes will automatically use the updated model, no restart needed.
+
+---
+
 ## Endpoint Quick Reference
 
 | Method | Path | When to call |
@@ -680,8 +687,6 @@ Directly patches any primitive field in the backend settings. Not persisted acro
 | POST | /scan | User scans the room |
 | GET | /crop | User focuses on a specific scan match |
 | POST | /feedback | User confirms or denies a scan match |
-| POST | /retrain | User requests "Improve accuracy" |
-| GET | /retrain/status | Poll retraining progress |
 | GET | /find | User asks "where is my [object]?" |
 | GET | /items | User opens the memory list |
 | DELETE | /items/<label> | User deletes a memory |
@@ -699,3 +704,5 @@ Directly patches any primitive field in the backend settings. Not persisted acro
 | GET | /debug/test-scan | Smoke test scan pipeline |
 | POST | /debug/wipe | Reset test state |
 | PATCH | /debug/config | Patch settings live |
+| POST | /retrain | Immediatly retrain for testing |
+| GET | /retrain/status | Poll retraining progress |
