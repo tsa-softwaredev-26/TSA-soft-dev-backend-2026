@@ -1,18 +1,19 @@
-# Spaitra Backend - Deployment Guide
+# Spaitra Deployment Guide
 
-Target: Debian 12+ (Bookworm/Trixie), Python 3.11, optional NVIDIA GPU.
-Public access via srv.us tunnel to gunicorn on localhost:5000.
+Target: Debian 12 or newer, Python 3.11, optional NVIDIA GPU for the core backend.
 
-This guide covers server deployment only. For local development, see README.md.
+This deployment uses two isolated services on the same host:
 
-All steps are manual. Run them in order.
+- `spaitra-core`: Flask + gunicorn backend, Torch models, SQLite
+- `spaitra-ocr`: FastAPI + uvicorn OCR microservice, PaddleOCR
 
----
+The services communicate over localhost with `OCR_SERVICE_URL=http://127.0.0.1:8001/ocr`.
 
-## 1. System Packages
+## 1. Install system packages
 
 ```bash
-apt-get update && apt-get install -y \
+apt-get update
+apt-get install -y \
     python3.11 python3.11-venv python3.11-dev \
     git gh build-essential curl \
     libglib2.0-0 libsm6 libxrender1 libxext6 libgomp1 \
@@ -20,15 +21,9 @@ apt-get update && apt-get install -y \
     ffmpeg
 ```
 
-**GPU servers:** CUDA drivers must be installed before continuing - check with
-`nvidia-smi`. Most GPU VPS providers offer CUDA-preloaded images; select one at
-provisioning time. If you need to install drivers manually, use the NVIDIA runfile
-installer (developer.nvidia.com/cuda-downloads, select "runfile"). Do not use the
-NVIDIA apt repo on Debian 12+; its signing key is rejected by current Debian policy.
+For GPU hosts, make sure NVIDIA drivers are already installed and `nvidia-smi` works before continuing.
 
----
-
-## 2. Service User
+## 2. Create the service user
 
 ```bash
 adduser --system --group --home /opt/spaitra spaitra
@@ -36,15 +31,11 @@ mkdir -p /opt/spaitra
 chown spaitra:spaitra /opt/spaitra
 ```
 
----
+## 3. Clone the repository
 
-## 3. GitHub Access
+Use either an SSH deploy key or a GitHub PAT as the `spaitra` user.
 
-The repo is private. Use an SSH deploy key (recommended) or a PAT.
-
-### Option A - SSH Deploy Key (recommended)
-
-Scoped to one repo, read-only, no expiry.
+SSH deploy key flow:
 
 ```bash
 su - spaitra -s /bin/bash
@@ -53,9 +44,7 @@ ssh-keygen -t ed25519 -C "spaitra-server" -f ~/.ssh/deploy_key -N ""
 cat ~/.ssh/deploy_key.pub
 ```
 
-Add the printed public key to GitHub:
-- github.com/tsa-softwaredev-26/TSA-soft-dev-backend-2026 -> Settings -> Deploy keys -> Add deploy key
-- Leave "Allow write access" unchecked
+Add that public key to the repository deploy keys, then:
 
 ```bash
 cat >> ~/.ssh/config <<'EOF'
@@ -65,185 +54,200 @@ Host github.com
 EOF
 chmod 600 ~/.ssh/config
 
-# Verify before cloning:
-ssh -T git@github.com
-```
-
-Clone:
-```bash
 cd /opt/spaitra
 git clone git@github.com:tsa-softwaredev-26/TSA-soft-dev-backend-2026.git .
 ```
 
-### Option B - Personal Access Token
-
-1. github.com -> Settings -> Developer settings -> Personal access tokens -> Tokens (classic)
-2. Generate new token, select `repo` scope, set an expiry
-3. Copy the token - it will not be shown again
+PAT flow:
 
 ```bash
 su - spaitra -s /bin/bash
 echo "YOUR_PAT" | gh auth login --with-token --hostname github.com
-gh auth status
 cd /opt/spaitra
 gh repo clone tsa-softwaredev-26/TSA-soft-dev-backend-2026 .
 ```
 
----
+## 4. Create two isolated Python environments
 
-## 4. Python Environment
+All commands below run as the `spaitra` user inside `/opt/spaitra`.
 
-All `pip` commands below run inside the activated venv. Do not use a system-wide pip.
+### Core backend environment
 
 ```bash
-# As spaitra user:
-cd /opt/spaitra
-python3.11 -m venv venv
-source venv/bin/activate
-
-pip install -e .
-pip install gunicorn
+python3.11 -m venv venv-core
+source venv-core/bin/activate
+pip install --upgrade pip
+pip install -e ".[core]"
+deactivate
 ```
 
-**GPU servers:** run the helper script - it reads `nvidia-smi`, picks the right
-PyTorch wheel index for your CUDA version, installs it, and verifies CUDA access:
+GPU hosts should install the correct PyTorch wheel index inside `venv-core`:
 
 ```bash
+source /opt/spaitra/venv-core/bin/activate
 bash deploy/install_gpu_deps.sh
+deactivate
 ```
 
-If your CUDA version is not handled, the script exits with an error and links to
-the official package indexes to find the right command manually.
-
-**CPU-only servers:** install the CPU PyTorch wheel (smaller download, no CUDA):
+CPU-only core hosts can replace that with:
 
 ```bash
+source /opt/spaitra/venv-core/bin/activate
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+deactivate
 ```
 
-OCR runs in a separate service. Point this backend to that service with
-`OCR_SERVICE_URL` in `.env`.
-
----
-
-## 5. HuggingFace Auth
-
-Two models require accepting a license on huggingface.co before they will download:
-
-- facebook/dinov3-vits16-pretrain-lvd1689m (image embedder)
-- IDEA-Research/grounding-dino-base (remember mode detector)
-
-Accept both licenses, then log in:
+### OCR environment
 
 ```bash
+python3.11 -m venv venv-ocr
+source venv-ocr/bin/activate
+pip install --upgrade pip
+pip install -e ".[ocr]"
+deactivate
+```
+
+Do not install OCR packages into `venv-core`. Do not install Torch model dependencies into `venv-ocr` unless you intentionally want a combined debug environment.
+
+## 5. Authenticate HuggingFace for the core service
+
+The core backend needs access to gated model repositories.
+
+```bash
+source /opt/spaitra/venv-core/bin/activate
 hf auth login
-```
-
-Get a token at huggingface.co/settings/tokens (read access is sufficient).
-
----
-
-## 6. Model Weights
-
-```bash
 python setup_weights.py
+deactivate
 ```
 
-Downloads Depth Pro (~2GB) and YOLOE (~80MB). DINOv3 (~1.2GB) and GroundingDINO
-(~900MB) download from HuggingFace on first startup. Total: ~5GB disk, 10-30 min.
+## 6. Create environment files
 
----
-
-## 7. Environment
+Core backend env:
 
 ```bash
-cp deploy/env.example .env
-nano .env  # set API_KEY at minimum
+cp deploy/env.example /opt/spaitra/.env
+nano /opt/spaitra/.env
 ```
 
-| Variable | Default | Notes |
-|----------|---------|-------|
-| `API_KEY` | (none) | All routes except /health require `X-API-Key` header. |
-| `ENABLE_DEPTH` | `1` | Depth Pro needs ~2GB VRAM. All models together: ~4GB VRAM per worker. Set `0` on CPU-only or <4GB VRAM. |
-| `ENABLE_OCR` | `1` | Set `0` to skip OCR calls entirely. |
-| `OCR_SERVICE_URL` | `http://127.0.0.1:8001/ocr` | Local HTTP OCR microservice endpoint. |
-| `ENABLE_LEARNING` | `1` | Set `0` to disable projection head. |
+Recommended core values:
 
----
+```dotenv
+API_KEY=replace-me
+ENABLE_DEPTH=1
+ENABLE_OCR=1
+OCR_SERVICE_URL=http://127.0.0.1:8001/ocr
+ENABLE_LEARNING=1
+API_HOST=127.0.0.1
+API_PORT=5000
+```
 
-## 8. OCR Service (required when ENABLE_OCR=1)
-
-Run OCR as a separate service and keep it local to the host when possible.
-`OCR_SERVICE_URL` must be reachable from the backend worker process.
-
-Example systemd unit (replace `ExecStart` with your OCR service command):
+OCR service env:
 
 ```bash
-cat > /etc/systemd/system/spaitra-ocr.service <<'EOF'
-[Unit]
-Description=Spaitra OCR microservice
-After=network.target
-
-[Service]
-Type=simple
-User=spaitra
-WorkingDirectory=/opt/spaitra-ocr
-ExecStart=/opt/spaitra-ocr/venv/bin/python -m your_ocr_service
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-systemctl daemon-reload
-systemctl enable --now spaitra-ocr
-systemctl status spaitra-ocr --no-pager
+cp deploy/ocr.env.example /opt/spaitra/.ocr.env
+nano /opt/spaitra/.ocr.env
 ```
 
-Quick connectivity check:
+Recommended OCR values:
+
+```dotenv
+OCR_HOST=127.0.0.1
+OCR_PORT=8001
+OCR_LANG=en
+OCR_MIN_CONFIDENCE=0.3
+OCR_USE_ANGLE_CLS=0
+```
+
+## 7. Smoke test each service before systemd
+
+### OCR service
 
 ```bash
-source /opt/spaitra/.env
-curl -X POST -F image=@/opt/spaitra/src/visual_memory/tests/text_demo/typed.jpeg "$OCR_SERVICE_URL"
+cd /opt/spaitra
+source venv-ocr/bin/activate
+set -a
+. /opt/spaitra/.ocr.env
+set +a
+python -m services.ocr.run
 ```
 
----
-
-## 9. Systemd Service
+In another shell:
 
 ```bash
-# As root:
-cp /opt/spaitra/deploy/spaitra.service /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable spaitra
-systemctl start spaitra
-journalctl -u spaitra -f
+curl http://127.0.0.1:8001/health
+curl -X POST -F image=@/opt/spaitra/src/visual_memory/tests/text_demo/typed.jpeg \
+  http://127.0.0.1:8001/ocr
 ```
 
-Ready when logs show `{"event": "warm_all_complete", ...}`.
+Stop the manual OCR process after verification.
+
+### Core service
+
+```bash
+cd /opt/spaitra
+source venv-core/bin/activate
+set -a
+. /opt/spaitra/.env
+set +a
+python -m services.core.run
+```
+
+In another shell:
 
 ```bash
 curl http://127.0.0.1:5000/health
-# {"status": "ok"}
 ```
 
-The service runs 2 workers so health checks do not block during slow inference.
-Each worker loads all models independently (~4GB VRAM each with `ENABLE_DEPTH=1`).
-On servers with <8GB VRAM, edit `spaitra.service` to set `-w 1`, then
-`systemctl daemon-reload && systemctl restart spaitra`.
+Stop the manual core process after verification.
 
----
+## 8. Install systemd units
 
-## 10. srv.us Tunnel
+```bash
+cp /opt/spaitra/deploy/spaitra-core.service /etc/systemd/system/
+cp /opt/spaitra/deploy/spaitra-ocr.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now spaitra-ocr
+systemctl enable --now spaitra-core
+```
 
-Create a second systemd service so the tunnel restarts automatically:
+Check status:
+
+```bash
+systemctl status spaitra-ocr --no-pager
+systemctl status spaitra-core --no-pager
+journalctl -u spaitra-ocr -n 100 --no-pager
+journalctl -u spaitra-core -n 100 --no-pager
+```
+
+## 9. Verify end-to-end behavior
+
+Check both health endpoints:
+
+```bash
+curl http://127.0.0.1:8001/health
+curl http://127.0.0.1:5000/health
+```
+
+Confirm the core service can reach OCR through its configured URL:
+
+```bash
+set -a
+. /opt/spaitra/.env
+set +a
+curl -X POST -F image=@/opt/spaitra/src/visual_memory/tests/text_demo/typed.jpeg \
+  "$OCR_SERVICE_URL"
+```
+
+If you want the core backend to run without OCR, set `ENABLE_OCR=0` in `/opt/spaitra/.env` and restart only `spaitra-core`.
+
+## 10. Public access with srv.us
 
 ```bash
 cat > /etc/systemd/system/spaitra-tunnel.service <<'EOF'
 [Unit]
 Description=Spaitra srv.us tunnel
-After=spaitra.service
-Requires=spaitra.service
+After=spaitra-core.service
+Requires=spaitra-core.service
 
 [Service]
 Type=simple
@@ -255,73 +259,101 @@ RestartSec=10
 [Install]
 WantedBy=multi-user.target
 EOF
+
+systemctl daemon-reload
 systemctl enable --now spaitra-tunnel
 ```
 
-The public HTTPS URL srv.us prints is the base URL for the iOS frontend.
-
----
-
-## 11. Updating
+## 11. Updating the deployment
 
 ```bash
 su - spaitra -s /bin/bash
-cd /opt/spaitra && source venv/bin/activate
+cd /opt/spaitra
 git pull
-pip install -e .
+
+source venv-core/bin/activate
+pip install -e ".[core]"
+deactivate
+
+source venv-ocr/bin/activate
+pip install -e ".[ocr]"
+deactivate
 exit
-systemctl restart spaitra
-# restart OCR service too if you updated it:
-# systemctl restart spaitra-ocr
+
+systemctl restart spaitra-ocr
+systemctl restart spaitra-core
 ```
 
----
+If the core model stack changes, also rerun:
+
+```bash
+su - spaitra -s /bin/bash
+cd /opt/spaitra
+source venv-core/bin/activate
+python setup_weights.py
+deactivate
+```
 
 ## 12. Troubleshooting
 
-**Service fails to start:**
+### Core service fails to start
+
 ```bash
-journalctl -u spaitra --no-pager -n 100
+journalctl -u spaitra-core -n 100 --no-pager
 ```
 
-- Missing `.env`: `cp deploy/env.example .env` and set `API_KEY`
-- HuggingFace auth: run `hf auth login` as the spaitra user
-- GPU packages wrong: rerun `bash deploy/install_gpu_deps.sh`
-- Disk full: need ~5GB free in `/opt/spaitra`
+Check:
 
-**SSH key rejected:**
-- Check the key is in GitHub repo deploy keys
-- `ssh -vT git@github.com` shows which key is being offered
-- Confirm `~/.ssh/config` has `IdentityFile /opt/spaitra/.ssh/deploy_key`
+- `/opt/spaitra/.env` exists and has valid values
+- `hf auth login` was run in `venv-core`
+- `python setup_weights.py` completed in `venv-core`
+- `OCR_SERVICE_URL` points to a reachable endpoint if `ENABLE_OCR=1`
 
-**HuggingFace 403:**
-- `hf whoami` to verify the token is valid
-- Confirm you accepted each gated model's license on huggingface.co
+### OCR service fails to start
 
-**OCR requests failing (connection refused/timeouts):**
-- Confirm OCR service is running and reachable at `OCR_SERVICE_URL`
-- Test locally: `curl -X POST -F image=@/path/to/test.png $OCR_SERVICE_URL`
-
-**VRAM OOM with 2 workers:**
-- Set `-w 1` in `spaitra.service` or `ENABLE_DEPTH=0` in `.env`
-- `systemctl daemon-reload && systemctl restart spaitra`
-
-**gunicorn timeout:**
-- Increase `--timeout` in `spaitra.service` (default 120s; warm-up can exceed this)
-- `systemctl daemon-reload && systemctl restart spaitra`
-
----
-
-## Directory Layout
-
+```bash
+journalctl -u spaitra-ocr -n 100 --no-pager
 ```
+
+Check:
+
+- `/opt/spaitra/.ocr.env` exists
+- `pip install -e ".[ocr]"` completed in `venv-ocr`
+- the port in `.ocr.env` matches the port in `OCR_SERVICE_URL`
+
+### OCR requests time out
+
+Check the OCR service directly:
+
+```bash
+curl http://127.0.0.1:8001/health
+curl -X POST -F image=@/opt/spaitra/src/visual_memory/tests/text_demo/typed.jpeg \
+  http://127.0.0.1:8001/ocr
+```
+
+### GPU issues in the core backend
+
+Inside `venv-core`:
+
+```bash
+python -c "import torch; print(torch.cuda.is_available())"
+```
+
+If false on a GPU host, rerun `bash deploy/install_gpu_deps.sh`.
+
+## 13. Final deployment layout
+
+```text
 /opt/spaitra/
-├── .env
-├── .ssh/deploy_key             # Option A only
-├── venv/
-├── checkpoints/depth_pro.pt   # ~2GB, from setup_weights.py
-├── data/memory.db             # created on first run
-├── models/                    # created on first /retrain
-├── logs/app.log
-└── src/visual_memory/
+  .env
+  .ocr.env
+  venv-core/
+  venv-ocr/
+  deploy/
+  services/
+  src/visual_memory/
+  checkpoints/
+  data/memory.db
+  models/
+  logs/app.log
 ```

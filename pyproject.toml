@@ -8,25 +8,32 @@ version = "0.1.0"
 description = "Visual memory system with object detection for TSA Software Development app"
 requires-python = ">=3.8"
 dependencies = [
-    # Core ML
+    # Shared package deps
+    "numpy>=1.24.0",
+    "pillow>=9.0.0",
+    "pillow-heif>=0.10.0",
+]
+
+[project.optional-dependencies]
+core = [
     "torch>=2.0.0",
     "torchvision>=0.15.0",
     "transformers>=4.56.0",
     "huggingface_hub>=0.26.0",
-    "numpy>=1.24.0",
-    # Image processing
-    "pillow>=9.0.0",
-    "pillow-heif>=0.10.0",
-    # Detection models
     "ultralytics>=8.0.0",
     "einops",
     "addict",
     "easydict",
-    # Depth estimation (Apple Depth Pro)
     "depth-pro @ git+https://github.com/apple/ml-depth-pro.git",
-    # API server
     "flask>=3.0.0",
     "gunicorn>=21.0.0",
+]
+ocr = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "python-multipart>=0.0.9",
+    "paddleocr>=2.8.0",
+    "paddlepaddle>=3.0.0",
 ]
 
 [project.scripts]

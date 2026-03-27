@@ -71,4 +71,4 @@ else:
 EOF
 
 echo ""
-echo "GPU dependencies installed successfully (PyTorch only)."
+echo "GPU dependencies installed successfully in the current environment."

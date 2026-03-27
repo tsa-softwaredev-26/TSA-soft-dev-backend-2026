@@ -69,14 +69,31 @@ Semantic memory retrieval.
 ```bash
 gh repo clone tsa-softwaredev-26/TSA-soft-dev-backend-2026
 cd TSA-soft-dev-backend-2026
-python -m venv venv
-source venv/bin/activate
-pip install -e .
+python -m venv .venv-core
+source .venv-core/bin/activate
+pip install -e ".[core]"
 hf auth login
 python setup_weights.py
 ```
 
-`pip install -e .` installs all dependencies including depth-pro from GitHub.
+OCR runs in a separate environment:
+
+```bash
+python -m venv .venv-ocr
+source .venv-ocr/bin/activate
+pip install -e ".[ocr]"
+python -m services.ocr.run
+```
+
+Run the core backend from the core environment:
+
+```bash
+source .venv-core/bin/activate
+python -m services.core.run
+```
+
+`pip install -e ".[core]"` installs Torch, depth-pro, Flask, and the core model stack.
+`pip install -e ".[ocr]"` installs PaddleOCR and the OCR service stack only.
 `setup_weights.py` downloads Depth Pro (~2GB), YOLOE (~80MB), CLIP (~180MB),
 DINOv3 (~1.2GB), and GroundingDINO (~900MB). DINOv3 and GroundingDINO are gated
 on HuggingFace - request access and run `hf auth login` first.
@@ -92,6 +109,17 @@ gunicorn, GPU PyTorch, external OCR service, srv.us tunnel).
 ## Core Structure
 
 ```
+services/
+├── core/
+│   ├── app.py                        # Core app surface
+│   ├── run.py                        # Dev entry point (python -m services.core.run)
+│   ├── wsgi.py                       # Gunicorn entry point (services.core.wsgi:application)
+│   └── requirements.txt              # Core-only install surface
+├── ocr/
+│   ├── app.py                        # FastAPI PaddleOCR service
+│   ├── run.py                        # Dev entry point (python -m services.ocr.run)
+│   └── requirements.txt              # OCR-only install surface
+│
 src/visual_memory/
 ├── pipelines/
 │   ├── remember_mode/pipeline.py
@@ -132,7 +160,7 @@ src/visual_memory/
 ├── api/
 │   ├── app.py                          # create_app() factory - blueprints, auth, upload cap
 │   ├── pipelines.py                    # Lazy singletons: get_remember_pipeline(), get_scan_pipeline(), get_feedback_store(), get_user_settings(), warm_all()
-│   ├── run.py                          # Local dev entry point (python src/visual_memory/api/run.py)
+│   ├── run.py                          # Compatibility shim; prefer services/core/run.py
 │   └── routes/
 │       ├── health.py                   # GET /health
 │       ├── remember.py                 # POST /remember
@@ -517,7 +545,7 @@ python -m visual_memory.learning.trainer --epochs 50 --lr 5e-5
 
 ## API
 
-Run locally: `python src/visual_memory/api/run.py`
+Run locally: `python -m services.core.run`
 Production (Ubuntu/NVIDIA): `gunicorn -w 1 -b 0.0.0.0:5000 "visual_memory.api.app:create_app()"`
 Single worker is required - model state is process-local.
 
@@ -611,6 +639,7 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 ## TODO
 
 ### Engine / Architecture
+- [] Remove redact receipts, uneeded, using receipts with no personal info
 - [ ] Run full benchmark - 120 images not yet captured; see `benchmarks/CAPTURE_GUIDE.md` (~1-2 hrs)
 - [ ] Add batched OCR service endpoint support and wire it into pipeline OCR paths to reduce HTTP overhead on multi-crop scans
 - [ ] Wire `detect_all_batch()` into ScanPipeline when processing multiple images per request

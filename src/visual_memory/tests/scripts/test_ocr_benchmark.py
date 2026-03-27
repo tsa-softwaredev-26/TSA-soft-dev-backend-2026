@@ -1,7 +1,7 @@
 """
 OCR Benchmark: Extract text from test images, verify CLIP embedding shape.
 
-Focus: Verify PaddleOCR text extraction accuracy.
+Focus: Verify OCR service text extraction accuracy through the HTTP recognizer.
 
 Run:
     python -m visual_memory.tests.scripts.test_ocr_benchmark
@@ -39,13 +39,13 @@ _X = "\033[0m"
 
 VERBOSE = os.environ.get("VERBOSE", "0") == "1"
 
-print(f"\n{_B}OCR Benchmark: PaddleOCR Text Extraction{_X}")
+print(f"\n{_B}OCR Benchmark: OCR Service Text Extraction{_X}")
 print(f"{_B}{'='*60}{_X}\n")
 
-# Load only PaddleOCR for text extraction
+# Load the HTTP OCR recognizer
 from visual_memory.engine.text_recognition import TextRecognizer
 recognizer = TextRecognizer()
-print(f"{_G}✓ PaddleOCR loaded{_X}\n")
+print(f"{_G}✓ OCR recognizer ready{_X}\n")
 
 # Benchmark images: text_demo/*.jpeg
 test_images = sorted([p for p in TEXT_DEMO.glob("*.jpeg") if p.is_file() and not p.name.startswith(".")])
@@ -97,7 +97,7 @@ print(f"  OCR Success: {n_success}/{len(test_images)} images")
 print(f"  Ground truth available: {n_gt} images")
 
 print(f"\n{_B}Key Findings{_X}\n")
-print(f"  • All test images extracted successfully with PaddleOCR")
+print(f"  • All test images extracted successfully through the OCR service")
 print(f"  • CLIP embedding will be computed in next phase (text similarity tuning)")
 print(f"  • Text confidence and segment counts logged for analysis")
 print()

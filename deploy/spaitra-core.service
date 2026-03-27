@@ -1,5 +1,5 @@
 [Unit]
-Description=Spaitra Visual Memory API
+Description=Spaitra core backend
 After=network.target
 
 [Service]
@@ -8,7 +8,6 @@ User=spaitra
 Group=spaitra
 WorkingDirectory=/opt/spaitra
 EnvironmentFile=/opt/spaitra/.env
-# Legacy alias for the core backend. Prefer deploy/spaitra-core.service.
 ExecStart=/opt/spaitra/venv-core/bin/gunicorn \
     -w 1 \
     -b 127.0.0.1:5000 \

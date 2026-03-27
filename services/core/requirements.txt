@@ -1,0 +1,3 @@
+# Install from the repository root with:
+#   pip install -r services/core/requirements.txt
+-e ../..[core]
