@@ -1,60 +1,68 @@
 # Spaitra Frontend Integration Guide
 
-> For the mobile team. Everything needed to integrate with the backend API.
-> Backend details: see ARCHITECTURE.md.
+> Flow-based integration guide for the mobile team.
+> Organized by user action, not by endpoint. Quick reference table at the bottom.
+> Backend internals: ARCHITECTURE.md.
 
 ---
 
-## Base URL and Auth
+## Auth and Base URL
 
 ```
 Base URL: http://<host>:5000
 Default local: http://127.0.0.1:5000
 ```
 
-Auth is opt-in. If `API_KEY` is set on the server, all routes except `/health` require:
+If `API_KEY` is set on the server, every route except `GET /health` requires:
 ```
 X-API-Key: <secret>
 ```
-If the key is missing or wrong, the server returns `401`. `/health` is always open.
+Missing or wrong key -> `401`. No key configured on the server -> no header needed.
 
 Upload cap: 50MB per request.
 
 ---
 
-## Endpoints
+## What to Store Client-Side
 
-### GET /health
+Before diving into flows, here is what state the client needs to track across calls.
 
-Health check. No auth required.
+**`scan_id`** - returned by every `POST /scan` response. Store it immediately. It is needed for:
+- `GET /crop` - fetch the cropped image of a match
+- `POST /feedback` - tell the backend whether a match was correct
 
-```json
-{ "status": "ok" }
-```
+The server caches the last 50 scans. If the user does 50 more scans before you send feedback, the `scan_id` expires and `/feedback` returns 404. In practice: send feedback during the same scan session, before the user navigates away.
+
+**`voice_speed`** - read once from `GET /user-settings` at app launch. Apply to your TTS engine for every narration.
+
+**Current match index** - 0-based position in the `matches` array from the last scan. The client owns this; the server does not track it.
 
 ---
 
-### POST /remember
+## Teach Mode
 
-Teach the app a new object. Detects the object in the image, embeds it, and saves it to the database. The new item is immediately visible to `/scan` after this returns.
+The user wants the app to remember a new object. The flow is: capture -> POST /remember -> handle signals -> optionally record location.
 
-**Single image - request:** `multipart/form-data`
+### Step 1: Capture
 
-| Field | Type | Required |
-|-------|------|----------|
-| `image` | file | yes (single frame) |
-| `prompt` | string | yes - e.g. `"wallet"`, `"house keys"` |
+Capture a burst of 3-5 frames in quick succession (~500ms apart) when the user initiates a teach. The backend picks the best frame automatically.
 
-**Multi-image (recommended) - request:** `multipart/form-data`
+Get close: 1-3 feet is reliable. 6 feet is not.
 
-Send 2-5 frames captured in quick succession (~500ms apart). Backend picks the frame with the highest-confidence detection and returns a single result.
+### Step 2: POST /remember
 
-| Field | Type | Required |
-|-------|------|----------|
-| `images[]` | file[] | yes (2-5 frames) |
-| `prompt` | string | yes |
+```
+POST /remember
+Content-Type: multipart/form-data
+```
 
-**Response (success):**
+| Field | Type | Notes |
+|-------|------|-------|
+| `images[]` | file[] | 2-5 frames from the burst (recommended) |
+| `image` | file | Single frame (fallback - send `images[]` when possible) |
+| `prompt` | string | The user's label, e.g. `"wallet"`, `"house keys"` |
+
+**Success response:**
 ```json
 {
   "success": true,
@@ -66,7 +74,7 @@ Send 2-5 frames captured in quick succession (~500ms apart). Backend picks the f
     "confidence": 0.87,
     "detection_quality": "high",
     "detection_hint": "Detection confidence is high.",
-    "blur_score": 143.7,
+    "blur_score": 312.7,
     "is_blurry": false,
     "is_dark": false,
     "darkness_level": 112.4,
@@ -81,7 +89,9 @@ Send 2-5 frames captured in quick succession (~500ms apart). Backend picks the f
 }
 ```
 
-**Response (failure - too dark):**
+`images_tried` and `images_with_detection` only appear when using `images[]`.
+
+**Failure - too dark:**
 ```json
 {
   "success": false,
@@ -94,7 +104,7 @@ Send 2-5 frames captured in quick succession (~500ms apart). Backend picks the f
 }
 ```
 
-**Response (failure - no detection):**
+**Failure - no detection:**
 ```json
 {
   "success": false,
@@ -107,58 +117,97 @@ Send 2-5 frames captured in quick succession (~500ms apart). Backend picks the f
 }
 ```
 
-**Result field reference:**
+### Step 3: Handle the response signals
 
-| Field | Notes |
-|-------|-------|
-| `detection_quality` | `"low"` / `"medium"` / `"high"` based on GroundingDINO confidence |
-| `detection_hint` | Human-readable advice string - surface verbatim when quality is low or medium |
-| `blur_score` | Laplacian variance; > 100 is sharp |
-| `is_blurry` | true when `blur_score < 100` |
-| `is_dark` | true when mean luminance < 30 - check this FIRST before other signals |
-| `darkness_level` | Mean grayscale 0-255 |
-| `replaced_previous` | true if a prior teach for this label was overwritten - say "Updated [label]" |
-| `second_pass` | true if detection only succeeded with a reformulated prompt |
-| `text_likelihood` | 0.0-1.0 heuristic estimate of text on the object; > 0.3 = OCR was likely run |
-| `ocr_text` | Raw extracted text (empty string when none found or OCR skipped) |
-| `images_tried` | Only present in multi-image mode |
-| `images_with_detection` | Only present in multi-image mode |
+Check signals in this order:
 
-**Frontend signals:**
+**1. `is_dark: true`** - highest priority. Enable the flashlight immediately. Do not check other signals.
+```
+speak: "It's too dark - turning on flashlight"
+```
 
-| Signal | Recommended UX |
-|--------|---------------|
-| `is_dark: true` | PRIORITY: enable flashlight; speak "It's too dark - turning on flashlight" |
-| `detection_quality: "low"` | Show warning; speak `detection_hint` verbatim |
-| `detection_quality: "medium"` | Soft prompt; surface `detection_hint` |
-| `is_blurry: true` + `is_dark: false` | "Hold steady and try again" |
-| `replaced_previous: true` | Say "Updated [label]" not "[label] saved" |
-| `text_likelihood > 0.3` | Show "Text label detected on this item" |
-| `success: false` + `is_dark: false` + `is_blurry: false` | "Try a different angle, better lighting, or a more specific label" |
+**2. `success: false` + `is_dark: false`**
+```
+is_blurry: true  -> "Hold steady and try again"
+is_blurry: false -> "Could not detect - try a different angle, better lighting, or a more specific label"
+```
+
+**3. `success: true`** - object saved.
+```
+replaced_previous: true  -> say "Updated [label]"
+replaced_previous: false -> say "[label] saved"
+```
+If `detection_quality` is `"low"` or `"medium"`, surface `detection_hint` verbatim as a soft warning. The object is saved regardless; the hint just tells the user a better photo would improve future scans.
+
+### Step 4: Record location (optional)
+
+After a successful teach, ask the user where the object is. If they answer:
+
+```
+POST /sightings
+Content-Type: application/json
+```
+```json
+{
+  "room_name": "kitchen",
+  "sightings": [{ "label": "wallet" }]
+}
+```
+
+`room_name` is normalized server-side ("In The Kitchen" -> "kitchen"). The normalized form is echoed in the response. Omit `room_name` if the user does not name the room.
+
+Response:
+```json
+{ "saved": 1, "labels": ["wallet"], "room_name": "kitchen" }
+```
 
 ---
 
-### POST /scan
+## Scan Mode
 
-Scan the current scene for previously taught objects. Returns matches sorted left-to-right by spatial position.
+The user scans the room to find previously taught objects. The flow is: capture -> POST /scan -> store `scan_id` -> navigate matches -> (optional) crop, feedback, location update, retrain.
 
-**Request:** `multipart/form-data`
+### Step 1: POST /scan
 
-| Field | Type | Required |
-|-------|------|----------|
-| `image` | file | yes |
-| `focal_length_px` | float | no - pass for calibrated depth; omit or `0` to disable depth |
+```
+POST /scan
+Content-Type: multipart/form-data
+```
 
-**Focal length formula (for calibrated depth):**
+| Field | Type | Notes |
+|-------|------|-------|
+| `image` | file | The scene image |
+| `focal_length_px` | float | Optional - enables calibrated depth. Omit or send `0` to disable. |
+
+**Focal length (for depth):**
 ```
 focal_length_px = (focalLengthMm / sensorWidthMm) * imageWidthPx
 ```
-iPhone 15 Plus reference: `f_mm=6.24`, `sensor_width=8.64mm` -> `focal_length_px = 3094.0`
+iPhone 15 Plus: `f_mm=6.24, sensor_width=8.64mm` -> `focal_length_px = 3094.0`
 
-**Response:**
+### Step 2: Check for darkness
+
+Before touching `matches`, check the top-level `is_dark` field:
+
 ```json
 {
-  "scan_id": "a3f9c2b1...",
+  "matches": [],
+  "count": 0,
+  "is_dark": true,
+  "darkness_level": 8.2,
+  "message": "Image is too dark for detection. Enable the flashlight and retry."
+}
+```
+
+`is_dark` is at the top level of the scan response, not inside a match. If true, speak the message and stop.
+
+### Step 3: Store scan_id and navigate matches
+
+A normal scan response looks like:
+
+```json
+{
+  "scan_id": "a3f9c2b1d4e5f6a7",
   "count": 2,
   "matches": [
     {
@@ -178,139 +227,149 @@ iPhone 15 Plus reference: `f_mm=6.24`, `sensor_width=8.64mm` -> `focal_length_px
       "direction": "to your right",
       "narration": "May be house keys to your right, focus to verify.",
       "distance_ft": 4.1,
-      "text_likelihood": 0.05,
       "box": [640, 100, 820, 300]
     }
   ]
 }
 ```
 
-**Dark scene response** (check `is_dark` at top level, not inside matches):
-```json
-{
-  "matches": [],
-  "count": 0,
-  "is_dark": true,
-  "darkness_level": 8.2,
-  "message": "Image is too dark for detection. Enable the flashlight and retry."
-}
-```
+**Store `scan_id` immediately** - you need it for `/crop` and `/feedback`.
 
-**Field reference:**
+`matches` is ordered left-to-right spatially. Read `narration` aloud for each match in array order. The narration string is already phrased for a blind user - speak it verbatim.
 
-| Field | Always present | Notes |
-|-------|---------------|-------|
-| `scan_id` | yes | UUID hex - pass to `/feedback` and `/crop` |
-| `is_dark` | top level only | true when scene is too dark; check before processing matches |
-| `label` | yes | Object name as taught - pass to `DELETE /items/<label>` to forget it |
-| `similarity` | yes | Cosine similarity score, 0-1 |
-| `confidence` | yes | `"high"` / `"medium"` / `"low"` - see thresholds below |
-| `direction` | yes | One of 5 zones - see below |
-| `narration` | yes | Ready-to-speak string |
-| `text_likelihood` | yes | 0.0-1.0 heuristic; > 0.3 means the item has a text label and OCR ran |
-| `box` | yes | `[x1, y1, x2, y2]` in pixels |
-| `distance_ft` | only with depth | Metric depth in feet; absent when `ENABLE_DEPTH=0` or `focal_length_px=0` |
-| `ocr_text` | only when found | Text extracted from the object |
-
-**Confidence thresholds:**
-
-| Label | Similarity range | Narration style |
-|-------|-----------------|-----------------|
-| `"high"` | >= 0.35 | `"Wallet to your left, 2.3 feet away."` |
-| `"medium"` | 0.25 - 0.35 | `"May be a wallet to your left, focus to verify."` |
-| `"low"` | 0.2 - 0.25 | `"May be a wallet to your left, focus to verify."` |
+`distance_ft` is only present when depth is enabled. When absent, narration still includes direction.
 
 **Direction zones:**
 
-| Value | Meaning |
-|-------|---------|
-| `"to your left"` | Far left (< 25% of frame) |
+| Value | Where in the frame |
+|-------|-------------------|
+| `"to your left"` | Far left (< 25%) |
 | `"slightly left"` | Left of center |
 | `"ahead"` | Center |
 | `"slightly right"` | Right of center |
-| `"to your right"` | Far right (> 75% of frame) |
+| `"to your right"` | Far right (> 75%) |
 
-**Matches are always sorted left-to-right.** Read them out in array order for spatial narration.
+**Confidence tiers** (for UI styling only - narration already reflects confidence):
 
-**When depth is disabled** (`ENABLE_DEPTH=0` server-side or `focal_length_px=0`): `distance_ft` is absent, narration omits distance but keeps direction. All other fields are still present.
+| Value | Similarity range |
+|-------|-----------------|
+| `"high"` | >= 0.35 |
+| `"medium"` | 0.25 - 0.35 |
+| `"low"` | 0.2 - 0.25 |
 
----
+### Step 4: Fetch a crop (on demand)
 
-### GET /crop
+When the user focuses on a specific match, fetch its cropped image:
 
-Fetch the cropped image for a specific match by its index in the scan result array. Returns a raw JPEG. Call this only when the user navigates to that match - do not prefetch all crops.
+```
+GET /crop?scan_id=a3f9c2b1d4e5f6a7&index=0
+```
 
-**Request:** query params
+`index` is the 0-based position in the `matches` array. Returns a raw JPEG. Do not prefetch - call this only when the user navigates to that match.
 
-| Param | Type | Required |
-|-------|------|----------|
-| `scan_id` | string | yes |
-| `index` | integer | yes - 0-based position in the `matches` array |
+Returns `404` if the `scan_id` has expired (older than the last 50 scans) or `index` is out of range.
 
-**Response:** `image/jpeg` - the cropped region of the detected object.
+### Step 5: Collect feedback (optional but important)
 
-**404** if `scan_id` has expired (last 50 scans cached) or `index` is out of range.
+After the user reviews each match, record whether it was right or wrong. This is what trains the personalization model over time.
 
-Example: `GET /crop?scan_id=a3f9c2b1...&index=1`
-
----
-
-### GET /items
-
-List all taught objects. Use this to fetch item details before confirming a deletion - see voice delete flow below.
-
-**Request:** query params
-
-| Param | Type | Required | Notes |
-|-------|------|----------|-------|
-| `label` | string | no | Filter to a single label. Omit to return all items. |
-
-**Response:**
+```
+POST /feedback
+Content-Type: application/json
+```
 ```json
 {
-  "items": [
-    { "id": 3, "label": "wallet", "confidence": 0.87, "ocr_text": "RFID Blocking", "timestamp": 1742700000.0 },
-    { "id": 1, "label": "house keys", "confidence": 0.91, "ocr_text": "", "timestamp": 1742600000.0 }
-  ],
-  "count": 2
+  "scan_id": "a3f9c2b1d4e5f6a7",
+  "label": "wallet",
+  "feedback": "correct"
 }
 ```
 
-Results are ordered most-recently-taught first. Multiple rows with the same label means the user taught the object more than once - all rows are removed by `DELETE /items/<label>`.
+`feedback` must be `"correct"` or `"wrong"`. Use the `scan_id` from the scan that produced this match.
 
----
-
-### DELETE /items/<label>
-
-Permanently remove a taught object from memory. After deletion the object will no longer be detected in future scans.
-
-**Request:** no body
-
-**Response:**
+Response:
 ```json
-{ "deleted": true, "label": "wallet", "count": 1 }
+{
+  "recorded": true,
+  "label": "wallet",
+  "feedback": "correct",
+  "triplets": 12,
+  "min_for_training": 10
+}
 ```
 
-`count` is the number of database rows removed. **404** if no item with that label exists.
+`triplets` is the total training pairs collected so far. When `triplets >= min_for_training`, you can offer the user a "Improve accuracy" action (see Retraining below).
 
-The scan pipeline reloads immediately - no restart needed.
+`404` means the `scan_id` is no longer cached. Send feedback before the user does 50 more scans.
+
+### Step 6: Update location (optional)
+
+After a scan, if the user names the room, record it for all matches at once:
+
+```
+POST /sightings
+Content-Type: application/json
+```
+```json
+{
+  "room_name": "bedroom",
+  "sightings": [
+    { "label": "wallet",     "direction": "to your left", "distance_ft": 2.3, "similarity": 0.72 },
+    { "label": "house keys", "direction": "to your right", "distance_ft": 4.1, "similarity": 0.38 }
+  ]
+}
+```
+
+`direction`, `distance_ft`, and `similarity` come directly from the match objects. Omit `room_name` if the user does not name the room. The scan pipeline already records a basic sighting for every match automatically - this call enriches it with the room name.
+
+### Retraining (when the user requests it)
+
+Once enough feedback has accumulated, surface a manual "Improve accuracy" action. Do not trigger this automatically.
+
+```
+POST /retrain
+```
+
+Response:
+```json
+{ "started": true, "triplets": 15 }
+```
+
+If not enough data yet:
+```json
+{ "started": false, "reason": "insufficient_data", "triplets": 3, "min_required": 10 }
+```
+
+If already running:
+```json
+{ "started": false, "reason": "already_running" }
+```
+
+Poll for completion:
+```
+GET /retrain/status
+```
+```json
+{
+  "running": false,
+  "last_result": { "trained": true, "triplets": 15, "final_loss": 0.012, "head_weight": 0.3 },
+  "error": null
+}
+```
+
+Poll every 5 seconds until `running: false`. The next scan after training completes will automatically use the updated model - no restart needed.
 
 ---
 
-### GET /find
+## Ask Mode
 
-Ask Mode - retrieve the last known location of a taught object. Searches by label with fuzzy semantic matching (so `"my wallet"` will match a label stored as `"wallet"`).
+The user asks "where did I leave my wallet?" Query the last known location by label. Fuzzy matching is built in - "my wallet", "the wallet", and "brown wallet" all resolve to "wallet".
 
-**Request:** query params
+```
+GET /find?label=wallet
+```
 
-| Param | Type | Required | Notes |
-|-------|------|----------|-------|
-| `label` | string | no | Object to search for. Omit to get last sighting of every known object. |
-| `limit` | integer | no | Max sightings to return (1-100, default 1) |
-| `since` | float | no | Unix timestamp - only return sightings after this time |
-| `before` | float | no | Unix timestamp - only return sightings before this time |
-
-**Response (label found - exact or fuzzy match):**
+**Found:**
 ```json
 {
   "label": "my wallet",
@@ -324,117 +383,127 @@ Ask Mode - retrieve the last known location of a taught object. Searches by labe
     "direction": "to your left",
     "distance_ft": 2.3,
     "similarity": 0.72,
-    "crop_path": "/path/to/scans/abc123_0.jpg"
+    "room_name": "kitchen",
+    "crop_path": null
   },
   "sightings": [...]
 }
 ```
 
-`matched_label` is only present when a fuzzy match was used (query did not exactly match any stored label).
+`matched_label` only appears when the query did not exactly match any stored label (fuzzy match was used). Build the narration from `last_sighting.direction`, `distance_ft`, `last_seen`, and `room_name`.
 
-**Response (no label param - overview of all known objects):**
+`room_name` is null until the user has confirmed a location via `POST /sightings`. `last_seen` is always a human-readable string ("3 minutes ago", "2 hours ago").
+
+**Not found:**
+```json
+{ "label": "wallet", "found": false, "sightings": [] }
+```
+
+**All objects at once** (omit `label`):
+```
+GET /find
+```
 ```json
 {
   "results": [
-    { "id": 41, "label": "wallet", "last_seen": "3 minutes ago", ... },
-    { "id": 38, "label": "house keys", "last_seen": "2 hours ago", ... }
+    { "label": "wallet", "last_seen": "3 minutes ago", "direction": "to your left", ... },
+    { "label": "house keys", "last_seen": "2 hours ago", ... }
   ],
   "count": 2
 }
 ```
 
-Results are ordered most-recently-seen first.
+Ordered most-recently-seen first. Good for "where is everything I own."
 
-**Response (not found):**
-```json
-{ "label": "wallet", "found": false, "sightings": [] }
-```
+**Optional filters:**
 
----
-
-### POST /feedback
-
-Record whether a scan result was correct or wrong. This powers the personalization system - the projection head adapts over time to be more accurate for this specific user.
-
-**Request:** `application/json`
-
-```json
-{
-  "scan_id": "a3f9c2b1...",
-  "label": "wallet",
-  "feedback": "correct"
-}
-```
-
-`feedback` must be `"correct"` or `"wrong"`.
-
-**Response:**
-```json
-{
-  "recorded": true,
-  "label": "wallet",
-  "feedback": "correct",
-  "triplets": 12,
-  "min_for_training": 10
-}
-```
-
-**404** if `scan_id` is not found. The backend caches the last 50 scan results. Don't delay feedback more than 50 scans.
+| Param | Type | Notes |
+|-------|------|-------|
+| `limit` | integer | Max sightings to return (1-100, default 1) |
+| `since` | float | Unix timestamp - only return sightings after this time |
+| `before` | float | Unix timestamp - only return sightings before this time |
 
 ---
 
-### GET /settings
+## Managing Memories
 
-Read ML runtime state. Useful for showing personalization progress in settings UI.
+### List what is stored
 
-**Response:**
-```json
-{
-  "enable_learning": true,
-  "min_feedback_for_training": 10,
-  "projection_head_weight": 1.0,
-  "projection_head_ramp_at": 50,
-  "projection_head_epochs": 20,
-  "head_trained": false,
-  "triplet_count": 0,
-  "feedback_counts": {
-    "positives": 5,
-    "negatives": 3,
-    "triplets": 3
-  }
-}
 ```
-
-`head_trained` = whether the personalization model has weights loaded (false = no feedback yet).
-`triplet_count` = total triplets used in last training run.
-
----
-
-### PATCH /settings
-
-Update ML runtime parameters. All fields optional. Returns the full settings state.
-
-**Request:** `application/json` (any subset)
+GET /items
+GET /items?label=wallet
+```
 
 ```json
 {
-  "enable_learning": true,
-  "min_feedback_for_training": 10,
-  "projection_head_weight": 1.0,
-  "projection_head_ramp_at": 50,
-  "projection_head_epochs": 20
+  "items": [
+    { "id": 3, "label": "wallet", "confidence": 0.87, "ocr_text": "RFID Blocking", "timestamp": 1742700000.0 },
+    { "id": 1, "label": "house keys", "confidence": 0.91, "ocr_text": "", "timestamp": 1742600000.0 }
+  ],
+  "count": 2
 }
 ```
 
-Changes are persisted to the database and restored on server restart.
+Ordered most-recently-taught first. Multiple rows with the same label means the user taught it more than once.
+
+### Delete (forget) an object
+
+```
+DELETE /items/wallet
+```
+
+```json
+{ "deleted": true, "label": "wallet", "count": 1 }
+```
+
+`count` is the number of rows removed. `404` if the label does not exist. The scan pipeline reloads immediately.
+
+**Recommended UX before deleting:**
+1. GET /items?label=wallet -> get `timestamp`
+2. Confirm: "Are you sure you want to forget wallet? Taught 3 days ago."
+3. User confirms -> DELETE /items/wallet
+
+### Rename an object
+
+Two-step flow to handle conflicts:
+
+**Step 1 - send without force:**
+```
+POST /items/wallet/rename
+Content-Type: application/json
+{"new_label": "My Wallet"}
+```
+
+Success:
+```json
+{ "renamed": true, "old_label": "wallet", "new_label": "My Wallet", "count": 1, "replaced": 0 }
+```
+
+Conflict (a memory named "My Wallet" already exists):
+```json
+{ "conflict": true, "message": "A memory named \"My Wallet\" already exists (1 item(s)). Send with force=true to overwrite it.", "existing_count": 1 }
+```
+
+**Step 2 - user confirms, send with force:**
+```json
+{ "new_label": "My Wallet", "force": true }
+```
+
+`replaced` in the success response is the number of items deleted from the target label before renaming (0 when no conflict).
+
+Other errors: `404` (old label not found), `400` (new_label missing or same as current).
 
 ---
 
-### GET /user-settings
+## Settings
 
-User preferences. These are persisted in the database.
+### User preferences (persisted, survive restarts)
 
-**Response:**
+```
+GET /user-settings
+PATCH /user-settings
+```
+
 ```json
 {
   "performance_mode": "balanced",
@@ -445,241 +514,58 @@ User preferences. These are persisted in the database.
 }
 ```
 
-**Performance modes:**
+| Field | Values | Notes |
+|-------|--------|-------|
+| `performance_mode` | `"fast"` / `"balanced"` / `"accurate"` | fast = no depth (~1s), balanced = depth (~3s), accurate = depth + better models (~5s) |
+| `voice_speed` | 0.5 - 2.0 | Apply to your TTS rate for all narrations |
+| `scan_update_location` | bool | Whether to prompt the user for room name after each scan |
+| `learning_enabled` | bool | Propagated to the scan pipeline immediately - no restart needed |
+| `button_layout` | `"default"` / `"swapped"` | UI control layout preference |
 
-| Mode | Depth enabled | Target latency |
-|------|--------------|----------------|
-| `"fast"` | no | ~1s |
-| `"balanced"` | yes | ~3s |
-| `"accurate"` | yes | ~5s |
+PATCH accepts any subset. `400` on type or range errors with per-field error messages.
 
-`voice_speed` range: 0.5 - 2.0. Apply this to your TTS engine when reading narrations.
+### ML parameters (persisted, survive restarts)
 
----
+```
+GET /settings
+PATCH /settings
+```
 
-### PATCH /user-settings
-
-Update user preferences. Persisted to the database. All fields optional.
-
-**Request:** `application/json` (any subset)
+Useful for surfacing personalization progress in a settings UI:
 
 ```json
 {
-  "performance_mode": "fast",
-  "voice_speed": 1.2,
-  "scan_update_location": false,
-  "learning_enabled": true,
-  "button_layout": "default"
+  "enable_learning": true,
+  "min_feedback_for_training": 10,
+  "projection_head_weight": 1.0,
+  "projection_head_ramp_at": 50,
+  "projection_head_epochs": 20,
+  "head_trained": false,
+  "triplet_count": 0,
+  "feedback_counts": { "positives": 5, "negatives": 3, "triplets": 3 }
 }
 ```
 
-`learning_enabled` is propagated to the scan pipeline immediately (no restart needed).
-
-**400** on type or range errors. Response includes `{"errors": {...}}` with per-field messages.
+`head_trained` = personalization model has been trained at least once. `triplet_count` = pairs used in the last training run.
 
 ---
 
-### POST /sightings
+## TTS and Narration
 
-Record the location of detected objects. Dual-use: called from remember mode (just taught - where is it?) and scan mode (objects detected - what room?). `room_name` is normalized before storage ("In The Kitchen" -> "kitchen").
-
-**Request:** `application/json`
-
-```json
-{
-  "room_name": "kitchen",
-  "sightings": [
-    { "label": "wallet", "direction": "to your left", "distance_ft": 3.2, "similarity": 0.61 }
-  ]
-}
-```
-
-`direction`, `distance_ft`, and `similarity` are optional - omit them in remember mode.
-`room_name` is optional - omit when room is unknown.
-
-**Response:**
-```json
-{ "saved": 1, "labels": ["wallet"], "room_name": "kitchen" }
-```
-
-`room_name` in the response is the normalized form stored in the database.
-
-**Remember mode flow:**
-```
-POST /remember  ->  success  ->  ask "Where is this?"
-User says "in the kitchen"
-POST /sightings  {"room_name": "kitchen", "sightings": [{"label": "wallet"}]}
-```
-
-**Scan mode flow:**
-```
-POST /scan  ->  matches  ->  ask "Update location? What room?"
-User says "bedroom"
-POST /sightings  {"room_name": "bedroom", "sightings": [all matches + spatial data]}
-```
-
-Auto-sightings: /scan automatically records a sighting (direction only, no room_name) for every match. GET /find works without a POST /sightings call; POST /sightings enriches it with the room name.
-
----
-
-### POST /items/<label>/rename
-
-Rename a stored memory. Two-step flow to handle conflicts.
-
-**Step 1 - without force:**
-```
-POST /items/wallet/rename
-Content-Type: application/json
-{"new_label": "My Wallet"}
-```
-
-**Response (200 - success):**
-```json
-{"renamed": true, "old_label": "wallet", "new_label": "My Wallet", "count": 1, "replaced": 0}
-```
-
-**Response (409 - conflict):**
-```json
-{"conflict": true, "message": "A memory named \"My Wallet\" already exists (1 item(s)). Send with force=true to overwrite it.", "existing_count": 1}
-```
-
-**Step 2 - user confirms overwrite, send with force:**
-```json
-{"new_label": "My Wallet", "force": true}
-```
-
-**Other error responses:**
-- `404` - old label not found
-- `400` - `new_label` missing or same as current label
-
-**UX flow:**
-1. User swipes left on a memory - reveal Rename / Delete
-2. Tap Rename -> show text input pre-filled with current label
-3. User edits -> POST without force
-4. If 409: alert "Replace existing '[new_label]'?" -> resend with force=true
-5. On success: update the list in-place
-
----
-
-### POST /retrain
-
-Start personalization model training in the background. Returns immediately; poll `/retrain/status` for results.
-
-**Response (training started):**
-```json
-{"started": true, "triplets": 15}
-```
-
-**Response (already running):**
-```json
-{"started": false, "reason": "already_running"}
-```
-
-**Response (not enough feedback):**
-```json
-{"started": false, "reason": "insufficient_data", "triplets": 3, "min_required": 10}
-```
-
----
-
-### GET /retrain/status
-
-Poll training progress.
-
-**Response:**
-```json
-{
-  "running": false,
-  "last_result": {
-    "trained": true,
-    "triplets": 15,
-    "final_loss": 0.012345,
-    "head_weight": 0.3
-  },
-  "error": null
-}
-```
-
-`last_result` is null until the first successful training run. `error` is null unless training failed with an exception. `running: true` means training is currently in progress.
-
-**Typical poll flow:**
-```
-POST /retrain  ->  {"started": true}
-poll GET /retrain/status every 5s until running: false
-show result or error
-```
-
----
-
-## Scan -> Feedback Flow
-
-After each scan the user can optionally confirm or deny matches. This powers the personalization system - the backend retrains automatically overnight once enough feedback accumulates.
-
-```
-1. POST /scan
-   - Store scan_id and the matches array
-
-2. User swipes through matches
-   - For each match, allow confirm/deny (voice or gesture)
-   - POST /feedback with scan_id + label + "correct"/"wrong"
-
-3. Retraining - POST /retrain to start; GET /retrain/status to poll
-   - Next /scan uses updated model weights transparently
-```
-
-The model starts as identity (no effect on scan accuracy) and gradually adapts as feedback accumulates. Training is async - POST /retrain starts it in the background, poll GET /retrain/status for results. The frontend does not need to trigger retraining automatically; it can be surfaced as a manual "Improve accuracy" action once enough feedback exists.
-
----
-
-## Scan Mode UX
-
-The `matches` array is ordered left-to-right spatially. Navigate it like a paged list:
-
-```
-POST /scan -> matches: [wallet, keys, charger]
-                         ^
-                    user swipes left/right through indexes
-
-Read narration[i] aloud as user lands on each item.
-```
-
-**Voice: "delete this"**
-```
-1. User is on match[i] (label = "wallet")
-2. GET /items?label=wallet -> returns item details (taught date, confidence)
-3. Announce: "Are you sure you want to forget wallet? Taught 3 days ago."
-4. User confirms -> DELETE /items/wallet
-5. Item permanently removed; will not appear in future scans
-```
-
----
-
-## Scan -> Find (Ask Mode)
-
-Every successful scan match is automatically recorded. Ask Mode queries that history:
-
-```
-1. POST /scan
-   - Matches are saved to sighting history automatically
-
-2. Later: GET /find?label=wallet
-   - Returns last known location with direction, distance, and human-readable time
-   - Fuzzy match: "my wallet", "the wallet", "brown wallet" all resolve to "wallet"
-   - Build narration from: last_sighting.direction + last_sighting.distance_ft + last_sighting.last_seen
-
-3. GET /find (no label)
-   - Returns the most recent sighting per known object - good for "where is everything"
-```
+- Read `narration` from scan matches verbatim. It is phrased for a blind user.
+- Apply `voice_speed` from `/user-settings` to your TTS rate.
+- Read matches in array order - they are already left-to-right spatially.
+- `"May be a..."` in narration means medium or low confidence. Do not add additional hedging.
+- `ocr_text` is raw extracted text. Read it verbatim only if the user specifically asks.
 
 ---
 
 ## Image Tips
 
-- Send JPEG or HEIC. Both are supported.
-- For `/remember`: get close (1-3ft). 6ft is unreliable for teach mode.
-- For `/scan`: wider shots work; the model crops detected regions internally.
-- EXIF orientation is automatically corrected server-side.
-- If `/remember` returns `"No object detected."`, the object is probably too small or occluded.
+- Send JPEG or HEIC. Both are supported. EXIF orientation is corrected server-side.
+- For `/remember`: 1-3 feet. 6 feet is unreliable.
+- For `/scan`: wider shots work; the pipeline crops detected regions internally.
+- If `/remember` returns `"No object detected."`, the object is probably too small, occluded, or the label is too vague. Try a more specific label or get closer.
 
 ---
 
@@ -687,291 +573,129 @@ Every successful scan match is automatically recorded. Ask Mode queries that his
 
 | Status | Meaning |
 |--------|---------|
-| 400 | Bad request - missing field, wrong type, or invalid value |
+| 400 | Missing field, wrong type, or invalid value |
 | 401 | Missing or wrong `X-API-Key` |
-| 404 | `scan_id` expired or not found (feedback only) |
-| 500 | Server error - log and surface a generic retry message |
+| 404 | Label not found, or `scan_id` expired (feedback/crop) |
+| 500 | Server error - log and show a generic retry message |
 
-All error responses include `{"error": "<message>"}` or `{"errors": {...}}` (PATCH routes).
-
----
-
-## Notes for TTS
-
-- Read `narration` directly. It is phrased for a blind user.
-- Apply `voice_speed` from `/user-settings` to your TTS rate.
-- Read matches in array order - they are already left-to-right spatially.
-- For low/medium confidence matches, the narration already includes `"May be a..."` - do not add additional hedging in the UI.
-- `ocr_text` is raw extracted text. Read it verbatim if the user requests it.
+All error responses include `{"error": "..."}`. PATCH routes may return `{"errors": {...}}` with per-field messages.
 
 ---
 
 ## Debug Endpoints
 
-Use these to verify the integration during development. All require `X-API-Key` if the server has one set (same as every other route).
+These are for the mobile team during integration. Do not call them from production code. All require `X-API-Key` if set.
 
-**Do not call these from production code.** They expose internal state and some endpoints are destructive.
+### Diagnosing a 400
 
----
+Hit `/debug/echo` with the exact same request that is failing. It mirrors back everything the server received - content-type, field names, file sizes - without running any inference.
 
-### GET /debug/state
-
-Overall system status: pipeline readiness, OCR service reachability, DB counts, active settings.
-
-```json
-{
-  "device": "mps",
-  "pipelines": {
-    "remember": "loaded",
-    "scan": "loaded"
-  },
-  "ocr": {
-    "url": "http://127.0.0.1:8001/health",
-    "reachable": true,
-    "latency_ms": 3.2
-  },
-  "db": {
-    "item_count": 4,
-    "sighting_count": 12,
-    "feedback": { "positives": 5, "negatives": 3, "triplets": 15 }
-  },
-  "settings": {
-    "enable_depth": true,
-    "enable_ocr": true,
-    "enable_dedup": true,
-    "enable_learning": true,
-    "similarity_threshold": 0.3,
-    "darkness_threshold": 30.0,
-    "blur_sharpness_threshold": 100.0,
-    "ocr_backend": "http"
-  }
-}
+```
+POST /debug/echo
+(same headers and body as the failing request)
 ```
 
-`pipelines.remember` and `pipelines.scan` reflect actual load state, not just startup success.
-
----
-
-### POST /debug/echo
-
-Send any request; get back exactly what the server received. No inference, instant response.
-
-Use this when `/remember` or `/scan` returns an unexpected 400. Hit `/debug/echo` with the identical request to see what field names, file sizes, and content-type the server actually got.
-
-**Request:** any format (multipart, JSON, form, raw)
-
-**Response:**
 ```json
 {
-  "method": "POST",
   "content_type": "multipart/form-data; boundary=abc123",
-  "headers": { "Content-Length": "48231", "Accept": "*/*" },
   "form_fields": { "prompt": "wallet" },
-  "files": [
-    { "field": "image", "filename": "photo.jpg", "mimetype": "image/jpeg", "size_bytes": 48100 }
-  ],
-  "json_body": null,
-  "raw_body_preview": null
+  "files": [{ "field": "image", "filename": "photo.jpg", "mimetype": "image/jpeg", "size_bytes": 48100 }]
 }
 ```
 
-`X-API-Key` and `Authorization` headers are stripped from the response. Everything else is echoed verbatim. Common issues to look for:
-- `content_type` should be `multipart/form-data` for `/remember` and `/scan`
-- `files` field name must be `"image"` (not `"photo"`, `"file"`, etc.)
-- `form_fields.prompt` must be present for `/remember`
+Common issues: field named `"file"` instead of `"image"`, missing `prompt`, wrong content-type.
+
+### Checking system state
+
+```
+GET /debug/state
+```
+
+Returns pipeline load status, whether OCR service is reachable (and latency), DB item/sighting counts, and active feature flags. Use this to confirm the server is healthy before debugging anything else.
+
+### Checking image quality
+
+```
+POST /debug/image
+Content-Type: multipart/form-data
+image: <file>
+```
+
+Returns `is_dark`, `is_blurry`, `luminance`, `blur_score` - the same values the pipeline uses to reject images. Use this when `/remember` or `/scan` silently rejects an image.
+
+### Smoke testing pipelines
+
+```
+GET /debug/test-remember
+GET /debug/test-scan
+```
+
+Runs the remember or scan pipeline on a built-in test image (wallet at 1ft). No DB write for test-remember. Proves models loaded and are working. If `detected: false` from test-remember, GroundingDINO is not working.
+
+### Inspecting the database
+
+```
+GET /debug/db
+```
+
+Returns all taught items, last 20 sightings, and feedback counts. Use between test runs to verify state.
+
+### Resetting test state
+
+```
+POST /debug/wipe
+Content-Type: application/json
+{"confirm": true, "target": "all"}
+```
+
+Wipes items, sightings, feedback, and projection head weights. `target` can be `"all"`, `"items"`, `"sightings"`, `"feedback"`, `"weights"`, `"settings"`, or `"user-settings"` to wipe selectively. The scan pipeline reloads immediately.
+
+### Reading logs
+
+```
+GET /debug/logs?n=50&event=scan_text_match
+```
+
+Returns recent structured log entries. Useful for seeing exactly what happened during a scan or remember call. Useful `event` filters: `remember_ocr`, `scan_text_match`, `text_recognition`.
+
+### Tweaking thresholds live
+
+```
+PATCH /debug/config
+Content-Type: application/json
+{"similarity_threshold": 0.25, "darkness_threshold": 20.0}
+```
+
+Directly patches any primitive field in the backend settings. Not persisted across restarts. GET with no body to see all settable fields.
 
 ---
 
-### POST /debug/image
+## Endpoint Quick Reference
 
-Upload an image; returns quality metadata without running any ML inference.
-
-Returns the exact same luminance and blur values the pipeline computes before deciding whether to reject an image. Use this to rule out image quality as the cause of a failed `/remember` or `/scan`.
-
-**Request:** `multipart/form-data`
-
-| Field | Type | Required |
-|-------|------|----------|
-| `image` | file | yes |
-
-**Response:**
-```json
-{
-  "width": 3024,
-  "height": 4032,
-  "mode": "RGB",
-  "file_bytes": 2483712,
-  "luminance": 98.4,
-  "is_dark": false,
-  "darkness_threshold": 30.0,
-  "blur_score": 312.7,
-  "is_blurry": false,
-  "blur_sharpness_threshold": 100.0
-}
-```
-
----
-
-### GET /debug/db
-
-Full database dump: all taught items, last 20 sightings, feedback counts.
-
-```json
-{
-  "item_count": 2,
-  "items": [
-    { "id": 3, "label": "wallet", "confidence": 0.87, "ocr_text": "RFID Blocking", "timestamp": 1742700000.0 },
-    { "id": 1, "label": "house keys", "confidence": 0.91, "ocr_text": "", "timestamp": 1742600000.0 }
-  ],
-  "sighting_count": 8,
-  "recent_sightings": [
-    { "id": 12, "label": "wallet", "timestamp": 1742860412.3, "direction": "to your left", "distance_ft": 2.3, "similarity": 0.72, "crop_path": null, "room_name": "kitchen" }
-  ],
-  "feedback": { "positives": 2, "negatives": 1, "triplets": 2 }
-}
-```
-
----
-
-### GET /debug/logs
-
-Return recent log entries from the server log. Useful for seeing what happened during a `/remember` or `/scan` call that produced an unexpected result.
-
-**Query params:**
-
-| Param | Default | Notes |
-|-------|---------|-------|
-| `n` | 50 | Number of entries (max 200) |
-| `event` | none | Filter by event type |
-
-**Useful event filters:** `remember_ocr`, `scan_text_match`, `text_recognition`, `text_embedding`
-
-**Response:**
-```json
-{
-  "count": 3,
-  "filter": "scan_text_match",
-  "entries": [
-    { "ts": "2026-03-27T14:22:01", "level": "DEBUG", "module": "...", "event": "scan_text_match", "label": "wallet", "score": 0.72 }
-  ]
-}
-```
-
----
-
-### GET /debug/test-remember
-
-Run detection on a built-in test image (`wallet_1ft_table.jpg`) using the prompt `"wallet"`. No DB write.
-
-Proves GroundingDINO loaded correctly and can detect objects. Call this right after server start to confirm the remember pipeline is healthy.
-
-**Response:**
-```json
-{
-  "image": "wallet_1ft_table.jpg",
-  "prompt": "wallet",
-  "detected": true,
-  "score": 0.61,
-  "blur_score": 312.7,
-  "second_pass_prompt": null
-}
-```
-
-`detected: false` means GroundingDINO could not find the object (model may not have loaded, or test image is missing).
-
----
-
-### GET /debug/test-scan
-
-Run scan on the same built-in test image. No sightings saved.
-
-Proves YOLOE and the embedding matcher loaded correctly. If the DB has items taught for `"wallet"`, you should see a match. If the DB is empty, `matches` will be empty but the pipeline still executes successfully.
-
-**Response:**
-```json
-{
-  "image": "wallet_1ft_table.jpg",
-  "db_item_count": 1,
-  "count": 1,
-  "matches": [
-    {
-      "label": "wallet",
-      "similarity": 0.68,
-      "confidence": "high",
-      "direction": "ahead",
-      "narration": "Wallet ahead."
-    }
-  ]
-}
-```
-
----
-
-### POST /debug/wipe
-
-Wipe data selectively. Requires `{"confirm": true}`. Missing confirm returns 400.
-
-**Request:**
-```json
-{ "confirm": true, "target": "all" }
-```
-
-**target options:**
-
-| Value | What is wiped |
-|-------|---------------|
-| `"all"` (default) | items + sightings + feedback + projection head weights |
-| `"items"` | taught objects only; scan pipeline reloads immediately |
-| `"sightings"` | location history only |
-| `"feedback"` | feedback records only |
-| `"weights"` | projection head weights from DB and file; scan pipeline reloads |
-| `"settings"` | ML settings reset to defaults (enable_learning, thresholds, etc.) |
-| `"user-settings"` | user preferences reset to defaults (performance_mode, voice_speed, etc.) |
-
-**Response:**
-```json
-{
-  "wiped": true,
-  "target": "all",
-  "items_deleted": 4,
-  "sightings_deleted": 12,
-  "feedback_deleted": 8,
-  "weights_db_cleared": true,
-  "weights_file_deleted": false
-}
-```
-
-Response fields vary by target - only the relevant counts appear.
-
----
-
-### PATCH /debug/config
-
-Directly modify any primitive setting on the backend. Changes apply immediately but are not persisted across restarts.
-
-For the ML learning fields (`enable_learning`, `projection_head_weight`, etc.), prefer `PATCH /settings` - it persists and propagates the same fields.
-
-**GET first to see all settable fields and their types:**
-```
-PATCH /debug/config   (no body)
--> { "settable_fields": { "similarity_threshold": "float", "darkness_threshold": "float", ... } }
-```
-
-**Then patch:**
-```json
-{
-  "similarity_threshold": 0.25,
-  "darkness_threshold": 20.0,
-  "enable_ocr": false
-}
-```
-
-**Response:**
-```json
-{
-  "applied": { "similarity_threshold": 0.25, "darkness_threshold": 20.0, "enable_ocr": false },
-  "note": "in-memory only - not persisted across restarts. For ML fields use PATCH /settings."
-}
-```
-
-`400` with `{"errors": {...}}` on type mismatches or unknown fields.
+| Method | Path | When to call |
+|--------|------|-------------|
+| GET | /health | App launch health check |
+| POST | /remember | User teaches a new object |
+| POST | /sightings | User names the room after teach or scan |
+| POST | /scan | User scans the room |
+| GET | /crop | User focuses on a specific scan match |
+| POST | /feedback | User confirms or denies a scan match |
+| POST | /retrain | User requests "Improve accuracy" |
+| GET | /retrain/status | Poll retraining progress |
+| GET | /find | User asks "where is my [object]?" |
+| GET | /items | User opens the memory list |
+| DELETE | /items/<label> | User deletes a memory |
+| POST | /items/<label>/rename | User renames a memory |
+| GET | /settings | Read ML/personalization state |
+| PATCH | /settings | Update ML parameters |
+| GET | /user-settings | Read user preferences (call at app launch) |
+| PATCH | /user-settings | Update user preferences |
+| GET | /debug/state | Verify server is healthy |
+| POST | /debug/echo | Diagnose a 400 - mirrors your request back |
+| POST | /debug/image | Check why an image was rejected |
+| GET | /debug/db | Inspect database contents |
+| GET | /debug/logs | Read server log entries |
+| GET | /debug/test-remember | Smoke test remember pipeline |
+| GET | /debug/test-scan | Smoke test scan pipeline |
+| POST | /debug/wipe | Reset test state |
+| PATCH | /debug/config | Patch settings live |
