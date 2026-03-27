@@ -85,7 +85,7 @@ on HuggingFace - request access and run `hf auth login` first.
 ### Server Deployment
 
 See [DEPLOY.md](DEPLOY.md) for the full server setup guide (Debian, systemd,
-gunicorn, GPU PaddlePaddle, srv.us tunnel).
+gunicorn, GPU PyTorch, external OCR service, srv.us tunnel).
 
 ---
 
@@ -104,7 +104,7 @@ src/visual_memory/
 │   │   └── embed_combined.py          # make_combined_embedding() - 1536-dim output
 │   ├── text_recognition/
 │   │   ├── base.py                    # BaseTextRecognizer ABC
-│   │   └── paddle_recognizer.py       # PaddleOCRRecognizer (active)
+│   │   └── http_recognizer.py         # HTTPOCRRecognizer (active)
 │   ├── object_detection/
 │   │   ├── detect_all.py              # YOLOE
 │   │   └── prompt_based.py            # GroundingDINO
@@ -243,7 +243,7 @@ Multi-image (POST /remember with `images[]`):
 - Detection: `grounding_dino_model`, `box_threshold`, `text_threshold`, `yoloe_confidence`, `yoloe_iou`
 - Embedding: `image_embedder_model` (`dinov3-vits16`), `embedder_model` (`clip-vit-base-patch32`)
 - Matching: `similarity_threshold` (0.2), `dedup_iou_threshold` (0.5), `narration_high_confidence` (0.6)
-- OCR: `ocr_backend` ("paddle"), `ocr_languages`, `ocr_min_confidence` (0.3), `text_similarity_threshold` (0.4)
+- OCR: `ocr_backend` ("http"), `ocr_service_url`, `ocr_timeout_seconds`, `ocr_languages`, `ocr_min_confidence` (0.3), `text_similarity_threshold` (0.4)
 - Toggles (env-overridable): `enable_depth` (`ENABLE_DEPTH`), `enable_ocr` (`ENABLE_OCR`), `enable_dedup` (`ENABLE_DEDUP`)
 - Personalization: `projection_head_path` ("models/projection_head.pt"), `projection_head_dim` (1536)
 - Learning: `enable_learning` (`ENABLE_LEARNING`), `min_feedback_for_training` (10), `projection_head_weight` (1.0), `projection_head_ramp_at` (50), `projection_head_epochs` (20)
@@ -283,12 +283,11 @@ Multi-image (POST /remember with `images[]`):
 - Non-document objects pass a zero text vector - image similarity dominates
 - Used in: Both pipelines
 
-### `engine/text_recognition/paddle_recognizer.py` - `PaddleOCRRecognizer`
-- Model: PaddleOCR-VL-1.5 with PP-DocLayoutV3 layout detection
-- Input: PIL Image (saved to temp PNG, passed as file path)
+### `engine/text_recognition/http_recognizer.py` - `HTTPOCRRecognizer`
+- Backend: external HTTP OCR microservice
+- Input: PIL Image (encoded as PNG multipart form-data, field name: `image`)
 - Output: `{"text": str, "confidence": float, "segments": list}`
-- Inference: ~3-18s per image
-- Extracts text from `parsing_res_list[].block_content` in JSON export
+- Response contract: JSON with at least `text` (string), optional `confidence` (float)
 
 ### `learning/projection_head.py` - `ProjectionHead`
 - Single residual linear layer (`Linear(1536, 1536, bias=False)`) initialized to zeros
@@ -323,7 +322,7 @@ Multi-image (POST /remember with `images[]`):
 
 ### `utils/quality_utils.py`
 - `mean_luminance(image: PIL.Image) -> float` - mean grayscale pixel value (0-255); used by both pipelines for darkness detection
-- `estimate_text_likelihood(image: PIL.Image) -> float` - normalized Laplacian edge density on a 128x128 greyscale resize; returns 0.0-1.0; ~2ms; used as OCR pre-check to skip PaddleOCR on plain-color crops (threshold `ocr_text_likelihood_threshold=0.10` in settings.py)
+- `estimate_text_likelihood(image: PIL.Image) -> float` - normalized Laplacian edge density on a 128x128 greyscale resize; returns 0.0-1.0; ~2ms; used as OCR pre-check to skip HTTP OCR calls on plain-color crops (threshold `ocr_text_likelihood_threshold=0.10` in settings.py)
 - Pure numpy/PIL - no model loading, no extra deps
 - Shared between RememberPipeline and ScanPipeline via `utils` package export
 
@@ -436,7 +435,7 @@ Labels are per-instance (wallet_a vs wallet_b) to test instance-level discrimina
 
 ### Phases
 
-1. **Embed** - DINOv3 image embedding + optional PaddleOCR text embedding for each image.
+1. **Embed** - DINOv3 image embedding + optional OCR-service text embedding for each image.
 2. **Split** - 60/40 train/test per label (seeded RNG).
 3. **Database** - Individual train embeddings, identical format to production ScanPipeline.
 4. **Train** - ProjectionTrainer generates triplets from train set; trains ProjectionHead.
@@ -525,7 +524,8 @@ Single worker is required - model state is process-local.
 **Environment variables:**
 - `API_KEY=<secret>` - enforce `X-API-Key` header on all routes except `/health` (opt-in; unset = no auth)
 - `ENABLE_DEPTH=0` - skip Depth Pro (~2GB VRAM savings)
-- `ENABLE_OCR=0` - skip PaddleOCR
+- `ENABLE_OCR=0` - skip OCR requests
+- `OCR_SERVICE_URL=http://127.0.0.1:8001/ocr` - external OCR endpoint
 - `ENABLE_LEARNING=0` - disable projection head application in scan (also patchable at runtime via PATCH /settings)
 - `api_host` / `api_port` controlled via `settings.py` (defaults: 127.0.0.1:5000)
 
@@ -600,8 +600,8 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - /settings and ML setting overrides survive restarts (persisted to `user_state.ml_settings`, restored by `warm_all()`)
 - FeedbackStore migrated to SQLite feedback table; flat .pt file approach removed
 - Database: SQLite via DatabaseStore; items, sightings, feedback, user_state, ml_settings all in one file
-- OCR pre-check: `estimate_text_likelihood()` skips PaddleOCR for plain-color crops (~2ms vs 3-18s)
-- OCR backend: PaddleOCR-VL-1.5 (`ocr_backend = "paddle"`)
+- OCR pre-check: `estimate_text_likelihood()` skips OCR service calls for plain-color crops
+- OCR backend: external HTTP service (`ocr_backend = "http"`)
 - Image embedder: DINOv3 ViT-S/16 (`facebook/dinov3-vits16-pretrain-lvd1689m`, gated on HuggingFace)
 - Text embedder: CLIP text encoder only (`openai/clip-vit-base-patch32`, 512-dim, ~180MB)
 - Deployment: `deploy/setup_server.sh` automates full Debian server setup; `deploy/spaitra.service` for systemd
@@ -612,7 +612,7 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 
 ### Engine / Architecture
 - [ ] Run full benchmark - 120 images not yet captured; see `benchmarks/CAPTURE_GUIDE.md` (~1-2 hrs)
-- [ ] Wire `batch_embed_text()` into pipeline OCR paths once PaddleOCR supports batch (currently CPU-sequential; no gain until backend changes)
+- [ ] Add batched OCR service endpoint support and wire it into pipeline OCR paths to reduce HTTP overhead on multi-crop scans
 - [ ] Wire `detect_all_batch()` into ScanPipeline when processing multiple images per request
 - [ ] Wire `detect_batch()` into RememberPipeline if multi-prompt remember is added
 - [ ] Remove `engine/embedding/projection_head/` empty dir (leftover from earlier experiment)
@@ -628,6 +628,11 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 
 ### Deployment
 - [ ] `scans/` crop save directory is lazily created relative to CWD; should come from a config value or env var for production (write permission not guaranteed in containers)
+- [ ] Add a systemd unit for the OCR microservice and a startup health check dependency
+
+### API
+- [] Add optional OCR service health probe endpoint in backend startup checks
+- [] Have fast mode in settings disable second pass detection in remember mode
 
 ---
 
@@ -664,7 +669,7 @@ All server-transition items are complete as of March 2026.
 - **Grounding DINO for remember** - Handles vague natural language; much stronger than prompted YOLOE for this use case.
 - **Depth Pro** - Only monocular model with metric (absolute) depth; no scale factor needed.
 - **Actionability over accuracy** - "May be a wallet two feet to your right, focus to verify" is actionable. A raw confidence percentage is not.
-- **PaddleOCR over EasyOCR** - Switched from EasyOCR to PaddleOCR-VL-1.5 (Feb 2026). EasyOCR averaged 9.7% word-overlap on the `text_demo/` test set at 200-435s/image. PaddleOCR-VL-1.5 runs in 3-18s/image (~15x faster) and correctly extracts layout-aware text from `parsing_res_list[].block_content` in its JSON output. Text extraction was initially broken due to the engine searching wrong JSON paths; fixed by targeting the correct field.
+- **OCR moved out of core backend (March 2026)** - OCR is now an external HTTP microservice so backend deployment avoids Paddle dependency conflicts. The core backend only sends crop images to `OCR_SERVICE_URL` and consumes a stable JSON response (`text`, `confidence`).
 - **Combined embedding over hybrid matching** - `max(image_sim, text_sim)` could false-match two white documents with different text (image similarity alone passes threshold). The combined embedding `normalize(img) || normalize(text)` means cosine similarity is approximately the average of both sub-similarities, so both image AND text must match. Non-document objects get a zero text slot; image similarity dominates unchanged.
-- **Single venv** - All dependencies including PaddleOCR live in one `pip install -e .` install.
+- **Lean backend venv** - Core backend install no longer includes PaddleOCR. OCR dependencies live in the separate OCR service environment.
 - **Projection head: identity-at-init residual design** - A single `Linear(1536, 1536, bias=False)` initialized to zeros. At init `output = normalize(x + 0) = x`, so the head is a strict no-op before any training. Safe to wire in by default with zero runtime cost. After triplet training, the head learns a small residual correction that pulls user-confirmed matches closer and pushes mismatches apart. Raw base embeddings are stored; projection applied on-the-fly at match time, so retraining only requires reloading weights - no re-embedding the database.

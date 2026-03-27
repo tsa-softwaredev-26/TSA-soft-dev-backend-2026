@@ -45,7 +45,7 @@ See [DEPLOY.md](DEPLOY.md) for full step-by-step instructions.
 **Requirements:**
 - Debian 12 (Bookworm) or 13 (Trixie)
 - NVIDIA GPU with >=8GB VRAM recommended (CUDA 11.8 or 12.x)
-- CPU-only is supported but PaddleOCR will run at 3-18s per image
+- CPU-only is supported; OCR runs in an external service configured via `OCR_SERVICE_URL`
 
 Key steps: install system packages, set up SSH deploy key or PAT for GitHub access,
 create a `spaitra` service user, install dependencies, configure `.env`, install the

@@ -8,6 +8,7 @@ User=spaitra
 Group=spaitra
 WorkingDirectory=/opt/spaitra
 EnvironmentFile=/opt/spaitra/.env
+# If ENABLE_OCR=1, OCR_SERVICE_URL must be reachable before first request.
 # -w 2: two workers handle concurrent requests (health check does not block during slow inference).
 # Each worker loads all models independently (~4GB VRAM each with ENABLE_DEPTH=1).
 # On servers with <8GB VRAM or CPU-only, lower to -w 1.

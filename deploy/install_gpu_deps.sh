@@ -45,35 +45,9 @@ else
 fi
 
 # -----------------------------
-# PaddlePaddle selection
-# -----------------------------
-PADDLE_VER="3.3.1"
-PADDLE_INDEX=""
-
-if [ "$CUDA_MAJOR" -ge 13 ]; then
-    PADDLE_INDEX="https://www.paddlepaddle.org.cn/packages/stable/cu130/"
-elif [ "$CUDA_MAJOR" -eq 12 ] && [ "$CUDA_MINOR" -ge 9 ]; then
-    PADDLE_INDEX="https://www.paddlepaddle.org.cn/packages/stable/cu129/"
-elif [ "$CUDA_MAJOR" -eq 12 ] && [ "$CUDA_MINOR" -ge 8 ]; then
-    PADDLE_INDEX="https://www.paddlepaddle.org.cn/packages/stable/cu128/"
-elif [ "$CUDA_MAJOR" -eq 12 ] && [ "$CUDA_MINOR" -ge 6 ]; then
-    PADDLE_INDEX="https://www.paddlepaddle.org.cn/packages/stable/cu126/"
-elif [ "$CUDA_MAJOR" -eq 12 ]; then
-    PADDLE_INDEX="https://www.paddlepaddle.org.cn/packages/stable/cu126/"
-elif [ "$CUDA_MAJOR" -eq 11 ]; then
-    PADDLE_VER="3.1.0"
-    PADDLE_INDEX="https://www.paddlepaddle.org.cn/packages/stable/cu118/"
-else
-    echo "ERROR: Unsupported CUDA version $CUDA_VER for PaddlePaddle"
-    exit 1
-fi
-
-# -----------------------------
 # Output config
 # -----------------------------
 echo "PyTorch index:    $TORCH_INDEX"
-echo "PaddlePaddle:     paddlepaddle-gpu==$PADDLE_VER"
-echo "Paddle index:     $PADDLE_INDEX"
 echo ""
 
 # -----------------------------
@@ -81,12 +55,6 @@ echo ""
 # -----------------------------
 echo "Installing PyTorch..."
 pip install torch torchvision --index-url "$TORCH_INDEX"
-
-# -----------------------------
-# Install Paddle
-# -----------------------------
-echo "Installing PaddlePaddle GPU..."
-pip install "paddlepaddle-gpu==$PADDLE_VER" -i "$PADDLE_INDEX"
 
 # -----------------------------
 # Verify PyTorch
@@ -102,14 +70,5 @@ else:
     raise SystemExit("ERROR: PyTorch cannot see GPU")
 EOF
 
-
-# Verify Paddle
 echo ""
-echo "Verifying PaddlePaddle GPU..."
-python - <<'EOF'
-import paddle
-paddle.utils.run_check()
-EOF
-
-echo ""
-echo "GPU dependencies installed successfully."
+echo "GPU dependencies installed successfully (PyTorch only)."

@@ -106,8 +106,7 @@ pip install gunicorn
 ```
 
 **GPU servers:** run the helper script - it reads `nvidia-smi`, picks the right
-PyTorch and PaddlePaddle wheel indexes for your CUDA version, installs both, and
-verifies both can see the GPU:
+PyTorch wheel index for your CUDA version, installs it, and verifies CUDA access:
 
 ```bash
 bash deploy/install_gpu_deps.sh
@@ -122,7 +121,8 @@ the official package indexes to find the right command manually.
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 ```
 
-PaddleOCR will run on CPU at 3-18s per image crop. No other action needed.
+OCR runs in a separate service. Point this backend to that service with
+`OCR_SERVICE_URL` in `.env`.
 
 ---
 
@@ -165,12 +165,51 @@ nano .env  # set API_KEY at minimum
 |----------|---------|-------|
 | `API_KEY` | (none) | All routes except /health require `X-API-Key` header. |
 | `ENABLE_DEPTH` | `1` | Depth Pro needs ~2GB VRAM. All models together: ~4GB VRAM per worker. Set `0` on CPU-only or <4GB VRAM. |
-| `ENABLE_OCR` | `1` | Set `0` to skip PaddleOCR entirely. |
+| `ENABLE_OCR` | `1` | Set `0` to skip OCR calls entirely. |
+| `OCR_SERVICE_URL` | `http://127.0.0.1:8001/ocr` | Local HTTP OCR microservice endpoint. |
 | `ENABLE_LEARNING` | `1` | Set `0` to disable projection head. |
 
 ---
 
-## 8. Systemd Service
+## 8. OCR Service (required when ENABLE_OCR=1)
+
+Run OCR as a separate service and keep it local to the host when possible.
+`OCR_SERVICE_URL` must be reachable from the backend worker process.
+
+Example systemd unit (replace `ExecStart` with your OCR service command):
+
+```bash
+cat > /etc/systemd/system/spaitra-ocr.service <<'EOF'
+[Unit]
+Description=Spaitra OCR microservice
+After=network.target
+
+[Service]
+Type=simple
+User=spaitra
+WorkingDirectory=/opt/spaitra-ocr
+ExecStart=/opt/spaitra-ocr/venv/bin/python -m your_ocr_service
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable --now spaitra-ocr
+systemctl status spaitra-ocr --no-pager
+```
+
+Quick connectivity check:
+
+```bash
+source /opt/spaitra/.env
+curl -X POST -F image=@/opt/spaitra/src/visual_memory/tests/text_demo/typed.jpeg "$OCR_SERVICE_URL"
+```
+
+---
+
+## 9. Systemd Service
 
 ```bash
 # As root:
@@ -195,7 +234,7 @@ On servers with <8GB VRAM, edit `spaitra.service` to set `-w 1`, then
 
 ---
 
-## 9. srv.us Tunnel
+## 10. srv.us Tunnel
 
 Create a second systemd service so the tunnel restarts automatically:
 
@@ -223,7 +262,7 @@ The public HTTPS URL srv.us prints is the base URL for the iOS frontend.
 
 ---
 
-## 10. Updating
+## 11. Updating
 
 ```bash
 su - spaitra -s /bin/bash
@@ -232,11 +271,13 @@ git pull
 pip install -e .
 exit
 systemctl restart spaitra
+# restart OCR service too if you updated it:
+# systemctl restart spaitra-ocr
 ```
 
 ---
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 **Service fails to start:**
 ```bash
@@ -257,11 +298,9 @@ journalctl -u spaitra --no-pager -n 100
 - `hf whoami` to verify the token is valid
 - Confirm you accepted each gated model's license on huggingface.co
 
-**PaddlePaddle not using GPU:**
-```bash
-python -c "import paddle; print(paddle.device.get_device())"
-# Should print gpu:0 - if it prints cpu, rerun deploy/install_gpu_deps.sh
-```
+**OCR requests failing (connection refused/timeouts):**
+- Confirm OCR service is running and reachable at `OCR_SERVICE_URL`
+- Test locally: `curl -X POST -F image=@/path/to/test.png $OCR_SERVICE_URL`
 
 **VRAM OOM with 2 workers:**
 - Set `-w 1` in `spaitra.service` or `ENABLE_DEPTH=0` in `.env`
