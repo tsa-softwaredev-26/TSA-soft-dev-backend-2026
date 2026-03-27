@@ -10,6 +10,7 @@ from visual_memory.config import Settings
 from visual_memory.utils import load_image, crop_object, get_logger, mean_luminance, estimate_text_likelihood
 from visual_memory.engine.embedding import make_combined_embedding
 from visual_memory.engine.model_registry import registry
+from visual_memory.engine.text_recognition import TextRecognizer
 from visual_memory.database import DatabaseStore
 
 pillow_heif.register_heif_opener()
@@ -100,7 +101,7 @@ class RememberPipeline:
         self.detector        = registry.gdino_detector
         self.img_embedder    = registry.img_embedder
         self.text_embedder   = registry.text_embedder   if _settings.enable_ocr else None
-        self.text_recognizer = registry.text_recognizer if _settings.enable_ocr else None
+        self.ocr_client      = TextRecognizer() if _settings.enable_ocr else None
 
         self.db = DatabaseStore(Path(_settings.db_path))
 
@@ -233,9 +234,9 @@ class RememberPipeline:
         ocr_text = ""
         ocr_confidence = 0.0
         text_embedding = None
-        if (self.text_recognizer is not None
+        if (self.ocr_client is not None
                 and text_likelihood >= _settings.ocr_text_likelihood_threshold):
-            ocr_result = self.text_recognizer.recognize(cropped)
+            ocr_result = self.ocr_client.recognize(cropped)
             ocr_text = ocr_result["text"]
             ocr_confidence = ocr_result["confidence"]
             if ocr_text:
@@ -245,7 +246,7 @@ class RememberPipeline:
             "event": "remember_ocr",
             "label": label,
             "text_likelihood": round(text_likelihood, 3),
-            "ocr_ran": self.text_recognizer is not None and text_likelihood >= _settings.ocr_text_likelihood_threshold,
+            "ocr_ran": self.ocr_client is not None and text_likelihood >= _settings.ocr_text_likelihood_threshold,
             "ocr_text_length": len(ocr_text),
             "ocr_confidence": round(ocr_confidence, 4),
             "has_text_embedding": text_embedding is not None,

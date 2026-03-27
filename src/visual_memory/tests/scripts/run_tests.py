@@ -185,14 +185,13 @@ _section("[4] text_recognition + embedding - magnesium.heic")
 
 _mark4 = log_mark()
 
-# FAST mode: scan had OCR disabled, so reuse the recognizer loaded by RememberPipeline.
-# Access private attrs to avoid triggering lazy-load of a second instance.
-if FAST and scan.text_recognizer is None:
-    from visual_memory.engine.model_registry import registry as _reg
-    _recognizer = _reg._text_recognizer
-    _embedder   = _reg._text_embedder
+# FAST mode: scan had OCR disabled, so create a temporary OCR client for this test.
+if FAST and scan.ocr_client is None:
+    from visual_memory.engine.text_recognition import TextRecognizer
+    _recognizer = TextRecognizer()
+    _embedder   = remember.text_embedder
 else:
-    _recognizer = scan.text_recognizer
+    _recognizer = scan.ocr_client
     _embedder   = scan.text_embedder
 
 if _recognizer is None:
@@ -207,7 +206,7 @@ else:
         print("     ocr:", json.dumps(ocr_display))
 
         if isinstance(ocr, dict) and "text" in ocr and "confidence" in ocr and "segments" in ocr:
-            _pass("text_recognition:recognizer", f"engine=paddle  segments={len(ocr['segments'])}  conf={ocr['confidence']:.3f}")
+            _pass("text_recognition:recognizer", f"engine=http  segments={len(ocr['segments'])}  conf={ocr['confidence']:.3f}")
         else:
             _fail("text_recognition:recognizer", "unexpected result structure")
 

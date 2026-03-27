@@ -25,8 +25,7 @@ def estimate_text_likelihood(image: Image.Image) -> float:
     labels, packaging, and text-bearing surfaces score high.
 
     Returns 0.0 (no text) to 1.0 (high text likelihood). Below
-    settings.ocr_text_likelihood_threshold, the pipelines skip PaddleOCR
-    entirely (saves 3-18s per image).
+    settings.ocr_text_likelihood_threshold, pipelines skip OCR service calls.
     """
     small = np.array(image.convert("L").resize((128, 128)), dtype=np.float32)
     lap = np.abs(

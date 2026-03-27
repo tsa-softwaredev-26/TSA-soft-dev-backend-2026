@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from visual_memory.config import Settings
 from visual_memory.engine.embedding import make_combined_embedding
 from visual_memory.engine.model_registry import registry
+from visual_memory.engine.text_recognition import TextRecognizer
 from visual_memory.learning import ProjectionHead
 from visual_memory.utils import crop_object, find_match, deduplicate_matches, get_logger, mean_luminance, estimate_text_likelihood
 from visual_memory.database import DatabaseStore
@@ -37,7 +38,7 @@ class ScanPipeline:
         self.img_embedder    = registry.img_embedder
         self.text_embedder   = registry.text_embedder   if _settings.enable_ocr   else None
         self.detector        = registry.yoloe_detector
-        self.text_recognizer = registry.text_recognizer if _settings.enable_ocr   else None
+        self.ocr_client      = TextRecognizer() if _settings.enable_ocr else None
         self.estimator       = registry.depth_estimator if _settings.enable_depth else None
         self.focal_length_px = focal_length_px
 
@@ -182,9 +183,9 @@ class ScanPipeline:
             text_likelihood = estimate_text_likelihood(crops[i])
             ocr_text = ""
             text_emb = None
-            if (self.text_recognizer is not None
+            if (self.ocr_client is not None
                     and text_likelihood >= _settings.ocr_text_likelihood_threshold):
-                ocr_result = self.text_recognizer.recognize(crops[i])
+                ocr_result = self.ocr_client.recognize(crops[i])
                 ocr_text = ocr_result["text"]
                 text_emb = self.text_embedder.embed_text(ocr_text) if ocr_text else None
             combined = make_combined_embedding(img_emb, text_emb)
