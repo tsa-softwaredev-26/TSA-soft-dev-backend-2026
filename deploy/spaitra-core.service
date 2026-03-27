@@ -6,9 +6,9 @@ After=network.target
 Type=simple
 User=spaitra
 Group=spaitra
-WorkingDirectory=/opt/spaitra
+WorkingDirectory=__REPO_ROOT__
 EnvironmentFile=/opt/spaitra/.env
-ExecStart=/opt/spaitra/venv-core/bin/gunicorn \
+ExecStart=__REPO_ROOT__/venv-core/bin/gunicorn \
     -w 1 \
     -b 127.0.0.1:5000 \
     --timeout 120 \
