@@ -76,6 +76,13 @@ class Settings:
     projection_head_path: str = "models/projection_head.pt"
     projection_head_dim: int = 1536
 
+    # VRAM management — offload exclusive-pipeline models to CPU RAM between calls.
+    # Enable on GPUs with < 8 GB VRAM (e.g. GTX 1060 6 GB).
+    # Remember mode keeps GDino + DINOv3 + CLIP on GPU; offloads YOLOE + Depth.
+    # Scan mode keeps YOLOE + Depth + DINOv3 + CLIP on GPU; offloads GDino.
+    # Transfer cost: ~1-2 s for GDino, ~3-5 s for Depth Pro (PCIe, not disk reload).
+    save_vram: bool = field(default_factory=lambda: os.environ.get("SAVE_VRAM", "0") != "0")
+
     # Learning / online feedback training
     # enable_learning: apply projection head during scan (can be toggled via PATCH /settings)
     enable_learning: bool = field(default_factory=lambda: os.environ.get("ENABLE_LEARNING", "1") != "0")

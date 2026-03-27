@@ -153,6 +153,7 @@ class RememberPipeline:
             is_dark (bool), darkness_level (float),
             second_pass_prompt (str | None)
         """
+        registry.prepare_for_remember()
         image = load_image(str(Path(image_path)))
         lum = mean_luminance(image)
         is_dark = lum < _settings.darkness_threshold
@@ -182,6 +183,7 @@ class RememberPipeline:
         prompt: text label from the user
         returns structured result dict
         """
+        registry.prepare_for_remember()
         image_path = Path(image_path)
         image = load_image(str(image_path))
 

@@ -44,6 +44,19 @@ class GroundingDinoDetector:
         ).to(self.device)
         self.model.eval()
 
+    def to_cpu(self) -> None:
+        """Move model weights to CPU RAM. Frees GPU VRAM; call before scan pipeline."""
+        if self.device != "cpu":
+            self.model.to("cpu")
+            self.device = "cpu"
+
+    def to_gpu(self) -> None:
+        """Restore model weights to GPU. Call before remember pipeline."""
+        if self.device != get_device():
+            dev = get_device()
+            self.model.to(dev)
+            self.device = dev
+
     def detect(self, image: Image.Image, prompt: str) -> Optional[Dict[str, Any]]:
         """
         Detect an object in an image using a text prompt.

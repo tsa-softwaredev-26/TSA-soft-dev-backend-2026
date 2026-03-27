@@ -151,6 +151,7 @@ class ScanPipeline:
         focal_length_px: overrides self.focal_length_px for this call only
         returns structured JSON dict
         """
+        registry.prepare_for_scan()
         _focal = focal_length_px if focal_length_px is not None else self.focal_length_px
 
         lum = mean_luminance(query_image)

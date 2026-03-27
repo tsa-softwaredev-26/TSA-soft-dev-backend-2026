@@ -51,6 +51,40 @@ class ModelRegistry:
             self._yoloe_detector = YoloeDetector()
         return self._yoloe_detector
 
+    def prepare_for_remember(self) -> None:
+        """Offload scan-only models to CPU; ensure remember models are on GPU.
+
+        No-op when SAVE_VRAM=0 or CUDA is unavailable.
+        Called at the start of every RememberPipeline.run() / detect_score().
+        """
+        import torch
+        if not _settings.save_vram or not torch.cuda.is_available():
+            return
+        if self._yoloe_detector is not None:
+            self._yoloe_detector.to_cpu()
+        if self._depth_estimator is not None:
+            self._depth_estimator.to_cpu()
+        torch.cuda.empty_cache()
+        if self._gdino_detector is not None:
+            self._gdino_detector.to_gpu()
+
+    def prepare_for_scan(self) -> None:
+        """Offload remember-only models to CPU; ensure scan models are on GPU.
+
+        No-op when SAVE_VRAM=0 or CUDA is unavailable.
+        Called at the start of every ScanPipeline.run() and after warm_all().
+        """
+        import torch
+        if not _settings.save_vram or not torch.cuda.is_available():
+            return
+        if self._gdino_detector is not None:
+            self._gdino_detector.to_cpu()
+        torch.cuda.empty_cache()
+        if self._yoloe_detector is not None:
+            self._yoloe_detector.to_gpu()
+        if self._depth_estimator is not None and _settings.enable_depth:
+            self._depth_estimator.to_gpu()
+
     def preload(self, depth: bool = False) -> None:
         # Eagerly load all models. Call at Flask startup to avoid first-request latency.
         _ = self.img_embedder

@@ -33,6 +33,19 @@ class ImageEmbedder:
         self.processor = AutoImageProcessor.from_pretrained(pretrained_model_name)
         self.model = AutoModel.from_pretrained(pretrained_model_name).to(self.device).eval()
 
+    def to_cpu(self) -> None:
+        """Move model weights to CPU RAM."""
+        if self.device != torch.device("cpu"):
+            self.model.to("cpu")
+            self.device = torch.device("cpu")
+
+    def to_gpu(self) -> None:
+        """Restore model weights to GPU."""
+        target = torch.device(get_device())
+        if self.device != target:
+            self.model.to(target)
+            self.device = target
+
     def embed(self, image: Image.Image) -> torch.Tensor:
         """Embed a single image. Returns (1, 1024) L2-normalized tensor."""
         inputs = self.processor(images=image, return_tensors="pt").to(self.device)

@@ -55,6 +55,15 @@ class YoloeDetector:
         self.confidence_threshold = confidence_threshold
         self.intersection_threshold = intersection_threshold
 
+    def to_cpu(self) -> None:
+        """Move YOLOE weights to CPU RAM. Frees GPU VRAM; call before remember pipeline."""
+        self.prompt_free_model.to("cpu")
+
+    def to_gpu(self) -> None:
+        """Restore YOLOE weights to GPU. Call before scan pipeline."""
+        from visual_memory.utils.device_utils import get_device
+        self.prompt_free_model.to(get_device())
+
     def detect_all(self, image: Union[str, Image.Image]) -> Tuple[Optional[List[List[float]]], Optional[List[float]]]:
         """
         Prompt-free detection: return ALL boxes.
