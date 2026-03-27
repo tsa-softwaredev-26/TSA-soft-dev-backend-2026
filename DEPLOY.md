@@ -141,6 +141,19 @@ API_HOST=127.0.0.1
 API_PORT=5000
 ```
 
+**GPU VRAM < 8 GB (e.g. GTX 1060 6 GB):** add this line:
+
+```dotenv
+SAVE_VRAM=1
+```
+
+With `SAVE_VRAM=1` the service swaps model weights between GPU and CPU RAM between
+pipeline calls instead of keeping everything loaded simultaneously (~5.9 GB idle).
+- Remember calls: GroundingDINO + DINOv3 + CLIP on GPU; YOLOE + Depth Pro on CPU.
+- Scan calls: YOLOE + Depth Pro + DINOv3 + CLIP on GPU; GroundingDINO on CPU.
+- Transfer cost per swap: ~1–2 s for GroundingDINO, ~3–5 s for Depth Pro (PCIe, not disk).
+- Requires 16 GB system RAM to hold all models resident in CPU memory.
+
 OCR service env:
 
 ```bash

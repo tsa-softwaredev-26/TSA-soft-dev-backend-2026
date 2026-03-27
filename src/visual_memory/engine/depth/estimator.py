@@ -35,6 +35,20 @@ class DepthEstimator:
         self.model, self.transform = depth_pro.create_model_and_transforms(config=config, device=self.device)
         self.model.eval()
 
+    def to_cpu(self) -> None:
+        """Move Depth Pro weights to CPU RAM. Frees ~2 GB VRAM; call before remember pipeline."""
+        if self.device != torch.device("cpu"):
+            self.model.to("cpu")
+            self.device = torch.device("cpu")
+
+    def to_gpu(self) -> None:
+        """Restore Depth Pro weights to GPU. Call before scan pipeline (when enable_depth)."""
+        from visual_memory.utils.device_utils import get_device
+        target = torch.device(get_device())
+        if self.device != target:
+            self.model.to(target)
+            self.device = target
+
     def estimate(self, image: Image.Image, focal_length_px: float = None) -> torch.Tensor:
         # focal_length_px from Android: (focalLengthMm / sensorWidthMm) * imageWidthPx
         # None = Depth Pro infers (~75% error vs ~26% calibrated at close range)

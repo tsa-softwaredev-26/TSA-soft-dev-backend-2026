@@ -29,6 +29,20 @@ class CLIPTextEmbedder:
         self.tokenizer = CLIPTokenizer.from_pretrained(model_name)
         self.model = CLIPTextModelWithProjection.from_pretrained(model_name).to(self.device).eval()
 
+    def to_cpu(self) -> None:
+        """Move model weights to CPU RAM."""
+        if self.device != torch.device("cpu"):
+            self.model.to("cpu")
+            self.device = torch.device("cpu")
+
+    def to_gpu(self) -> None:
+        """Restore model weights to GPU."""
+        from visual_memory.utils.device_utils import get_device
+        target = torch.device(get_device())
+        if self.device != target:
+            self.model.to(target)
+            self.device = target
+
     def embed_text(self, text: str) -> torch.Tensor:
         """
         Generate L2-normalized text embedding.

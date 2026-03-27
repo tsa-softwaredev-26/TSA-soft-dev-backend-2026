@@ -66,6 +66,11 @@ def warm_all():
     get_scan_pipeline()
     get_feedback_store()
     _apply_persisted_ml_settings()
+    # When SAVE_VRAM is on, settle into scan-mode VRAM layout after loading everything.
+    # This offloads GDino (~900 MB) immediately, leaving scan models warm on GPU.
+    if _settings.save_vram:
+        from visual_memory.engine.model_registry import registry
+        registry.prepare_for_scan()
 
 
 def _apply_persisted_ml_settings():

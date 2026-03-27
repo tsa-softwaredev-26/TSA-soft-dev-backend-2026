@@ -126,6 +126,7 @@ src/visual_memory/
 │   └── scan_mode/pipeline.py
 │
 ├── engine/
+│   ├── model_registry.py               # ModelRegistry singleton — lazy-loads all models; prepare_for_remember() / prepare_for_scan() for VRAM swapping
 │   ├── embedding/
 │   │   ├── embed_image.py              # ImageEmbedder (DINOv3, 1024-dim)
 │   │   ├── embed_text.py              # CLIPTextEmbedder (CLIP text encoder, 512-dim)
@@ -179,6 +180,32 @@ src/visual_memory/
     ├── demo_database/                  # Reference crops for ScanPipeline
     └── text_demo/                      # OCR test images + ground_truth/
 ```
+
+---
+
+## VRAM Management (`SAVE_VRAM`)
+
+All model wrappers (`ImageEmbedder`, `CLIPTextEmbedder`, `GroundingDinoDetector`,
+`YoloeDetector`, `DepthEstimator`) expose `to_cpu()` / `to_gpu()` methods that move
+weights between GPU VRAM and system RAM without reloading from disk.
+
+`ModelRegistry` coordinates swapping via two methods called at the start of every
+pipeline `run()` invocation:
+
+| Method | GPU (active) | CPU (parked) |
+|---|---|---|
+| `prepare_for_remember()` | GDino + DINOv3 + CLIP | YOLOE + Depth Pro |
+| `prepare_for_scan()` | YOLOE + Depth Pro + DINOv3 + CLIP | GDino |
+
+DINOv3 and CLIP stay on GPU in both modes (shared, small, ~480 MB combined).
+
+**When to enable:** set `SAVE_VRAM=1` in `.env` for GPUs with < 8 GB VRAM.
+Requires ~16 GB system RAM. Transfer cost per swap: ~1–2 s (GDino) / ~3–5 s (Depth Pro).
+On GPUs ≥ 8 GB, leave `SAVE_VRAM=0` (default) — all models stay warm on GPU with no
+per-request overhead.
+
+At startup (`warm_all()`), the registry settles into scan-mode layout so the most
+common operation (scan) has no initial swap overhead.
 
 ---
 
