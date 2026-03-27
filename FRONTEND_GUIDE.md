@@ -426,7 +426,7 @@ Update ML runtime parameters. All fields optional. Returns the full settings sta
 }
 ```
 
-Note: these are not persisted across restarts (planned fix).
+Changes are persisted to the database and restored on server restart.
 
 ---
 
@@ -437,11 +437,11 @@ User preferences. These are persisted in the database.
 **Response:**
 ```json
 {
-  "performance_mode": "balanced", # fast = no depth, no ocr, balanced = depth, ocr included w/ base models, accurate = base + better models
+  "performance_mode": "balanced",
   "voice_speed": 1.0,
-  "scan_update_location": true, #asks user where they are after a scan mode detection, updates all
-  "learning_enabled": true, # train personalized model from user feedback
-  "button_layout": "default", # default or swapped
+  "scan_update_location": true,
+  "learning_enabled": true,
+  "button_layout": "default"
 }
 ```
 
@@ -703,3 +703,275 @@ All error responses include `{"error": "<message>"}` or `{"errors": {...}}` (PAT
 - Read matches in array order - they are already left-to-right spatially.
 - For low/medium confidence matches, the narration already includes `"May be a..."` - do not add additional hedging in the UI.
 - `ocr_text` is raw extracted text. Read it verbatim if the user requests it.
+
+---
+
+## Debug Endpoints
+
+Use these to verify the integration during development. All require `X-API-Key` if the server has one set (same as every other route).
+
+**Do not call these from production code.** They expose internal state and some endpoints are destructive.
+
+---
+
+### GET /debug/state
+
+Overall system status: pipeline readiness, OCR service reachability, DB counts, active settings.
+
+```json
+{
+  "device": "mps",
+  "pipelines": {
+    "remember": "loaded",
+    "scan": "loaded"
+  },
+  "ocr": {
+    "url": "http://127.0.0.1:8001/health",
+    "reachable": true,
+    "latency_ms": 3.2
+  },
+  "db": {
+    "item_count": 4,
+    "sighting_count": 12,
+    "feedback": { "positives": 5, "negatives": 3, "triplets": 15 }
+  },
+  "settings": {
+    "enable_depth": true,
+    "enable_ocr": true,
+    "enable_dedup": true,
+    "enable_learning": true,
+    "similarity_threshold": 0.3,
+    "darkness_threshold": 30.0,
+    "blur_sharpness_threshold": 100.0,
+    "ocr_backend": "http"
+  }
+}
+```
+
+`pipelines.remember` and `pipelines.scan` reflect actual load state, not just startup success.
+
+---
+
+### POST /debug/echo
+
+Send any request; get back exactly what the server received. No inference, instant response.
+
+Use this when `/remember` or `/scan` returns an unexpected 400. Hit `/debug/echo` with the identical request to see what field names, file sizes, and content-type the server actually got.
+
+**Request:** any format (multipart, JSON, form, raw)
+
+**Response:**
+```json
+{
+  "method": "POST",
+  "content_type": "multipart/form-data; boundary=abc123",
+  "headers": { "Content-Length": "48231", "Accept": "*/*" },
+  "form_fields": { "prompt": "wallet" },
+  "files": [
+    { "field": "image", "filename": "photo.jpg", "mimetype": "image/jpeg", "size_bytes": 48100 }
+  ],
+  "json_body": null,
+  "raw_body_preview": null
+}
+```
+
+`X-API-Key` and `Authorization` headers are stripped from the response. Everything else is echoed verbatim. Common issues to look for:
+- `content_type` should be `multipart/form-data` for `/remember` and `/scan`
+- `files` field name must be `"image"` (not `"photo"`, `"file"`, etc.)
+- `form_fields.prompt` must be present for `/remember`
+
+---
+
+### POST /debug/image
+
+Upload an image; returns quality metadata without running any ML inference.
+
+Returns the exact same luminance and blur values the pipeline computes before deciding whether to reject an image. Use this to rule out image quality as the cause of a failed `/remember` or `/scan`.
+
+**Request:** `multipart/form-data`
+
+| Field | Type | Required |
+|-------|------|----------|
+| `image` | file | yes |
+
+**Response:**
+```json
+{
+  "width": 3024,
+  "height": 4032,
+  "mode": "RGB",
+  "file_bytes": 2483712,
+  "luminance": 98.4,
+  "is_dark": false,
+  "darkness_threshold": 30.0,
+  "blur_score": 312.7,
+  "is_blurry": false,
+  "blur_sharpness_threshold": 100.0
+}
+```
+
+---
+
+### GET /debug/db
+
+Full database dump: all taught items, last 20 sightings, feedback counts.
+
+```json
+{
+  "item_count": 2,
+  "items": [
+    { "id": 3, "label": "wallet", "confidence": 0.87, "ocr_text": "RFID Blocking", "timestamp": 1742700000.0 },
+    { "id": 1, "label": "house keys", "confidence": 0.91, "ocr_text": "", "timestamp": 1742600000.0 }
+  ],
+  "sighting_count": 8,
+  "recent_sightings": [
+    { "id": 12, "label": "wallet", "timestamp": 1742860412.3, "direction": "to your left", "distance_ft": 2.3, "similarity": 0.72, "crop_path": null, "room_name": "kitchen" }
+  ],
+  "feedback": { "positives": 2, "negatives": 1, "triplets": 2 }
+}
+```
+
+---
+
+### GET /debug/logs
+
+Return recent log entries from the server log. Useful for seeing what happened during a `/remember` or `/scan` call that produced an unexpected result.
+
+**Query params:**
+
+| Param | Default | Notes |
+|-------|---------|-------|
+| `n` | 50 | Number of entries (max 200) |
+| `event` | none | Filter by event type |
+
+**Useful event filters:** `remember_ocr`, `scan_text_match`, `text_recognition`, `text_embedding`
+
+**Response:**
+```json
+{
+  "count": 3,
+  "filter": "scan_text_match",
+  "entries": [
+    { "ts": "2026-03-27T14:22:01", "level": "DEBUG", "module": "...", "event": "scan_text_match", "label": "wallet", "score": 0.72 }
+  ]
+}
+```
+
+---
+
+### GET /debug/test-remember
+
+Run detection on a built-in test image (`wallet_1ft_table.jpg`) using the prompt `"wallet"`. No DB write.
+
+Proves GroundingDINO loaded correctly and can detect objects. Call this right after server start to confirm the remember pipeline is healthy.
+
+**Response:**
+```json
+{
+  "image": "wallet_1ft_table.jpg",
+  "prompt": "wallet",
+  "detected": true,
+  "score": 0.61,
+  "blur_score": 312.7,
+  "second_pass_prompt": null
+}
+```
+
+`detected: false` means GroundingDINO could not find the object (model may not have loaded, or test image is missing).
+
+---
+
+### GET /debug/test-scan
+
+Run scan on the same built-in test image. No sightings saved.
+
+Proves YOLOE and the embedding matcher loaded correctly. If the DB has items taught for `"wallet"`, you should see a match. If the DB is empty, `matches` will be empty but the pipeline still executes successfully.
+
+**Response:**
+```json
+{
+  "image": "wallet_1ft_table.jpg",
+  "db_item_count": 1,
+  "count": 1,
+  "matches": [
+    {
+      "label": "wallet",
+      "similarity": 0.68,
+      "confidence": "high",
+      "direction": "ahead",
+      "narration": "Wallet ahead."
+    }
+  ]
+}
+```
+
+---
+
+### POST /debug/wipe
+
+Wipe data selectively. Requires `{"confirm": true}`. Missing confirm returns 400.
+
+**Request:**
+```json
+{ "confirm": true, "target": "all" }
+```
+
+**target options:**
+
+| Value | What is wiped |
+|-------|---------------|
+| `"all"` (default) | items + sightings + feedback + projection head weights |
+| `"items"` | taught objects only; scan pipeline reloads immediately |
+| `"sightings"` | location history only |
+| `"feedback"` | feedback records only |
+| `"weights"` | projection head weights from DB and file; scan pipeline reloads |
+| `"settings"` | ML settings reset to defaults (enable_learning, thresholds, etc.) |
+| `"user-settings"` | user preferences reset to defaults (performance_mode, voice_speed, etc.) |
+
+**Response:**
+```json
+{
+  "wiped": true,
+  "target": "all",
+  "items_deleted": 4,
+  "sightings_deleted": 12,
+  "feedback_deleted": 8,
+  "weights_db_cleared": true,
+  "weights_file_deleted": false
+}
+```
+
+Response fields vary by target - only the relevant counts appear.
+
+---
+
+### PATCH /debug/config
+
+Directly modify any primitive setting on the backend. Changes apply immediately but are not persisted across restarts.
+
+For the ML learning fields (`enable_learning`, `projection_head_weight`, etc.), prefer `PATCH /settings` - it persists and propagates the same fields.
+
+**GET first to see all settable fields and their types:**
+```
+PATCH /debug/config   (no body)
+-> { "settable_fields": { "similarity_threshold": "float", "darkness_threshold": "float", ... } }
+```
+
+**Then patch:**
+```json
+{
+  "similarity_threshold": 0.25,
+  "darkness_threshold": 20.0,
+  "enable_ocr": false
+}
+```
+
+**Response:**
+```json
+{
+  "applied": { "similarity_threshold": 0.25, "darkness_threshold": 20.0, "enable_ocr": false },
+  "note": "in-memory only - not persisted across restarts. For ML fields use PATCH /settings."
+}
+```
+
+`400` with `{"errors": {...}}` on type mismatches or unknown fields.

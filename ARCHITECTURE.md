@@ -171,7 +171,8 @@ src/visual_memory/
 │       ├── user_settings_route.py      # GET /user-settings, PATCH /user-settings (user prefs)
 │       ├── find.py                     # GET /find - last-seen location query (Ask Mode)
 │       ├── items.py                    # GET /items, DELETE /items/<label>, POST /items/<label>/rename
-│       └── sightings.py               # POST /sightings - user-confirmed location update
+│       ├── sightings.py               # POST /sightings - user-confirmed location update
+│       └── debug.py                   # GET /debug/state, POST /debug/echo, POST /debug/image, GET /debug/db, GET /debug/logs, GET /debug/test-remember, GET /debug/test-scan, POST /debug/wipe, PATCH /debug/config
 └── tests/                             # Test scripts + test data
     ├── scripts/                        # Runnable .py test scripts
     ├── input_images/                   # Object test images
@@ -271,7 +272,7 @@ Multi-image (POST /remember with `images[]`):
 - Detection: `grounding_dino_model`, `box_threshold`, `text_threshold`, `yoloe_confidence`, `yoloe_iou`
 - Embedding: `image_embedder_model` (`dinov3-vits16`), `embedder_model` (`clip-vit-base-patch32`)
 - Matching: `similarity_threshold` (0.2), `dedup_iou_threshold` (0.5), `narration_high_confidence` (0.6)
-- OCR: `ocr_backend` ("http"), `ocr_service_url`, `ocr_timeout_seconds`, `ocr_languages`, `ocr_min_confidence` (0.3), `text_similarity_threshold` (0.4)
+- OCR: `ocr_backend` ("http"), `ocr_service_url`, `ocr_health_url` (derived from ocr_service_url if empty), `ocr_timeout_seconds`, `ocr_languages`, `ocr_min_confidence` (0.3), `text_similarity_threshold` (0.4)
 - Toggles (env-overridable): `enable_depth` (`ENABLE_DEPTH`), `enable_ocr` (`ENABLE_OCR`), `enable_dedup` (`ENABLE_DEDUP`)
 - Personalization: `projection_head_path` ("models/projection_head.pt"), `projection_head_dim` (1536)
 - Learning: `enable_learning` (`ENABLE_LEARNING`), `min_feedback_for_training` (10), `projection_head_weight` (1.0), `projection_head_ramp_at` (50), `projection_head_epochs` (20)
@@ -554,12 +555,13 @@ Single worker is required - model state is process-local.
 - `ENABLE_DEPTH=0` - skip Depth Pro (~2GB VRAM savings)
 - `ENABLE_OCR=0` - skip OCR requests
 - `OCR_SERVICE_URL=http://127.0.0.1:8001/ocr` - external OCR endpoint
+- `OCR_HEALTH_URL=http://127.0.0.1:8001/health` - OCR service health check URL (derived from OCR_SERVICE_URL if unset)
 - `ENABLE_LEARNING=0` - disable projection head application in scan (also patchable at runtime via PATCH /settings)
 - `api_host` / `api_port` controlled via `settings.py` (defaults: 127.0.0.1:5000)
 
 Models are loaded once at startup via `warm_all()` in `create_app()`. Upload cap: 50MB.
 
-**Endpoints:** GET /health, POST /remember, POST /scan, POST /feedback, POST /retrain, GET /retrain/status, GET /settings, PATCH /settings, GET /user-settings, PATCH /user-settings, GET /find, GET /items, DELETE /items/<label>, POST /items/<label>/rename, POST /sightings.
+**Endpoints:** GET /health, POST /remember, POST /scan, POST /feedback, POST /retrain, GET /retrain/status, GET /settings, PATCH /settings, GET /user-settings, PATCH /user-settings, GET /find, GET /crop, GET /items, DELETE /items/<label>, POST /items/<label>/rename, POST /sightings, GET /debug/state, POST /debug/echo, POST /debug/image, GET /debug/db, GET /debug/logs, GET /debug/test-remember, GET /debug/test-scan, POST /debug/wipe, PATCH /debug/config.
 
 See `FRONTEND_GUIDE.md` for full request/response schemas, field reference, and integration patterns.
 
@@ -615,7 +617,7 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 
 ---
 
-## Current State (March 26, 2026)
+## Current State (March 27, 2026)
 
 - Core engine complete and tested (depth, detection, embedding, OCR)
 - Both pipelines produce structured JSON dicts; combined 1536-dim embeddings (DINOv3 + CLIP text)
@@ -623,23 +625,24 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - `learning/` module complete: ProjectionHead, ProjectionTrainer, FeedbackStore (SQLite) - all tested CPU-only
 - `test_projection_head.py` passes: identity-at-init, triplet loss, store roundtrip, training convergence
 - ProjectionHead wired into ScanPipeline with auto-scaling blend (`_apply_head`); no-op until weights exist
-- Flask API: all endpoints live (remember, scan, feedback, retrain, settings, user-settings, find, items, sightings)
+- Flask API: all endpoints live (remember, scan, feedback, retrain, settings, user-settings, find, crop, items, sightings, debug)
 - /retrain is async (threading.Thread); GET /retrain/status for polling
 - /settings and ML setting overrides survive restarts (persisted to `user_state.ml_settings`, restored by `warm_all()`)
 - FeedbackStore migrated to SQLite feedback table; flat .pt file approach removed
 - Database: SQLite via DatabaseStore; items, sightings, feedback, user_state, ml_settings all in one file
 - OCR pre-check: `estimate_text_likelihood()` skips OCR service calls for plain-color crops
-- OCR backend: external HTTP service (`ocr_backend = "http"`)
+- OCR backend: external HTTP service (`ocr_backend = "http"`, `ocr_health_url` settable via `OCR_HEALTH_URL`)
 - Image embedder: DINOv3 ViT-S/16 (`facebook/dinov3-vits16-pretrain-lvd1689m`, gated on HuggingFace)
 - Text embedder: CLIP text encoder only (`openai/clip-vit-base-patch32`, 512-dim, ~180MB)
 - Deployment: `deploy/setup_server.sh` automates full Debian server setup; `deploy/spaitra.service` for systemd
+- Debug endpoints: /debug/state, /debug/echo, /debug/image, /debug/db, /debug/logs, /debug/test-remember, /debug/test-scan, /debug/wipe (selective), /debug/config (live settings patch)
 
 ---
 
 ## TODO
 
 ### Engine / Architecture
-- [] Remove redact receipts, uneeded, using receipts with no personal info
+- [ ] Remove redact_receipt.py - not needed, using receipts with no personal info
 - [ ] Run full benchmark - 120 images not yet captured; see `benchmarks/CAPTURE_GUIDE.md` (~1-2 hrs)
 - [ ] Add batched OCR service endpoint support and wire it into pipeline OCR paths to reduce HTTP overhead on multi-crop scans
 - [ ] Wire `detect_all_batch()` into ScanPipeline when processing multiple images per request
@@ -656,12 +659,13 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - [ ] CLI trainer (`python -m visual_memory.learning.trainer`) still reads from legacy `feedback/` dir; update to accept a `--db-path` arg that reads from SQLite feedback table instead
 
 ### Deployment
-- [ ] `scans/` crop save directory is lazily created relative to CWD; should come from a config value or env var for production (write permission not guaranteed in containers)
+- [ ] `scans/` crop save directory path is hardcoded relative to source; move to a settings.py / env var so it points to a writable location in containers
 - [ ] Add a systemd unit for the OCR microservice and a startup health check dependency
 
 ### API
-- [] Add optional OCR service health probe endpoint in backend startup checks
-- [] Have fast mode in settings disable second pass detection in remember mode
+- [x] OCR service health probe - covered by GET /debug/state (checks OCR health on demand); startup check not wired but `/debug/state` gives the same information on request
+- [ ] Have fast mode in settings disable second pass detection in remember mode
+- [ ] `PATCH /debug/config` changes are not persisted - by design for a debug tool, but could be useful for persisting arbitrary threshold changes; consider adding a `persist: true` flag that calls `save_ml_settings()` after applying
 
 ---
 
@@ -682,12 +686,6 @@ All server-transition items are complete as of March 2026.
 - **Bloat Prevention** - Duplicate entry detection, pruning unused entries, user confirmation before overwriting similar embeddings.
 - **HNSW index** - Marginal benefit below ~10k entries; defer until scale requires it.
 - **Pipeline batching** - ScanPipeline can call `batch_embed()` and `detect_all_batch()` instead of per-crop loops for full GPU utilization on the server.
--   One thing to watch: the scans/ dir is created lazily on first scan result. If
-  the server doesn't have write permission at that path (e.g. read-only
-  container), the crop save will throw and bubble up through the route. For
-  production that directory path should come from a config value (env var or
-  settings.py) pointing to a writable location, not hardcoded relative to the
-  source file.
 
 ---
 
