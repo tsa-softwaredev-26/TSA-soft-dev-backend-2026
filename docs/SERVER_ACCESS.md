@@ -1,11 +1,11 @@
 # Server Access Guide
 
-Quick reference for Spaitra backend team members: how to reach the server, run
+Quick reference for Spaitra team members: how to reach the server, run
 the API, and integrate from the frontend.
 
 ---
 
-## 1. Server info
+## 1. Server info (self-hosted on a desktop, should migrate later)
 
 | Item | Value |
 |------|-------|
@@ -29,7 +29,7 @@ You need to be on the Tailscale VPN to reach the server directly.
 # Run: sudo tailscale up
 
 # Then SSH in (replace <yourname> with your server account):
-ssh <yourname>@100.114.39.23
+ssh dev@100.114.39.23
 
 # Example for the dev account:
 ssh dev@100.114.39.23
@@ -209,7 +209,7 @@ curl -X POST "$BASE/retrain" -H "X-API-Key: $KEY"
 
 ---
 
-## 6. Debug endpoints (backend devs only)
+## 6. Debug endpoints 
 
 These require the API key and are useful for verifying the running state of the
 server.
@@ -258,4 +258,4 @@ sudo systemctl restart spaitra-core
 ```
 
 No migration step is needed for most changes. If `settings.py` or the DB
-schema changed, check `DEPLOY.md → Troubleshooting` before restarting.
+schema changed, check `DEPLOY.md - Troubleshooting` before restarting.
