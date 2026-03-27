@@ -1,0 +1,18 @@
+[Unit]
+Description=Spaitra OCR service
+After=network.target
+
+[Service]
+Type=simple
+User=spaitra
+Group=spaitra
+WorkingDirectory=/opt/spaitra
+EnvironmentFile=/opt/spaitra/.ocr.env
+ExecStart=/opt/spaitra/venv-ocr/bin/python -m services.ocr.run
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

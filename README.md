@@ -1,86 +1,137 @@
 # Spaitra Backend
 
-Visual memory backend for the Spaitra iOS app. Teaches the system to recognize
-objects, then scans scenes to find them and report distance + direction.
+Spaitra is split into two runtime services:
 
----
+- `services/core`: the main backend API with Torch-based detection, embedding, depth, and retrieval pipelines
+- `services/ocr`: a separate PaddleOCR HTTP microservice
+
+Shared application code stays in `src/visual_memory`.
+
+## Repository Layout
+
+```text
+services/
+  core/   core runtime entrypoints
+  ocr/    OCR runtime entrypoints
+src/visual_memory/
+  shared package used by the core backend
+deploy/
+  Debian systemd units and env templates
+```
+
+## Dependency Model
+
+- Core environment: install `.[core]`
+- OCR environment: install `.[ocr]`
+- Shared package only: base `pip install -e .`
+
+The core backend does not require `paddleocr` or `paddlepaddle`. The OCR service does not require Torch model packages unless you choose to install them separately.
 
 ## Local Development
 
-For running tests and iterating on models locally (Mac or Linux workstation).
-Does not require a GPU - MPS (Apple Silicon) or CPU works.
-
-**Prerequisites:**
-- Python >= 3.10
-- HuggingFace account with access to both gated models (request access before cloning):
-  - [IDEA-Research/grounding-dino-base](https://huggingface.co/IDEA-Research/grounding-dino-base)
-  - [facebook/dinov3-vitl16-pretrain-lvd1689m](https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m)
-- `gh` CLI installed and authenticated (`gh auth login`)
+### 1. Clone the repo
 
 ```bash
 gh repo clone tsa-softwaredev-26/TSA-soft-dev-backend-2026
 cd TSA-soft-dev-backend-2026
-python -m venv venv
-source venv/bin/activate
-pip install -e .
+```
+
+### 2. Create the core environment
+
+```bash
+python3 -m venv .venv-core
+source .venv-core/bin/activate
+pip install -e ".[core]"
 hf auth login
 python setup_weights.py
 ```
 
-Models download on first run (~5GB total, 10-30 min). Subsequent runs load from cache.
+Use the core environment for the Flask API, model tests, and weight download.
 
-To run the API locally:
+### 3. Create the OCR environment
+
 ```bash
-python src/visual_memory/api/run.py
-# Starts Flask on 127.0.0.1:5000
+python3 -m venv .venv-ocr
+source .venv-ocr/bin/activate
+pip install -e ".[ocr]"
 ```
 
----
+### 4. Run the OCR service
 
-## Server Deployment
-
-For the production Flask/gunicorn API on a Debian server with optional GPU.
-See [DEPLOY.md](DEPLOY.md) for full step-by-step instructions.
-
-**Requirements:**
-- Debian 12 (Bookworm) or 13 (Trixie)
-- NVIDIA GPU with >=8GB VRAM recommended (CUDA 11.8 or 12.x)
-- CPU-only is supported; OCR runs in an external service configured via `OCR_SERVICE_URL`
-
-Key steps: install system packages, set up SSH deploy key or PAT for GitHub access,
-create a `spaitra` service user, install dependencies, configure `.env`, install the
-systemd service, and run a srv.us tunnel for public HTTPS access.
-
----
-
-## Running Tests
+In one shell:
 
 ```bash
-# Full integration test - run after any engine or pipeline change
+source .venv-ocr/bin/activate
+python -m services.ocr.run
+```
+
+Default OCR address: `http://127.0.0.1:8001/ocr`
+
+### 5. Run the core backend
+
+In a second shell:
+
+```bash
+source .venv-core/bin/activate
+export OCR_SERVICE_URL=http://127.0.0.1:8001/ocr
+python -m services.core.run
+```
+
+Default core address: `http://127.0.0.1:5000`
+
+### 6. Verify service-to-service communication
+
+```bash
+curl http://127.0.0.1:8001/health
+curl http://127.0.0.1:5000/health
+curl -X POST -F image=@src/visual_memory/tests/text_demo/typed.jpeg \
+  http://127.0.0.1:8001/ocr
+```
+
+If you disable OCR in the core backend, the API still runs:
+
+```bash
+ENABLE_OCR=0 python -m services.core.run
+```
+
+## Production-Style Local Run
+
+Core backend with gunicorn:
+
+```bash
+source .venv-core/bin/activate
+gunicorn -w 1 -b 127.0.0.1:5000 services.core.wsgi:application
+```
+
+OCR service with uvicorn:
+
+```bash
+source .venv-ocr/bin/activate
+uvicorn services.ocr.app:app --host 127.0.0.1 --port 8001
+```
+
+## Tests
+
+Run core integration tests from the core environment:
+
+```bash
+source .venv-core/bin/activate
 python -m visual_memory.tests.scripts.run_tests
-
-# Show OCR text vs ground truth
 VERBOSE=1 python -m visual_memory.tests.scripts.run_tests
-
-# CPU-only tests (no model loading, run any time)
 python -m visual_memory.tests.scripts.test_projection_head
 python -m visual_memory.tests.scripts.test_scan_batching
 ```
 
-First run loads all models (~2-3 min). Tests 3 and 4 reuse model instances from
-test 2, so the full suite is faster than loading each separately.
+OCR-related tests require the OCR service to be reachable at `OCR_SERVICE_URL`.
 
----
+## Deployment
 
-## Modes
+Use [DEPLOY.md](DEPLOY.md) for the Debian production setup with:
 
-- **Teach Mode** - detect and store an object from a photo + text label
-- **Scan Mode** - find all remembered objects in a new scene, return distance + direction
-- **Ask Mode** - query where a known object was last seen
-
----
+- isolated `venv-core` and `venv-ocr`
+- `spaitra-core.service` and `spaitra-ocr.service`
+- step-by-step environment and verification commands
 
 ## Architecture
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for module layout, pipeline internals,
-API contract, and tuning reference.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for pipeline internals and package structure.

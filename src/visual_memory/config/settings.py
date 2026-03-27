@@ -92,5 +92,5 @@ class Settings:
     db_path: str = "data/memory.db"
 
     # API server
-    api_host: str = "127.0.0.1"
-    api_port: int = 5000
+    api_host: str = field(default_factory=lambda: os.environ.get("API_HOST", "127.0.0.1"))
+    api_port: int = field(default_factory=lambda: int(os.environ.get("API_PORT", "5000")))

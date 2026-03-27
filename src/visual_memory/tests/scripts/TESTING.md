@@ -3,7 +3,7 @@
 ## Quick start
 
 ```bash
-# Full test suite (all models, ~15-20 min due to PaddleOCR on 6 DB images)
+# Full test suite (all core models, plus OCR HTTP calls when ENABLE_OCR=1)
 python -m visual_memory.tests.scripts.run_tests
 
 # Fast mode - skips scan OCR; 2 OCR calls total (~3-5 min)
@@ -27,7 +27,7 @@ Run all commands from project root.
 
 ### Test 1 - RememberPipeline
 - Input: `input_images/wallet_1ft_table.jpg`, prompt `"small rectangular wallet"`
-- Runs: GroundingDINO detect + DINOv3 embed + PaddleOCR (wallet crop, usually no text)
+- Runs: GroundingDINO detect + DINOv3 embed + OCR HTTP call (wallet crop, usually no text)
 - Pass: detection returns a box and label
 
 ### Test 2 - ScanPipeline
@@ -43,8 +43,8 @@ Run all commands from project root.
 
 ### Test 4 - TextRecognizer + CLIPTextEmbedder
 - Input: `input_images/magnesium.heic` (supplement label with readable text)
-- Runs: PaddleOCR recognize + CLIP text embed
-- `FAST=1`: reuses the PaddleOCR instance loaded by Test 1 (no extra model load)
+- Runs: OCR HTTP recognize + CLIP text embed
+- `FAST=1`: still requires the OCR service for the remaining OCR call
 - Pass: valid OCR result dict + embedding shape `(1, 512)`
 
 ---

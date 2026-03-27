@@ -1,5 +1,5 @@
 """
-Run once after `pip install -e .` to download all model weights.
+Run once inside the core backend environment after `pip install -e ".[core]"`.
 
     python setup_weights.py
 
