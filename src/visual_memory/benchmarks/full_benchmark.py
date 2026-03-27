@@ -35,6 +35,7 @@ except ImportError:
 from visual_memory.config import Settings
 from visual_memory.engine.embedding import make_combined_embedding
 from visual_memory.engine.model_registry import registry
+from visual_memory.engine.text_recognition import TextRecognizer
 from visual_memory.learning import ProjectionHead, ProjectionTrainer
 from visual_memory.utils.image_utils import load_image
 from visual_memory.utils.similarity_utils import find_match
@@ -102,6 +103,7 @@ def _embed_rows(
     no_ocr: bool,
 ) -> Dict[str, dict]:
     embedded: Dict[str, dict] = {}
+    ocr_client = TextRecognizer() if not no_ocr else None
     n = len(rows)
     for i, row in enumerate(rows):
         fname = row["image"]
@@ -118,10 +120,11 @@ def _embed_rows(
 
         text_emb = None
         lat_ocr = lat_txt = 0.0
-        if not no_ocr:
+        if ocr_client is not None:
             t0 = time.perf_counter()
-            text = registry.text_recognizer.recognize(img)
+            ocr = ocr_client.recognize(img)
             lat_ocr = time.perf_counter() - t0
+            text = ocr.get("text", "")
             if text and text.strip():
                 t0 = time.perf_counter()
                 text_emb = registry.text_embedder.embed_text(text)

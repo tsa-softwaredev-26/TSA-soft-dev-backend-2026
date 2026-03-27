@@ -1,12 +1,11 @@
-"""Text recognition engine — factory returns the active PaddleOCR backend."""
+"""Text recognition engine factory."""
 
 from .base import BaseTextRecognizer
-from .paddle_recognizer import PaddleOCRRecognizer
+from .http_recognizer import HTTPOCRRecognizer
 
 
 def make_recognizer() -> BaseTextRecognizer:
-    return PaddleOCRRecognizer()
+    return HTTPOCRRecognizer()
 
 
-# Pipelines do: self.text_recognizer = TextRecognizer()
 TextRecognizer = make_recognizer

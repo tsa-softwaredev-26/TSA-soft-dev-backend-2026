@@ -57,9 +57,11 @@ class Settings:
     ocr_text_likelihood_threshold: float = 0.10
 
     # OCR (text recognition)
-    ocr_backend: str = "paddle"
+    ocr_backend: str = "http"
     ocr_languages: list = field(default_factory=lambda: ["en"])
     ocr_min_confidence: float = 0.3
+    ocr_service_url: str = field(default_factory=lambda: os.environ.get("OCR_SERVICE_URL", "http://127.0.0.1:8001/ocr"))
+    ocr_timeout_seconds: float = field(default_factory=lambda: float(os.environ.get("OCR_TIMEOUT_SECONDS", "10.0")))
 
     # Text similarity (CLIP text embeddings)
     text_similarity_threshold: float = 0.4

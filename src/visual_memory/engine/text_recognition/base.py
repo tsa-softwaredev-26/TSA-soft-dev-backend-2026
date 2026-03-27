@@ -11,7 +11,7 @@ class BaseTextRecognizer(ABC):
 
         Returns:
             dict with keys:
-                "text": str — all recognized text joined with spaces
-                "confidence": float — average confidence across accepted segments
+                "text": str - all recognized text joined with spaces
+                "confidence": float - average confidence across accepted segments
                 "segments": list of (text, confidence) tuples
         """

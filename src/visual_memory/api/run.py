@@ -10,7 +10,7 @@
 #      pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 #      # CPU-only fallback (no GPU): pip install torch torchvision
 #
-#   2. Install GPU PyTorch + PaddlePaddle (auto-detects CUDA version):
+#   2. Install GPU PyTorch (auto-detects CUDA version):
 #      bash deploy/install_gpu_deps.sh
 #      # CPU-only: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 #
@@ -37,7 +37,8 @@
 # --- Environment variables ---
 #   API_KEY=<secret>   enforce X-API-Key header on all routes except /health
 #   ENABLE_DEPTH=0     skip Depth Pro (saves ~2GB VRAM; recommended if no GPU)
-#   ENABLE_OCR=0       skip PaddleOCR (faster startup, no text recognition)
+#   ENABLE_OCR=0       skip OCR calls (faster startup, no text recognition)
+#   OCR_SERVICE_URL    OCR microservice endpoint (default http://127.0.0.1:8001/ocr)
 #   ENABLE_LEARNING=0  disable projection head (raw embeddings only)
 #
 # --- Direct gunicorn invocation (no systemd) ---
