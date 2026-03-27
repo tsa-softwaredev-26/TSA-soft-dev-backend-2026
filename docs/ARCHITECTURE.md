@@ -173,6 +173,7 @@ src/visual_memory/
 │       ├── find.py                     # GET /find - last-seen location query (Ask Mode)
 │       ├── items.py                    # GET /items, DELETE /items/<label>, POST /items/<label>/rename
 │       ├── sightings.py               # POST /sightings - user-confirmed location update
+│       ├── crop.py                    # GET /crop - fetch cropped image from cached scan
 │       └── debug.py                   # GET /debug/state, POST /debug/echo, POST /debug/image, GET /debug/db, GET /debug/logs, GET /debug/test-remember, GET /debug/test-scan, POST /debug/wipe, PATCH /debug/config
 └── tests/                             # Test scripts + test data
     ├── scripts/                        # Runnable .py test scripts

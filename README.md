@@ -126,7 +126,7 @@ OCR-related tests require the OCR service to be reachable at `OCR_SERVICE_URL`.
 
 ## Deployment
 
-Use [DEPLOY.md](DEPLOY.md) for the Debian production setup with:
+Use [DEPLOY.md](docs/DEPLOY.md) for the Debian production setup with:
 
 - isolated `venv-core` and `venv-ocr`
 - `spaitra-core.service` and `spaitra-ocr.service`
@@ -134,4 +134,4 @@ Use [DEPLOY.md](DEPLOY.md) for the Debian production setup with:
 
 ## Architecture
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for pipeline internals and package structure.
+See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for pipeline internals and package structure.
