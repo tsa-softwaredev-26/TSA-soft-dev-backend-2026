@@ -24,17 +24,10 @@ dependencies = [
     "easydict",
     # Depth estimation (Apple Depth Pro)
     "depth-pro @ git+https://github.com/apple/ml-depth-pro.git",
-    # OCR
-    "paddleocr>=3.2.0",
     # API server
     "flask>=3.0.0",
     "gunicorn>=21.0.0",
 ]
-
-# Note: paddlepaddle (CPU) is installed by pip install -e .
-# For GPU servers, replace it after install:
-#   pip install paddlepaddle-gpu>=3.1.0        (CUDA 11.x)
-#   pip install paddlepaddle-gpu>=3.1.0.post120 (CUDA 12.x)
 
 [project.scripts]
 remember-mode = "visual_memory.pipelines.remember_mode.main:main"
