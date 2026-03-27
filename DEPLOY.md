@@ -67,9 +67,18 @@ cd /opt/spaitra
 gh repo clone tsa-softwaredev-26/TSA-soft-dev-backend-2026 .
 ```
 
+> **Note — subdirectory layout:** Both clone commands above use a trailing `.` to place
+> the repo directly in `/opt/spaitra/`. If you omit the `.` (or clone via a GUI), the
+> repo lands at `/opt/spaitra/TSA-soft-dev-backend-2026/`. In that case all paths in the
+> steps below shift by one level: create venvs inside the repo dir, set
+> `WorkingDirectory` in the service files to that subdir, and update the `ExecStart`
+> venv paths accordingly. The service files in `deploy/` assume the flat layout; the
+> installed files under `/etc/systemd/system/` on this server use the subdirectory layout.
+
 ## 4. Create two isolated Python environments
 
-All commands below run as the `spaitra` user inside `/opt/spaitra`.
+All commands below run as the `spaitra` user inside `/opt/spaitra` (or the repo subdir
+if you used the subdirectory layout).
 
 ### Core backend environment
 
