@@ -362,6 +362,8 @@ def debug_patch_config():
             "settable_fields": {k: t.__name__ for k, t in _SETTABLE_TYPES.items()}
         })
 
+    persist = bool(data.pop("persist", False))
+
     errors = {}
     applied = {}
     for key, value in data.items():
@@ -397,7 +399,17 @@ def debug_patch_config():
     if "projection_head_weight" in applied or "projection_head_ramp_at" in applied:
         pipeline.set_head_weight(s.projection_head_weight, s.projection_head_ramp_at)
 
+    if persist:
+        import dataclasses as _dc
+        snapshot = {
+            f.name: getattr(s, f.name)
+            for f in _dc.fields(s)
+            if isinstance(getattr(s, f.name), (bool, int, float, str))
+        }
+        get_database().save_ml_settings(snapshot)
+
     return jsonify({
         "applied": applied,
-        "note": "in-memory only - not persisted across restarts. For ML fields use PATCH /settings.",
+        "persisted": persist,
+        "note": "in-memory only unless persist=true. For ML fields use PATCH /settings.",
     })
