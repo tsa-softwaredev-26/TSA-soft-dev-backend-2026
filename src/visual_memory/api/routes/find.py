@@ -1,3 +1,4 @@
+import re
 import time
 from typing import Optional
 
@@ -6,6 +7,12 @@ from flask import Blueprint, request, jsonify
 from visual_memory.api.pipelines import get_database
 
 find_bp = Blueprint("find", __name__)
+
+_ROOM_PREFIX = re.compile(r"^(in (the|my) |the |my )", re.IGNORECASE)
+
+
+def _normalize_room(name: str) -> str:
+    return _ROOM_PREFIX.sub("", name.strip()).strip().lower() or ""
 
 
 def _format_sighting(row: dict) -> dict:
@@ -28,12 +35,41 @@ def _format_sighting(row: dict) -> dict:
     return out
 
 
-def _fuzzy_label_match(query: str, threshold: float) -> list[str]:
-    """Return known labels whose text embedding is within `threshold` of the query.
+def build_narration(label: str, sighting: dict) -> str:
+    """Build a spoken narration string from a sighting dict.
 
-    Uses stored label embeddings from DB when available; falls back to
-    embedding on the fly for labels that predate the label_embedding column.
+    Examples:
+        "Your wallet is in the kitchen, to your left. Last seen 5 minutes ago."
+        "Your wallet is to your left, 2.3 feet away. Last seen just now."
+        "Your wallet was last seen 3 days ago."
     """
+    parts = []
+    room = sighting.get("room_name")
+    direction = sighting.get("direction")
+    distance = sighting.get("distance_ft")
+    last_seen = sighting.get("last_seen", "some time ago")
+
+    location_parts = []
+    if room:
+        location_parts.append(f"in the {room}")
+    if direction:
+        if distance:
+            location_parts.append(f"{direction}, {distance:.1f} feet away")
+        else:
+            location_parts.append(direction)
+
+    if location_parts:
+        parts.append(f"Your {label} is {', '.join(location_parts)}.")
+    else:
+        parts.append(f"Your {label} was last seen {last_seen}.")
+        return " ".join(parts)
+
+    parts.append(f"Last seen {last_seen}.")
+    return " ".join(parts)
+
+
+def _fuzzy_label_match(query: str, threshold: float) -> list[str]:
+    """Return known labels whose text embedding is within `threshold` of the query."""
     from visual_memory.api.pipelines import get_scan_pipeline
     from visual_memory.utils.similarity_utils import cosine_similarity
 
@@ -44,7 +80,6 @@ def _fuzzy_label_match(query: str, threshold: float) -> list[str]:
 
     query_emb = pipeline.text_embedder.embed_text(query)
 
-    # Build label -> embedding map; stored embeddings take priority
     stored = {row["label"]: row["embedding"] for row in db.get_label_embeddings()}
     all_labels = db.get_known_labels()
     label_embs: dict[str, object] = {}
@@ -66,8 +101,39 @@ def _fuzzy_label_match(query: str, threshold: float) -> list[str]:
     return [lbl for lbl, _ in matched]
 
 
+def _ocr_content_match(query: str, threshold: float) -> Optional[str]:
+    """Search OCR text of all taught items for semantic match.
+
+    Embeds the query and compares against the OCR text of every item that has
+    one. Returns the best-matching label above threshold, or None.
+    """
+    from visual_memory.api.pipelines import get_scan_pipeline
+    from visual_memory.utils.similarity_utils import cosine_similarity
+
+    db = get_database()
+    pipeline = get_scan_pipeline()
+    if pipeline.text_embedder is None:
+        return None
+
+    items = db.get_items_with_ocr()
+    if not items:
+        return None
+
+    query_emb = pipeline.text_embedder.embed_text(query)
+
+    best_label: Optional[str] = None
+    best_sim = -1.0
+    for item in items:
+        ocr_emb = pipeline.text_embedder.embed_text(item["ocr_text"])
+        sim = cosine_similarity(query_emb, ocr_emb).item()
+        if sim >= threshold and sim > best_sim:
+            best_sim = sim
+            best_label = item["label"]
+
+    return best_label
+
+
 def _parse_float_param(value: str, name: str):
-    """Parse a float query param; return (float, None) or (None, error response)."""
     try:
         return float(value), None
     except ValueError:
@@ -78,6 +144,7 @@ def _parse_float_param(value: str, name: str):
 @find_bp.get("/find")
 def find():
     label = request.args.get("label", "").strip()
+    room_raw = request.args.get("room", "").strip()
     limit_raw = request.args.get("limit", "1").strip()
     since_raw = request.args.get("since", "").strip()
     before_raw = request.args.get("before", "").strip()
@@ -103,38 +170,65 @@ def find():
 
     db = get_database()
 
+    # ---- room query: list all items last seen in a room ----
+    if room_raw and not label:
+        room = _normalize_room(room_raw)
+        rows = db.get_labels_last_seen_in_room(room)
+        results = [_format_sighting(r) for r in rows]
+        for s in results:
+            s["narration"] = build_narration(s["label"], s)
+        return jsonify({"room": room, "results": results, "count": len(results)})
+
+    # ---- list all known items (no label, no room) ----
     if not label:
         labels = db.get_known_labels()
         results = []
         for lbl in labels:
             row = db.get_last_sighting(lbl)
             if row:
-                results.append(_format_sighting(row))
+                s = _format_sighting(row)
+                s["narration"] = build_narration(lbl, s)
+                results.append(s)
         return jsonify({"results": results, "count": len(results)})
 
+    # ---- label lookup ----
     rows = db.get_sightings(label=label, limit=limit, since=since, before=before)
 
     fuzzy_matched: Optional[str] = None
+    ocr_matched: Optional[str] = None
+
     if not rows:
         from visual_memory.api.pipelines import get_settings
         settings = get_settings()
         candidates = _fuzzy_label_match(label, settings.text_similarity_threshold)
         if candidates:
             fuzzy_matched = candidates[0]
-            rows = db.get_sightings(
-                label=fuzzy_matched, limit=limit, since=since, before=before
-            )
+            rows = db.get_sightings(label=fuzzy_matched, limit=limit, since=since, before=before)
+
+    # ---- OCR content fallback ----
+    if not rows:
+        from visual_memory.api.pipelines import get_settings
+        settings = get_settings()
+        ocr_matched = _ocr_content_match(label, settings.text_similarity_threshold)
+        if ocr_matched:
+            rows = db.get_sightings(label=ocr_matched, limit=limit, since=since, before=before)
 
     if not rows:
         return jsonify({"label": label, "found": False, "sightings": []})
 
+    resolved_label = ocr_matched or fuzzy_matched or label
     sightings = [_format_sighting(r) for r in rows]
     out = {
         "label": label,
         "found": True,
         "last_sighting": sightings[0],
+        "narration": build_narration(resolved_label, sightings[0]),
         "sightings": sightings,
     }
     if fuzzy_matched is not None:
         out["matched_label"] = fuzzy_matched
+        out["matched_by"] = "fuzzy_label"
+    if ocr_matched is not None:
+        out["matched_label"] = ocr_matched
+        out["matched_by"] = "ocr"
     return jsonify(out)
