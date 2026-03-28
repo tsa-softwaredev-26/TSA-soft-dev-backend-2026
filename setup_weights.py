@@ -9,9 +9,13 @@ Downloads:
   - CLIP text encoder (~180MB)     -> HuggingFace cache
   - DINOv3 ViT-S/16 (~1.2GB)      -> HuggingFace cache  [requires HF login]
   - GroundingDINO base (~900MB)    -> HuggingFace cache  [requires HF login]
+  - llama3.2:1b (~1.3GB)          -> Ollama model store  [requires Ollama daemon]
 
 Gated models require accepting the license on huggingface.co and running:
     hf auth login
+
+Ollama daemon must be installed separately (free, one-time):
+    curl -fsSL https://ollama.com/install.sh | sh
 """
 import sys
 import urllib.request
@@ -33,6 +37,7 @@ YOLOE_FILE = "yoloe-26l-seg-pf.pt"
 CLIP_MODEL = "openai/clip-vit-base-patch32"
 DINOV3_MODEL = "facebook/dinov3-vits16-pretrain-lvd1689m"
 GDINO_MODEL = "IDEA-Research/grounding-dino-base"
+OLLAMA_MODEL = "llama3.2:1b"
 
 
 def _check_hf_auth():
@@ -102,6 +107,37 @@ def _download_hf_model(repo_id: str, size_hint: str, gated: bool = False):
         sys.exit(1)
 
 
+def _pull_ollama_model():
+    """Pull the Ollama LLM used by /ask and /item/ask.
+
+    Skips silently if Ollama is not installed — the API degrades gracefully
+    without it (falls back to pure embedding search).
+    """
+    import shutil
+    import subprocess
+
+    if not shutil.which("ollama"):
+        print(
+            "  Ollama not found. Install it first:\n"
+            "    curl -fsSL https://ollama.com/install.sh | sh\n"
+            "  Then re-run: python setup_weights.py\n"
+            "  The API works without Ollama but /ask and /item/ask will use\n"
+            "  embedding-only search (no natural language query parsing)."
+        )
+        return
+
+    try:
+        result = subprocess.run(
+            ["ollama", "pull", OLLAMA_MODEL],
+            capture_output=False,
+            check=True,
+        )
+        _ = result  # pull prints its own progress
+        print(f"  -> {OLLAMA_MODEL} ready")
+    except subprocess.CalledProcessError as exc:
+        print(f"  WARNING: ollama pull failed: {exc}\n  The API will degrade to embedding-only search.")
+
+
 def main():
     print("=== Spaitra weight setup ===\n")
 
@@ -111,20 +147,23 @@ def main():
             "  Run `hf auth login` before this script.\n"
         )
 
-    print("[1/5] Depth Pro checkpoint")
+    print("[1/6] Depth Pro checkpoint")
     _download_depth_pro()
 
-    print("[2/5] YOLOE detection weights")
+    print("[2/6] YOLOE detection weights")
     _download_yoloe()
 
-    print("[3/5] CLIP text encoder")
+    print("[3/6] CLIP text encoder")
     _download_hf_model(CLIP_MODEL, "~180MB")
 
-    print("[4/5] DINOv3 image embedder  [gated]")
+    print("[4/6] DINOv3 image embedder  [gated]")
     _download_hf_model(DINOV3_MODEL, "~1.2GB", gated=True)
 
-    print("[5/5] GroundingDINO detector  [gated]")
+    print("[5/6] GroundingDINO detector  [gated]")
     _download_hf_model(GDINO_MODEL, "~900MB", gated=True)
+
+    print("[6/6] Ollama LLM (llama3.2:1b) for /ask and /item/ask")
+    _pull_ollama_model()
 
     print("\nAll weights downloaded. First startup will be fast.")
 

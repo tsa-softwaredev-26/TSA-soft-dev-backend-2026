@@ -27,6 +27,7 @@ core = [
     "depth-pro @ git+https://github.com/apple/ml-depth-pro.git",
     "flask>=3.0.0",
     "gunicorn>=21.0.0",
+    "ollama>=0.3.0",
 ]
 ocr = [
     "fastapi>=0.110.0",
