@@ -55,9 +55,10 @@ checkpoints/
 models/
 weights/
 
-# Personalization feedback data
+# Local data
 feedback/
 scans/
+data/
 
 # Logs
 logs/
