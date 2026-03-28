@@ -96,6 +96,15 @@ class Settings:
     # training epochs for each /retrain call
     projection_head_epochs: int = 20
 
+    # Ollama LLM (used by /ask and /item/ask for query parsing, and remember mode
+    # enhanced second-pass detection prompt generation)
+    # ollama_max_retries: number of times to retry a failed Ollama call before
+    # falling back to embedding-only search or keyword matching.
+    ollama_max_retries: int = 2
+    # ollama_detection_retries: number of LLM-suggested prompts to try in remember
+    # mode when all _SECOND_PASS_TEMPLATES also fail (Ollama-enhanced third pass).
+    ollama_detection_retries: int = 2
+
     # Database
     db_path: str = "data/memory.db"
 
