@@ -1,7 +1,11 @@
 from __future__ import annotations
+import time
 from visual_memory.config import Settings
+from visual_memory.utils.logger import get_logger, LogTag
+from visual_memory.utils.metrics import collect_system_metrics
 
 _settings = Settings()
+_log = get_logger(__name__)
 
 
 class ModelRegistry:
@@ -60,13 +64,25 @@ class ModelRegistry:
         import torch
         if not _settings.save_vram or not torch.cuda.is_available():
             return
+        t0 = time.monotonic()
+        offloaded = []
         if self._yoloe_detector is not None:
             self._yoloe_detector.to_cpu()
+            offloaded.append("yoloe")
         if self._depth_estimator is not None:
             self._depth_estimator.to_cpu()
+            offloaded.append("depth")
         torch.cuda.empty_cache()
         if self._gdino_detector is not None:
             self._gdino_detector.to_gpu()
+        _log.info({
+            "event": "vram_layout",
+            "tag": LogTag.VRAM,
+            "mode": "remember",
+            "offloaded": offloaded,
+            "duration_ms": round((time.monotonic() - t0) * 1000),
+            **collect_system_metrics(),
+        })
 
     def prepare_for_scan(self) -> None:
         """Offload remember-only models to CPU; ensure scan models are on GPU.
@@ -77,13 +93,24 @@ class ModelRegistry:
         import torch
         if not _settings.save_vram or not torch.cuda.is_available():
             return
+        t0 = time.monotonic()
+        offloaded = []
         if self._gdino_detector is not None:
             self._gdino_detector.to_cpu()
+            offloaded.append("gdino")
         torch.cuda.empty_cache()
         if self._yoloe_detector is not None:
             self._yoloe_detector.to_gpu()
         if self._depth_estimator is not None and _settings.enable_depth:
             self._depth_estimator.to_gpu()
+        _log.info({
+            "event": "vram_layout",
+            "tag": LogTag.VRAM,
+            "mode": "scan",
+            "offloaded": offloaded,
+            "duration_ms": round((time.monotonic() - t0) * 1000),
+            **collect_system_metrics(),
+        })
 
     def preload(self, depth: bool = False) -> None:
         # Eagerly load all models. Call at Flask startup to avoid first-request latency.

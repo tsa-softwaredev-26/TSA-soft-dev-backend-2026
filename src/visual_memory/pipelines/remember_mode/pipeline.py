@@ -7,7 +7,8 @@ import pillow_heif
 from PIL import Image
 
 from visual_memory.config import Settings
-from visual_memory.utils import load_image, crop_object, get_logger, mean_luminance, estimate_text_likelihood
+from visual_memory.utils import load_image, crop_object, get_logger, mean_luminance, estimate_text_likelihood, collect_system_metrics
+from visual_memory.utils.logger import LogTag
 from visual_memory.engine.embedding import make_combined_embedding
 from visual_memory.engine.model_registry import registry
 from visual_memory.engine.text_recognition import TextRecognizer
@@ -106,14 +107,20 @@ class RememberPipeline:
         self.db = DatabaseStore(Path(_settings.db_path))
 
     def add_to_database(self, embedding, metadata):
+        ocr_text = metadata.get("ocr_text", "")
+        ocr_embedding = None
+        if ocr_text and self.text_embedder is not None:
+            ocr_embedding = self.text_embedder.embed_text(ocr_text)
+
         self.db.add_item(
             label=metadata["label"],
             combined_embedding=embedding,
-            ocr_text=metadata.get("ocr_text", ""),
+            ocr_text=ocr_text,
             image_path=metadata.get("image_path", ""),
             confidence=metadata.get("confidence", 0.0),
             timestamp=time.time(),
             label_embedding=metadata.get("label_embedding"),
+            ocr_embedding=ocr_embedding,
         )
 
     def _detect_with_fallback(self, image: Image.Image, prompt: str):
@@ -206,6 +213,7 @@ class RememberPipeline:
         prompt: text label from the user
         returns structured result dict
         """
+        t0 = time.time()
         registry.prepare_for_remember()
         image_path = Path(image_path)
         image = load_image(str(image_path))
@@ -213,6 +221,15 @@ class RememberPipeline:
         # Darkness check - must come before any detection attempt
         lum = mean_luminance(image)
         if lum < _settings.darkness_threshold:
+            _log.info({
+                "event": "remember_complete",
+                "tag": LogTag.PERF,
+                "success": False,
+                "reason": "dark",
+                "label": prompt,
+                "duration_ms": round((time.time() - t0) * 1000),
+                **collect_system_metrics(),
+            })
             return {
                 "success": False,
                 "message": "Image is too dark for detection. Enable the flashlight and retry.",
@@ -231,6 +248,15 @@ class RememberPipeline:
         detection, second_pass_prompt = self._detect_with_fallback(image, prompt)
 
         if not detection:
+            _log.info({
+                "event": "remember_complete",
+                "tag": LogTag.PERF,
+                "success": False,
+                "reason": "no_detection",
+                "label": prompt,
+                "duration_ms": round((time.time() - t0) * 1000),
+                **collect_system_metrics(),
+            })
             return {
                 "success": False,
                 "message": "No object detected.",
@@ -324,6 +350,16 @@ class RememberPipeline:
             "ocr_confidence": round(ocr_confidence, 4),
         }
 
+        _log.info({
+            "event": "remember_complete",
+            "tag": LogTag.PERF,
+            "success": True,
+            "label": label,
+            "detection_quality": quality,
+            "second_pass": second_pass_prompt is not None,
+            "duration_ms": round((time.time() - t0) * 1000),
+            **collect_system_metrics(),
+        })
         return {
             "success": True,
             "message": "Object detected and embedded successfully.",

@@ -1,55 +1,181 @@
-"""
-Structured JSON logging for VisualMemory.
+"""Structured JSON logging for VisualMemory.
+
+Two log files under logs/:
+  app.log       - all levels, rotated daily, 7-day retention
+  important.log - WARNING+ only, rotated weekly, 60-day retention
+  crash.log     - faulthandler + unhandled exceptions, never auto-deleted
 
 Usage:
     from visual_memory.utils import get_logger
     log = get_logger(__name__)
     log.info({"event": "similarity_check", "score": 0.24, "threshold": 0.3})
+    log.info({"event": "pipeline_done", "tag": LogTag.PERF, "duration_ms": 1200})
 
-Log file: logs/app.log (project root), JSON Lines format.
+Call setup_crash_handler() once at process startup (done in create_app).
 """
 import json
-import logging
+import sys
 from pathlib import Path
 
-_LOG_PATH = Path(__file__).resolve().parents[3] / "logs" / "app.log"
+from loguru import logger as _logger
+
+_LOG_DIR  = Path(__file__).resolve().parents[3] / "logs"
+_LOG_PATH = _LOG_DIR / "app.log"
+
+_logger.remove()  # remove default stderr sink
 
 
-class _JsonFormatter(logging.Formatter):
-    def format(self, record: logging.LogRecord) -> str:
-        payload = record.msg if isinstance(record.msg, dict) else {"message": record.msg}
-        return json.dumps({
-            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
-            "level": record.levelname,
-            "module": record.name,
-            **payload,
-        })
+class LogTag:
+    PERF      = "perf"
+    DETECTION = "detection"
+    LEARNING  = "learning"
+    API       = "api"
+    OCR       = "ocr"
+    VRAM      = "vram"
 
 
-def get_logger(name: str) -> logging.Logger:
-    logger = logging.getLogger(name)
-    if logger.handlers:
-        return logger  # already configured
-    logger.setLevel(logging.DEBUG)
-    _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    handler = logging.FileHandler(_LOG_PATH, encoding="utf-8")
-    handler.setFormatter(_JsonFormatter())
-    logger.addHandler(handler)
-    return logger
+class _SafeEncoder(json.JSONEncoder):
+    def default(self, obj):
+        try:
+            import numpy as np
+            if isinstance(obj, np.integer):  return int(obj)
+            if isinstance(obj, np.floating): return float(obj)
+            if isinstance(obj, np.ndarray):  return obj.tolist()
+        except ImportError:
+            pass
+        try:
+            import torch
+            if isinstance(obj, torch.Tensor): return obj.tolist()
+        except ImportError:
+            pass
+        return str(obj)
+
+
+def _json_format(record: dict) -> str:
+    """Serialize a loguru record to a JSON line."""
+    extra = record["extra"]
+    data: dict = {
+        "ts":     record["time"].strftime("%Y-%m-%dT%H:%M:%S"),
+        "level":  record["level"].name,
+        "module": extra.get("module", record["name"]),
+    }
+    for k, v in extra.items():
+        if k != "module":
+            data[k] = v
+    msg = record["message"]
+    if msg:
+        data.setdefault("message", msg)
+    exc = record["exception"]
+    if exc is not None:
+        import traceback
+        exc_type, exc_val, exc_tb = exc
+        if exc_type is not None:
+            data["exception"] = "".join(
+                traceback.format_exception(exc_type, exc_val, exc_tb)
+            )
+    return json.dumps(data, cls=_SafeEncoder) + "\n"
+
+
+def _configure_sinks() -> None:
+    _LOG_DIR.mkdir(parents=True, exist_ok=True)
+    _logger.add(
+        str(_LOG_PATH),
+        format=_json_format,
+        level="DEBUG",
+        rotation="1 day",
+        retention="7 days",
+        enqueue=True,
+    )
+    _logger.add(
+        str(_LOG_DIR / "important.log"),
+        format=_json_format,
+        filter=lambda record: record["level"].no >= _logger.level("WARNING").no,
+        level="WARNING",
+        rotation="1 week",
+        retention="60 days",
+        enqueue=True,
+    )
+
+
+_configure_sinks()
+
+
+class _BoundLogger:
+    """Thin wrapper around a loguru bound logger.
+
+    Accepts dicts as log messages (preserving the existing call-site convention):
+        log.info({"event": "scan_complete", "duration_ms": 1234})
+
+    All dict keys are merged as extra fields in the JSON output.
+    String messages are also accepted:
+        log.warning("something unexpected happened")
+    """
+
+    __slots__ = ("_log",)
+
+    def __init__(self, name: str):
+        self._log = _logger.bind(module=name)
+
+    def _emit(self, level: str, msg) -> None:
+        if isinstance(msg, dict):
+            getattr(self._log.bind(**msg), level)("")
+        else:
+            getattr(self._log, level)(msg)
+
+    def debug(self, msg)     -> None: self._emit("debug",    msg)
+    def info(self, msg)      -> None: self._emit("info",     msg)
+    def warning(self, msg)   -> None: self._emit("warning",  msg)
+    def error(self, msg)     -> None: self._emit("error",    msg)
+    def critical(self, msg)  -> None: self._emit("critical", msg)
+
+    def exception(self, msg) -> None:
+        """Log at ERROR level and attach the current exception traceback."""
+        if isinstance(msg, dict):
+            self._log.bind(**msg).exception("")
+        else:
+            self._log.exception(msg)
+
+
+def get_logger(name: str) -> _BoundLogger:
+    return _BoundLogger(name)
+
+
+def setup_crash_handler() -> None:
+    """Install faulthandler (C crashes) and sys.excepthook (Python exceptions).
+
+    Writes to logs/crash.log. Call once at process startup.
+    """
+    import faulthandler
+    crash_path = _LOG_DIR / "crash.log"
+    _LOG_DIR.mkdir(parents=True, exist_ok=True)
+    # faulthandler handles SIGSEGV, SIGBUS, stack overflow, etc.
+    faulthandler.enable(file=open(crash_path, "a"), all_threads=True)
+
+    _orig_hook = sys.excepthook
+
+    def _excepthook(exc_type, exc_val, exc_tb):
+        import datetime
+        import traceback
+        with open(crash_path, "a") as f:
+            f.write(f"\n--- CRASH {datetime.datetime.now().isoformat()} ---\n")
+            traceback.print_exception(exc_type, exc_val, exc_tb, file=f)
+        _logger.opt(exception=(exc_type, exc_val, exc_tb)).critical(
+            "Unhandled exception"
+        )
+        _orig_hook(exc_type, exc_val, exc_tb)
+
+    sys.excepthook = _excepthook
 
 
 def log_mark() -> int:
-    """Return current line count in app.log (0 if file absent). Use as a section bookmark."""
+    """Return current line count in app.log (0 if absent). Use as a section bookmark."""
     if not _LOG_PATH.exists():
         return 0
     return len(_LOG_PATH.read_text(encoding="utf-8").splitlines())
 
 
 def tail_logs(event: str | None = None, n: int = 50, since_line: int = 0) -> list[dict]:
-    """
-    Read the last n lines from app.log, optionally filtered by event type.
-    Returns list of parsed JSON dicts.
-    """
+    """Read last n lines from app.log, optionally filtered by event type."""
     if not _LOG_PATH.exists():
         return []
     all_lines = _LOG_PATH.read_text(encoding="utf-8").splitlines()

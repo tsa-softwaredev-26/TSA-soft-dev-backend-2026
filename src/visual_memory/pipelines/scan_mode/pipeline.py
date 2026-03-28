@@ -1,5 +1,6 @@
 from collections import OrderedDict
 from pathlib import Path
+import time
 import torch
 import torch.nn.functional as F
 from visual_memory.config import Settings
@@ -7,7 +8,8 @@ from visual_memory.engine.embedding import make_combined_embedding
 from visual_memory.engine.model_registry import registry
 from visual_memory.engine.text_recognition import TextRecognizer
 from visual_memory.learning import ProjectionHead
-from visual_memory.utils import crop_object, find_match, deduplicate_matches, get_logger, mean_luminance, estimate_text_likelihood
+from visual_memory.utils import crop_object, find_match, deduplicate_matches, get_logger, mean_luminance, estimate_text_likelihood, collect_system_metrics
+from visual_memory.utils.logger import LogTag
 from visual_memory.database import DatabaseStore
 
 _settings = Settings()
@@ -151,11 +153,21 @@ class ScanPipeline:
         focal_length_px: overrides self.focal_length_px for this call only
         returns structured JSON dict
         """
+        t0 = time.monotonic()
         registry.prepare_for_scan()
         _focal = focal_length_px if focal_length_px is not None else self.focal_length_px
 
         lum = mean_luminance(query_image)
         if lum < _settings.darkness_threshold:
+            _log.info({
+                "event": "scan_complete",
+                "tag": LogTag.PERF,
+                "match_count": 0,
+                "boxes_detected": 0,
+                "is_dark": True,
+                "duration_ms": round((time.monotonic() - t0) * 1000),
+                **collect_system_metrics(),
+            })
             return {
                 "matches": [],
                 "count": 0,
@@ -167,6 +179,14 @@ class ScanPipeline:
         boxes, scores = self.detector.detect_all(query_image)
 
         if not boxes:
+            _log.info({
+                "event": "scan_complete",
+                "tag": LogTag.PERF,
+                "match_count": 0,
+                "boxes_detected": 0,
+                "duration_ms": round((time.monotonic() - t0) * 1000),
+                **collect_system_metrics(),
+            })
             return {"matches": [], "count": 0}
 
         # ---- PASS 1: combined similarity matching ----
@@ -274,6 +294,15 @@ class ScanPipeline:
                 output_crops.append(m["_crop"])
             if scan_id is not None:
                 self._store_crops(scan_id, output_crops)
+            _log.info({
+                "event": "scan_complete",
+                "tag": LogTag.PERF,
+                "match_count": len(output_matches),
+                "boxes_detected": len(boxes),
+                "depth": False,
+                "duration_ms": round((time.monotonic() - t0) * 1000),
+                **collect_system_metrics(),
+            })
             return {"matches": output_matches, "count": len(output_matches)}
 
         depth_map = self.estimator.estimate(query_image, focal_length_px=_focal)
@@ -311,6 +340,15 @@ class ScanPipeline:
         if scan_id is not None:
             self._store_crops(scan_id, output_crops)
 
+        _log.info({
+            "event": "scan_complete",
+            "tag": LogTag.PERF,
+            "match_count": len(output_matches),
+            "boxes_detected": len(boxes),
+            "depth": True,
+            "duration_ms": round((time.monotonic() - t0) * 1000),
+            **collect_system_metrics(),
+        })
         return {
             "matches": output_matches,
             "count": len(output_matches)
