@@ -118,11 +118,15 @@ def item_ask():
     if not query:
         return jsonify({"error": "missing field: query"}), 400
 
-    # ---- Resolve intent ----
-    intent = extract_item_intent(query)
-    ollama_used = intent is not None
-    if not ollama_used:
-        intent = _keyword_intent(query)
+    # ---- Resolve intent: keywords first, Ollama for ambiguous cases only ----
+    # Keywords are unambiguous signals — use them as the primary classifier.
+    # Ollama supplements only when no keyword pattern fires.
+    intent = _keyword_intent(query)
+    ollama_used = False
+    if intent is None:
+        intent = extract_item_intent(query)
+        if intent is not None:
+            ollama_used = True
     if intent is None:
         intent = "read_ocr"  # safest default for an unknown voice command
 
@@ -160,9 +164,10 @@ def item_ask():
 
     # ---- rename ----
     if intent == "rename":
-        new_label = extract_rename_target(query)
+        # Keyword extraction first (deterministic), Ollama as fallback
+        new_label = _extract_rename_target_keyword(query)
         if new_label is None:
-            new_label = _extract_rename_target_keyword(query)
+            new_label = extract_rename_target(query)
         if not new_label:
             return jsonify({
                 "action": "rename",

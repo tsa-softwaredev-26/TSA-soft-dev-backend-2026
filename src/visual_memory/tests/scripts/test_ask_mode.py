@@ -200,25 +200,19 @@ else:
 
 _section("[4] GET /find — narration field, room query, exact match")
 
-# Build a minimal app pointing at our seeded test DB
+# Inject singletons directly into the pipelines module so routes use our test DB.
+# Variable names must match pipelines.py exactly: _database, _scan_pipeline, _settings.
 import visual_memory.api.pipelines as _pm
 from visual_memory.config.settings import Settings as _Settings
-from visual_memory.api.app import create_app
 
-# Patch DB path before warming the app
-_real_settings = _Settings()
-_real_settings.db_path = _db_path
-_real_settings.enable_depth = False
-_real_settings.enable_ocr = False
-_real_settings.enable_learning = False
+_test_settings = _Settings()
+_test_settings.db_path = _db_path
+_test_settings.enable_depth = False
+_test_settings.enable_ocr = False
+_test_settings.enable_learning = False
 
-_pm._settings_instance = _real_settings
-_pm._database_instance = db
-
-# Suppress warm_all model loading by pre-setting scan pipeline with a stub
 class _StubTextEmbedder:
     def embed_text(self, text: str) -> torch.Tensor:
-        # Return a fixed embedding — deterministic for test purposes
         torch.manual_seed(hash(text) % (2**32))
         e = torch.randn(1, 512)
         return torch.nn.functional.normalize(e, dim=1)
@@ -233,7 +227,10 @@ class _StubScanPipeline:
     def reload_database(self):
         pass
 
-_pm._scan_pipeline_instance = _StubScanPipeline()
+# Inject using the correct variable names from pipelines.py
+_pm._settings = _test_settings
+_pm._database = db
+_pm._scan_pipeline = _StubScanPipeline()
 
 # Minimal Flask app without warm_all
 from flask import Flask, jsonify, request
@@ -288,6 +285,9 @@ else:
 
 _section("[5] POST /ask — exact match, not found, narration")
 
+# Re-seed in case section 4 (find) queries affected state (they shouldn't, but be safe)
+_seed_db(db, "wallet", ocr_text="RFID Blocking", room_name="kitchen", emb_seed=1)
+
 resp = client.post("/ask", json={"query": "wallet"})
 data = resp.get_json()
 _dump(data)
@@ -315,6 +315,13 @@ else:
 # ===== Section 6: POST /item/ask =====
 
 _section("[6] POST /item/ask — read_ocr, rename, find, no-op rename, describe deferred")
+
+# Re-seed fresh state — rename tests mutate the DB so order matters without this
+db.clear_items()
+db.clear_sightings()
+_seed_db(db, "wallet", ocr_text="RFID Blocking", room_name="kitchen", emb_seed=1)
+_seed_db(db, "keys", ocr_text="", room_name="bedroom", emb_seed=2)
+_pm._database = db
 
 # read_ocr — wallet has "RFID Blocking"
 resp = client.post("/item/ask", json={

@@ -59,11 +59,29 @@ def ask():
     settings = get_settings()
     db = get_database()
 
-    # ---- Step 1: extract search term via Ollama ----
-    search_term = extract_search_term(query)
-    ollama_used = search_term is not None
-    if not ollama_used:
-        search_term = query
+    # ---- Step 1: exact label match on raw query (skip Ollama if already a known label) ----
+    rows = db.get_sightings(label=query, limit=1)
+    matched_label: str | None = None
+    matched_by: str | None = None
+    ollama_used = False
+    search_term = query
+
+    if rows:
+        matched_label = query
+        matched_by = "exact"
+
+    # ---- Step 2: Ollama query extraction (only when raw query didn't match) ----
+    if not rows:
+        extracted = extract_search_term(query)
+        if extracted and extracted.lower() != query.lower():
+            ollama_used = True
+            search_term = extracted
+        # re-check exact match on extracted term
+        if ollama_used:
+            rows = db.get_sightings(label=search_term, limit=1)
+            if rows:
+                matched_label = search_term
+                matched_by = "exact"
 
     _log.info({
         "event": "ask_search",
@@ -71,15 +89,6 @@ def ask():
         "search_term": search_term,
         "ollama_used": ollama_used,
     })
-
-    # ---- Step 2: exact label match ----
-    rows = db.get_sightings(label=search_term, limit=1)
-    matched_label: str | None = None
-    matched_by: str | None = None
-
-    if rows:
-        matched_label = search_term
-        matched_by = "exact"
 
     # ---- Step 3: fuzzy label match ----
     if not rows:
