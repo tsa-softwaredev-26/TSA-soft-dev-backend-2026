@@ -81,6 +81,12 @@ class DatabaseStore:
             self._conn.commit()
         except Exception:
             pass  # column already exists
+        # migrate existing items tables that predate ocr_embedding
+        try:
+            self._conn.execute("ALTER TABLE items ADD COLUMN ocr_embedding BLOB")
+            self._conn.commit()
+        except Exception:
+            pass  # column already exists
         # migrate existing user_state tables that predate ml_settings
         try:
             self._conn.execute("ALTER TABLE user_state ADD COLUMN ml_settings TEXT")
@@ -110,16 +116,18 @@ class DatabaseStore:
         confidence: float = 0.0,
         timestamp: Optional[float] = None,
         label_embedding: Optional[torch.Tensor] = None,
+        ocr_embedding: Optional[torch.Tensor] = None,
     ) -> int:
         if timestamp is None:
             timestamp = time.time()
         blob = self._tensor_to_blob(combined_embedding)
         label_blob = self._tensor_to_blob(label_embedding) if label_embedding is not None else None
+        ocr_blob = self._tensor_to_blob(ocr_embedding) if ocr_embedding is not None else None
         cur = self._conn.execute(
             "INSERT INTO items "
-            "(label, combined_embedding, ocr_text, image_path, confidence, timestamp, label_embedding) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (label, blob, ocr_text or "", image_path or "", confidence, timestamp, label_blob),
+            "(label, combined_embedding, ocr_text, image_path, confidence, timestamp, label_embedding, ocr_embedding) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (label, blob, ocr_text or "", image_path or "", confidence, timestamp, label_blob, ocr_blob),
         )
         self._conn.commit()
         return cur.lastrowid
@@ -175,12 +183,23 @@ class DatabaseStore:
         return result
 
     def get_items_with_ocr(self) -> list[dict]:
-        """Return one row per unique label where OCR text is non-empty (most recent teach per label)."""
+        """Return one row per unique label where OCR text is non-empty (most recent teach per label).
+
+        Each dict includes `ocr_embedding` (Tensor) when the item was taught with
+        pre-embedded OCR, or None for items taught before this feature was added.
+        """
         rows = self._conn.execute(
-            "SELECT label, ocr_text FROM items WHERE id IN "
+            "SELECT label, ocr_text, ocr_embedding FROM items WHERE id IN "
             "(SELECT MAX(id) FROM items GROUP BY label) AND ocr_text IS NOT NULL AND ocr_text != ''"
         ).fetchall()
-        return [{"label": label, "ocr_text": ocr_text} for label, ocr_text in rows]
+        result = []
+        for label, ocr_text, ocr_blob in rows:
+            result.append({
+                "label": label,
+                "ocr_text": ocr_text,
+                "ocr_embedding": self._blob_to_tensor(ocr_blob) if ocr_blob else None,
+            })
+        return result
 
     def get_labels_last_seen_in_room(self, room_name: str) -> list[dict]:
         """Return the most recent sighting per label last seen in the given room."""

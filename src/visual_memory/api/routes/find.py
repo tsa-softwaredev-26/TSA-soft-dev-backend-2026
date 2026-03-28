@@ -104,8 +104,11 @@ def _fuzzy_label_match(query: str, threshold: float) -> list[str]:
 def _ocr_content_match(query: str, threshold: float) -> Optional[str]:
     """Search OCR text of all taught items for semantic match.
 
-    Embeds the query and compares against the OCR text of every item that has
-    one. Returns the best-matching label above threshold, or None.
+    Uses the pre-embedded OCR vector stored at teach time when available.
+    Falls back to re-embedding on the fly for older items that lack a stored
+    embedding, so the function is backward-compatible with existing databases.
+
+    Returns the best-matching label above threshold, or None.
     """
     from visual_memory.api.pipelines import get_scan_pipeline
     from visual_memory.utils.similarity_utils import cosine_similarity
@@ -124,7 +127,10 @@ def _ocr_content_match(query: str, threshold: float) -> Optional[str]:
     best_label: Optional[str] = None
     best_sim = -1.0
     for item in items:
-        ocr_emb = pipeline.text_embedder.embed_text(item["ocr_text"])
+        ocr_emb = item.get("ocr_embedding")
+        if ocr_emb is None:
+            # Backward compat: item was taught before OCR pre-embedding was added
+            ocr_emb = pipeline.text_embedder.embed_text(item["ocr_text"])
         sim = cosine_similarity(query_emb, ocr_emb).item()
         if sim >= threshold and sim > best_sim:
             best_sim = sim
