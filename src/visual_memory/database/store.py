@@ -174,6 +174,25 @@ class DatabaseStore:
                 result.append({"label": label, "embedding": self._blob_to_tensor(blob)})
         return result
 
+    def get_items_with_ocr(self) -> list[dict]:
+        """Return one row per unique label where OCR text is non-empty (most recent teach per label)."""
+        rows = self._conn.execute(
+            "SELECT label, ocr_text FROM items WHERE id IN "
+            "(SELECT MAX(id) FROM items GROUP BY label) AND ocr_text IS NOT NULL AND ocr_text != ''"
+        ).fetchall()
+        return [{"label": label, "ocr_text": ocr_text} for label, ocr_text in rows]
+
+    def get_labels_last_seen_in_room(self, room_name: str) -> list[dict]:
+        """Return the most recent sighting per label last seen in the given room."""
+        rows = self._conn.execute(
+            "SELECT id, label, timestamp, direction, distance_ft, similarity, crop_path, room_name "
+            "FROM sightings WHERE room_name = ? AND id IN "
+            "(SELECT MAX(id) FROM sightings WHERE room_name = ? GROUP BY label) "
+            "ORDER BY timestamp DESC",
+            (room_name, room_name),
+        ).fetchall()
+        return [self._sighting_row_to_dict(r) for r in rows]
+
     def rename_label(self, old_label: str, new_label: str) -> dict:
         """
         Rename all items and sightings from old_label to new_label.
