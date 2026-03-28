@@ -19,7 +19,8 @@ Two services run on the same host and communicate over localhost:
 - [ ] `venv-core` created, `pip install -e ".[core]"` done
 - [ ] `venv-ocr` created, `pip install -e ".[ocr]"` done
 - [ ] GPU PyTorch installed (GPU hosts only)
-- [ ] HuggingFace authenticated, `setup_weights.py` completed
+- [ ] HuggingFace authenticated, `setup_weights.py` completed (includes Ollama model pull)
+- [ ] Ollama daemon installed and running (optional — API degrades gracefully without it)
 - [ ] `/opt/spaitra/.env` created and edited
 - [ ] `/opt/spaitra/.ocr.env` created and edited
 - [ ] Smoke tests pass (manual service run + curl)
@@ -201,7 +202,60 @@ $REPO/src/visual_memory/engine/object_detection/yoloe-26l-seg-pf.pt  (~80 MB)
 
 ---
 
-## 6. Environment files
+## 6. Ollama (optional — enables natural language search)
+
+Ollama powers the `/ask` and `/item/ask` natural language query parsing. The API
+degrades gracefully without it (embedding-only search, keyword intent detection).
+
+### Install Ollama daemon
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+# Verify:
+ollama --version
+systemctl status ollama   # should be active/running after install
+```
+
+### Pull the model
+
+`setup_weights.py` handles this automatically if `ollama` is in `$PATH`:
+
+```bash
+source $REPO/venv-core/bin/activate
+python setup_weights.py   # step 6/6 pulls llama3.2:1b (~1.3 GB)
+deactivate
+```
+
+To pull manually:
+
+```bash
+ollama pull llama3.2:1b
+ollama list   # verify model appears
+```
+
+### Verify it works
+
+```bash
+ollama run llama3.2:1b "respond with JSON: {\"intent\": \"find\"}"
+# Should print a JSON response and exit cleanly.
+```
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `ollama: command not found` | Re-run install script; confirm `/usr/local/bin/ollama` exists |
+| `pull failed: connection refused` | `systemctl start ollama` |
+| Slow /ask responses | Lower `OLLAMA_TIMEOUT_SECONDS` in `.env` (default: 5.0 s) |
+| Remote Ollama host | Set `OLLAMA_HOST=http://<host>:11434` in `.env` |
+
+The backend circuit breaker opens after 3 consecutive Ollama failures and pauses
+all LLM calls for 60 seconds. This prevents a stalled daemon from adding latency
+to every request. The API continues to work in embedding-only mode during that window.
+
+---
+
+## 8. Environment files
 
 ### Core backend — `/opt/spaitra/.env`
 
@@ -246,6 +300,11 @@ OCR_TIMEOUT_SECONDS=10.0
 # Swaps model weights between GPU and CPU RAM between pipeline calls.
 # Requires ~16 GB system RAM. See ARCHITECTURE.md → VRAM Management.
 SAVE_VRAM=0
+
+# Ollama LLM (optional — enables natural language /ask and /item/ask parsing)
+# Leave OLLAMA_HOST commented out to use the default localhost:11434.
+# OLLAMA_HOST=http://127.0.0.1:11434
+OLLAMA_TIMEOUT_SECONDS=5.0
 ```
 
 ### OCR service — `/opt/spaitra/.ocr.env`
@@ -267,7 +326,7 @@ OCR_USE_ANGLE_CLS=0     # angle correction; keep 0 unless text is frequently rot
 
 ---
 
-## 7. Smoke test (before systemd)
+## 8. Smoke test (before systemd)
 
 Test each service manually before handing off to systemd.
 
@@ -308,7 +367,7 @@ deactivate
 
 ---
 
-## 8. Install systemd units
+## 9. Install systemd units
 
 The service files in `deploy/` assume the flat layout (`/opt/spaitra/venv-core`).
 If your venvs are inside the repo subdir, edit the two paths before copying:
@@ -339,7 +398,7 @@ journalctl -u spaitra-core -n 50 --no-pager
 
 ---
 
-## 9. Auto-retrain cron
+## 10. Auto-retrain cron
 
 The projection head personalizes scan results as the user gives feedback (confirm /
 correct detections). Once enough feedback accumulates (default: 10 triplets), a nightly
@@ -406,7 +465,7 @@ su - spaitra -s /bin/bash -c "/opt/spaitra/bin/auto_retrain.sh"
 
 ---
 
-## 10. Public access with srv.us
+## 11. Public access with srv.us
 
 `srv.us` creates a stable HTTPS public URL that forwards to the local gunicorn port.
 No account or configuration required.
@@ -456,7 +515,7 @@ The hostname persists across restarts for the same binary/port combination.
 
 ---
 
-## 11. End-to-end verification
+## 12. End-to-end verification
 
 Run after all services are up:
 
@@ -486,7 +545,7 @@ curl -sf -X POST http://127.0.0.1:5000/retrain -H "X-API-Key: $KEY"
 
 ---
 
-## 12. Updating the deployment
+## 13. Updating the deployment
 
 ```bash
 su - spaitra -s /bin/bash
@@ -521,7 +580,7 @@ su - spaitra -s /bin/bash -c "
 
 ---
 
-## 13. Troubleshooting
+## 14. Troubleshooting
 
 ### Service fails to start
 
@@ -580,7 +639,7 @@ curl -sf http://127.0.0.1:5000/retrain/status -H "X-API-Key: $KEY"
 
 ---
 
-## 14. Deployment layout
+## 15. Deployment layout
 
 ```text
 /opt/spaitra/

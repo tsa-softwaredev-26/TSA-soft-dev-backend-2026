@@ -142,7 +142,9 @@ src/visual_memory/
 ├── utils/
 │   ├── image_utils.py
 │   ├── similarity_utils.py
-│   └── logger.py                      # JSON structured logging
+│   ├── logger.py                      # JSON structured logging via loguru; LogTag constants; crash handler
+│   ├── metrics.py                     # collect_system_metrics() - RAM/swap/VRAM/thermals
+│   └── logparse.py                    # CLI filter + stats tool (python -m visual_memory.utils.logparse)
 │
 ├── learning/
 │   ├── projection_head.py             # ProjectionHead (residual linear, identity at init)
@@ -664,6 +666,9 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - Text embedder: CLIP text encoder only (`openai/clip-vit-base-patch32`, 512-dim, ~180MB)
 - Deployment: `deploy/setup_server.sh` automates full Debian server setup; `deploy/spaitra.service` for systemd
 - Debug endpoints: /debug/state, /debug/echo, /debug/image, /debug/db, /debug/logs, /debug/test-remember, /debug/test-scan, /debug/wipe (selective), /debug/config (live settings patch)
+- Ask Mode: POST /ask (NL query -> embedding search -> narration), POST /item/ask (item-context dispatcher: read_ocr, export_ocr, rename, find, describe)
+- Ollama integration: llama3.2:1b via `ollama_utils.py`; structured JSON output (format="json"); circuit breaker (3-strike, 60 s cooldown); configurable timeout via OLLAMA_TIMEOUT_SECONDS; OLLAMA_HOST env for non-localhost daemon
+- OCR pre-embedding: `add_to_database()` embeds OCR text at teach time and stores in `items.ocr_embedding`; `/ask` OCR content match uses stored embedding, re-embeds only for legacy items
 
 ---
 
@@ -683,7 +688,9 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - [ ] `DatabaseStore` methods `save_ml_settings` / `load_ml_settings` merge only changed keys on write - currently the PATCH /settings handler saves the full settings snapshot, which is fine for single-user but would need per-user scoping for multi-user.
 
 ### Testing
-- [ ] Overhaul test runner to exercise all features via HTTP endpoints (Flask test client) rather than calling pipeline code directly. Cover remember, scan, feedback, retrain, find, ask, item/ask, sightings, items, settings end-to-end.
+- [ ] Overhaul test runner to exercise all features via HTTP endpoints (Flask test client) rather than calling pipeline code directly. Cover remember, scan, feedback, retrain, find, ask, item/ask, sightings, items, settings end-to-end. See `test_suite_plan.log` for detailed plan.
+- [ ] Implement new test scripts from test_suite_plan.log: test_ollama_utils.py, test_database_store.py, test_find_route.py, test_item_ask_rename.py, test_circuit_breaker_integration.py
+- [ ] Validate Ollama prompts against 20+ real voice queries per extraction type (extract_search_term, extract_item_intent, extract_rename_target). See test_suite_plan.log section 8.
 
 ### Learning / Personalization
 - [ ] Test suite: add `test_learning_pipeline.py` covering FeedbackStore DB roundtrip, triplet loading, trainer convergence, `_apply_head` blending at various triplet counts, `reload_head`, and full /feedback -> /retrain -> /settings endpoint flow
@@ -719,6 +726,7 @@ All server-transition items are complete as of March 2026.
 ## Future Plans
 
 - **Input Enhancement in Remember Mode** - [x] Wired as third-pass Ollama fallback in `_detect_with_fallback()`. After all `_SECOND_PASS_TEMPLATES` fail, Ollama (llama3.2:1b) suggests `ollama_detection_retries` alternative phrasings; each is tried with GroundingDINO. Degrades silently if Ollama unavailable. Logged as `remember_third_pass_ollama`.
+- **OCR content pre-embedding** - [x] `add_to_database()` now embeds OCR text via CLIP at teach time and stores in `items.ocr_embedding`. `_ocr_content_match()` in `find.py` uses the stored embedding instead of re-embedding N items per query. Backward compatible: items without stored embedding are re-embedded on the fly.
 - **Vision-Language Model for item description** - `POST /item/ask` with `describe` intent returns `deferred: true`. Needs LLaVA or similar VLM via Ollama. Separate spike: confirm model fits memory with SAVE_VRAM=1.
 - **Bloat Prevention** - Duplicate entry detection, pruning unused entries, user confirmation before overwriting similar embeddings.
 - **HNSW index** - Marginal benefit below ~10k entries; defer until scale requires it.
