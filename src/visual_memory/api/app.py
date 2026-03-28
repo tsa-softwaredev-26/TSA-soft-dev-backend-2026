@@ -1,6 +1,7 @@
 import os
 
 from flask import Flask, request, jsonify
+from visual_memory.utils.logger import setup_crash_handler
 
 from visual_memory.api.routes.health import health_bp
 from visual_memory.api.routes.remember import remember_bp
@@ -21,6 +22,7 @@ _API_KEY = os.environ.get("API_KEY", "")
 
 
 def create_app():
+    setup_crash_handler()
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB
 
