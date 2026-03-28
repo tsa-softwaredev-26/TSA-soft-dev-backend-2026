@@ -141,6 +141,29 @@ class RememberPipeline:
                 })
                 return detection, alt_prompt
 
+        # Third pass: ask Ollama for alternative phrasings, try each one.
+        # ollama_detection_retries controls how many LLM suggestions to attempt.
+        # Skipped silently if Ollama is unavailable.
+        from visual_memory.utils.ollama_utils import _chat
+        n = max(1, _settings.ollama_detection_retries)
+        ollama_prompt = (
+            f"A vision model failed to detect '{prompt}' in an image. "
+            f"Give {n} alternative phrasings that a vision model might recognize better. "
+            f"Reply with only the phrases, one per line, no numbering, no explanation."
+        )
+        suggestions_raw = _chat(ollama_prompt)
+        if suggestions_raw:
+            suggestions = [s.strip() for s in suggestions_raw.splitlines() if s.strip()][:n]
+            for suggestion in suggestions:
+                detection = self.detector.detect(image, suggestion)
+                if detection is not None:
+                    _log.info({
+                        "event": "remember_third_pass_ollama",
+                        "original_prompt": prompt,
+                        "successful_prompt": suggestion,
+                    })
+                    return detection, suggestion
+
         return None, None
 
     def detect_score(self, image_path: str | Path, prompt: str) -> dict:
