@@ -72,7 +72,9 @@ the OCR service unreachable, the OCR microservice is down (core API still works 
 | POST | /scan | User scans the room |
 | GET | /crop | User focuses on a specific scan match |
 | POST | /feedback | User confirms or denies a scan match |
-| GET | /find | User asks "where is my [object]?" |
+| POST | /ask | User asks anything in natural language |
+| POST | /item/ask | User asks about a specific focused scan item |
+| GET | /find | Direct label lookup — "where is my [object]?" |
 | GET | /items | User opens the memory list |
 | DELETE | /items/<label> | User deletes a memory |
 | POST | /items/<label>/rename | User renames a memory |
@@ -373,6 +375,128 @@ Content-Type: application/json
 
 ## Ask Mode
 
+### Open-ended natural language: POST /ask
+
+When the user asks anything in free speech and the frontend cannot cleanly extract a known label, send the raw query here.
+
+```
+POST /ask
+Content-Type: application/json
+```
+```json
+{ "query": "where did I put my money last week?" }
+```
+
+**Found:**
+```json
+{
+  "query": "where did I put my money last week?",
+  "search_term": "money",
+  "ollama_used": true,
+  "found": true,
+  "matched_label": "wallet",
+  "matched_by": "fuzzy_label",
+  "narration": "Your wallet is in the kitchen, to your left. Last seen 3 days ago.",
+  "last_sighting": {
+    "id": 41,
+    "label": "wallet",
+    "timestamp": 1742860412.3,
+    "last_seen": "3 days ago",
+    "direction": "to your left",
+    "distance_ft": 2.3,
+    "room_name": "kitchen"
+  },
+  "sightings": [...]
+}
+```
+
+**Not found:**
+```json
+{
+  "query": "...",
+  "search_term": "...",
+  "ollama_used": true,
+  "found": false,
+  "narration": "I couldn't find anything matching that in your memory."
+}
+```
+
+`matched_by` values:
+- `"exact"` — label matched directly
+- `"fuzzy_label"` — matched via text embedding similarity on label names
+- `"ocr"` — matched via OCR text content of a taught item
+
+`ollama_used: false` means Ollama was unavailable; search ran on raw query text.
+
+**When to call:** any voice query where the user is not tapping a specific item. "Where's my wallet?", "The receipt with the chair", "What did I leave in the kitchen?", anything.
+
+---
+
+### Item-context queries: POST /item/ask
+
+When the user is focused on a specific scan result and asks about it. Frontend already has `scan_id` and `label`.
+
+```
+POST /item/ask
+Content-Type: application/json
+```
+```json
+{
+  "scan_id": "a3f9c2b1d4e5f6a7",
+  "label": "wallet",
+  "query": "read the text in this"
+}
+```
+
+**read_ocr / export_ocr response:**
+```json
+{
+  "action": "read_ocr",
+  "label": "wallet",
+  "ocr_text": "RFID Blocking",
+  "narration": "The text says: RFID Blocking.",
+  "export": false
+}
+```
+Set `export: true` when the user wants to copy/share the text rather than just hear it.
+
+**rename response:**
+```json
+{
+  "action": "rename",
+  "old_label": "wallet",
+  "new_label": "my wallet",
+  "narration": "Renamed to my wallet.",
+  "replaced_existing": false
+}
+```
+Rename auto-replaces any existing memory with the same name — no confirmation step. If the new name is the same as the current name:
+```json
+{ "action": "rename", "narration": "That's already called wallet.", "unchanged": true }
+```
+
+**find response:**
+```json
+{
+  "action": "find",
+  "label": "wallet",
+  "found": true,
+  "narration": "Your wallet is in the kitchen, to your left. Last seen 5 minutes ago.",
+  "last_sighting": { ... }
+}
+```
+
+**describe response (not yet available):**
+```json
+{ "action": "describe", "narration": "Visual description is not available yet.", "deferred": true }
+```
+
+**When to call:** user is scrolling through scan results and asks something about the item currently on screen.
+
+---
+
+### Direct label lookup: GET /find
+
 ```
 GET /find?label=wallet
 ```
@@ -383,6 +507,8 @@ GET /find?label=wallet
   "label": "my wallet",
   "found": true,
   "matched_label": "wallet",
+  "matched_by": "fuzzy_label",
+  "narration": "Your wallet is in the kitchen, to your left. Last seen 3 minutes ago.",
   "last_sighting": {
     "id": 41,
     "label": "wallet",
@@ -404,7 +530,16 @@ GET /find?label=wallet
 
 **All objects:** `GET /find` (omit `label`) - ordered most-recently-seen first.
 
-**Optional filters:** `limit` (int), `since` (Unix timestamp), `before` (Unix timestamp).
+**Room query** — all items last seen in a room:
+```
+GET /find?room=kitchen
+```
+```json
+{ "room": "kitchen", "results": [...], "count": 2 }
+```
+Room name is normalized server-side ("In The Kitchen" → "kitchen"). Each result includes a `narration` field.
+
+**Optional filters:** `label` (str), `room` (str), `limit` (int), `since` (Unix timestamp), `before` (Unix timestamp).
 
 ---
 

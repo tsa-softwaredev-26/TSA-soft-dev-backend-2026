@@ -589,7 +589,7 @@ Single worker is required - model state is process-local.
 
 Models are loaded once at startup via `warm_all()` in `create_app()`. Upload cap: 50MB.
 
-**Endpoints:** GET /health, POST /remember, POST /scan, POST /feedback, POST /retrain, GET /retrain/status, GET /settings, PATCH /settings, GET /user-settings, PATCH /user-settings, GET /find, GET /crop, GET /items, DELETE /items/<label>, POST /items/<label>/rename, POST /sightings, GET /debug/state, POST /debug/echo, POST /debug/image, GET /debug/db, GET /debug/logs, GET /debug/test-remember, GET /debug/test-scan, POST /debug/wipe, PATCH /debug/config.
+**Endpoints:** GET /health, POST /remember, POST /scan, POST /feedback, POST /retrain, GET /retrain/status, GET /settings, PATCH /settings, GET /user-settings, PATCH /user-settings, GET /find, POST /ask, POST /item/ask, GET /crop, GET /items, DELETE /items/<label>, POST /items/<label>/rename, POST /sightings, GET /debug/state, POST /debug/echo, POST /debug/image, GET /debug/db, GET /debug/logs, GET /debug/test-remember, GET /debug/test-scan, POST /debug/wipe, PATCH /debug/config.
 
 See `FRONTEND_GUIDE.md` for full request/response schemas, field reference, and integration patterns.
 
@@ -682,6 +682,9 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 ### Database
 - [ ] `DatabaseStore` methods `save_ml_settings` / `load_ml_settings` merge only changed keys on write - currently the PATCH /settings handler saves the full settings snapshot, which is fine for single-user but would need per-user scoping for multi-user.
 
+### Testing
+- [ ] Overhaul test runner to exercise all features via HTTP endpoints (Flask test client) rather than calling pipeline code directly. Cover remember, scan, feedback, retrain, find, ask, item/ask, sightings, items, settings end-to-end.
+
 ### Learning / Personalization
 - [ ] Test suite: add `test_learning_pipeline.py` covering FeedbackStore DB roundtrip, triplet loading, trainer convergence, `_apply_head` blending at various triplet counts, `reload_head`, and full /feedback -> /retrain -> /settings endpoint flow
 - [ ] CLI trainer (`python -m visual_memory.learning.trainer`) still reads from legacy `feedback/` dir; update to accept a `--db-path` arg that reads from SQLite feedback table instead
@@ -692,8 +695,8 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 
 ### API
 - [x] OCR service health probe - covered by GET /debug/state (checks OCR health on demand); startup check not wired but `/debug/state` gives the same information on request
-- [ ] Have fast mode in settings disable second pass detection in remember mode
-- [ ] `PATCH /debug/config` changes are not persisted - by design for a debug tool, but could be useful for persisting arbitrary threshold changes; consider adding a `persist: true` flag that calls `save_ml_settings()` after applying
+- [x] Have fast mode in settings disable second pass detection in remember mode
+- [x] `PATCH /debug/config` now accepts `persist: true` flag that calls `save_ml_settings()` after applying
 - [ ] Add a debug GET to query logs, including performance logs like temp, usage, critical/warning logs if any, etc.
 
 ### Logs
@@ -715,7 +718,8 @@ All server-transition items are complete as of March 2026.
 
 ## Future Plans
 
-- **Input Enhancement in Remember Mode** - Run user prompt through a lightweight LLM to expand vague descriptions before Grounding DINO. `"remember my airpods"` -> best detection wins from expanded candidates.
+- **Input Enhancement in Remember Mode** - [x] Wired as third-pass Ollama fallback in `_detect_with_fallback()`. After all `_SECOND_PASS_TEMPLATES` fail, Ollama (llama3.2:1b) suggests `ollama_detection_retries` alternative phrasings; each is tried with GroundingDINO. Degrades silently if Ollama unavailable. Logged as `remember_third_pass_ollama`.
+- **Vision-Language Model for item description** - `POST /item/ask` with `describe` intent returns `deferred: true`. Needs LLaVA or similar VLM via Ollama. Separate spike: confirm model fits memory with SAVE_VRAM=1.
 - **Bloat Prevention** - Duplicate entry detection, pruning unused entries, user confirmation before overwriting similar embeddings.
 - **HNSW index** - Marginal benefit below ~10k entries; defer until scale requires it.
 - **Pipeline batching** - ScanPipeline can call `batch_embed()` and `detect_all_batch()` instead of per-crop loops for full GPU utilization on the server.
