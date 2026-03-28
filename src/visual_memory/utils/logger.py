@@ -78,13 +78,16 @@ def _json_format(record: dict) -> str:
 
 def _configure_sinks() -> None:
     _LOG_DIR.mkdir(parents=True, exist_ok=True)
+    # enqueue=False: sync writes. This server runs a single gunicorn worker (GPU model
+    # footprint makes multi-worker impractical), so sync is safe and ensures pre-crash
+    # context is flushed. Change to enqueue=True if multi-worker is ever needed.
     _logger.add(
         str(_LOG_PATH),
         format=_json_format,
         level="DEBUG",
         rotation="1 day",
         retention="7 days",
-        enqueue=True,
+        enqueue=False,
     )
     _logger.add(
         str(_LOG_DIR / "important.log"),
@@ -93,7 +96,7 @@ def _configure_sinks() -> None:
         level="WARNING",
         rotation="1 week",
         retention="60 days",
-        enqueue=True,
+        enqueue=False,
     )
 
 
