@@ -104,6 +104,9 @@ class Settings:
     # ollama_detection_retries: number of LLM-suggested prompts to try in remember
     # mode when all _SECOND_PASS_TEMPLATES also fail (Ollama-enhanced third pass).
     ollama_detection_retries: int = 2
+    # ollama_timeout_seconds: seconds to wait for one Ollama chat response before
+    # giving up. Lower values keep /ask latency predictable when Ollama is slow.
+    ollama_timeout_seconds: float = field(default_factory=lambda: float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "5.0")))
 
     # Database
     db_path: str = "data/memory.db"
