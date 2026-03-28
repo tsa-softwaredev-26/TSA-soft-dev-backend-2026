@@ -64,7 +64,6 @@ class UserSettings:
     voice_speed: float = 1.0          # 0.5 (slow) - 2.0 (fast)
 
     # -- advanced settings (collapsed by default in UI) -----------------
-    scan_update_location: bool = False  # prompt to update location after found
     learning_enabled: bool = True       # collect feedback + improve with use
 
     # -- accessibility stub (not yet exposed in UI) ---------------------
@@ -83,7 +82,6 @@ class UserSettings:
         db.save_user_settings({
             "performance_mode": self.performance_mode.value,
             "voice_speed": self.voice_speed,
-            "scan_update_location": self.scan_update_location,
             "learning_enabled": self.learning_enabled,
             "button_layout": self.button_layout,
         })
@@ -95,7 +93,6 @@ class UserSettings:
             return cls(
                 performance_mode=PerformanceMode(data.get("performance_mode", "balanced")),
                 voice_speed=float(data.get("voice_speed", 1.0)),
-                scan_update_location=bool(data.get("scan_update_location", False)),
                 learning_enabled=bool(data.get("learning_enabled", True)),
                 button_layout=str(data.get("button_layout", "default")),
             )
@@ -107,7 +104,6 @@ class UserSettings:
         return {
             "performance_mode": self.performance_mode.value,
             "voice_speed": self.voice_speed,
-            "scan_update_location": self.scan_update_location,
             "learning_enabled": self.learning_enabled,
             "button_layout": self.button_layout,
             # read-only derived fields (informational for client)

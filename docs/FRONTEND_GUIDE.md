@@ -469,7 +469,6 @@ PATCH /user-settings
 {
   "performance_mode": "balanced",
   "voice_speed": 1.0,
-  "scan_update_location": true,
   "learning_enabled": true,
   "button_layout": "default"
 }
@@ -479,7 +478,6 @@ PATCH /user-settings
 |-------|--------|-------|
 | `performance_mode` | `"fast"` / `"balanced"` / `"accurate"` | fast = no depth (~1s), balanced = depth (~3s), accurate = depth + better models (~5s) |
 | `voice_speed` | 0.5 - 2.0 | Apply to your TTS rate |
-| `scan_update_location` | bool | Whether to prompt for room name after scan |
 | `learning_enabled` | bool | Propagated to scan pipeline immediately |
 | `button_layout` | `"default"` / `"swapped"` | UI layout preference |
 
