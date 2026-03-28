@@ -289,11 +289,11 @@ Multi-image (POST /remember with `images[]`):
 - Loaded once at process start via `get_user_settings()` which calls `get_database()`
 - `PerformanceMode`: FAST | BALANCED | ACCURATE (string enum)
 - `PerformanceConfig.for_mode(mode)` - returns `{depth_enabled, target_latency}` for each mode
-- `UserSettings` fields: `performance_mode` (BALANCED), `voice_speed` (1.0, range 0.5-2.0), `scan_update_location` (False), `learning_enabled` (True), `button_layout` ("default" | "swapped", stub)
+- `UserSettings` fields: `performance_mode` (BALANCED), `voice_speed` (1.0, range 0.5-2.0), `learning_enabled` (True), `button_layout` ("default" | "swapped", stub)
 - `save(db)` / `load(db)` - DB round-trip with safe defaults on missing/corrupt row
 - `to_dict()` - serializes for API response; includes derived `performance_config` block
 - Exposed via GET /user-settings, PATCH /user-settings
-- PATCH /user-settings propagates `learning_enabled` to ScanPipeline immediately
+- PATCH /user-settings propagates `learning_enabled` to ScanPipeline and `performance_mode: fast` disables detection second pass
 
 ### `config/settings.py` - `Settings`
 - Single dataclass, all ML tuning params in one place
