@@ -11,6 +11,8 @@ from visual_memory.api.routes.settings_route import settings_bp
 from visual_memory.api.routes.user_settings_route import user_settings_bp
 from visual_memory.api.routes.crop import crop_bp
 from visual_memory.api.routes.find import find_bp
+from visual_memory.api.routes.ask import ask_bp
+from visual_memory.api.routes.item_ask import item_ask_bp
 from visual_memory.api.routes.items import items_bp
 from visual_memory.api.routes.sightings import sightings_bp
 from visual_memory.api.routes.debug import debug_bp
@@ -40,6 +42,8 @@ def create_app():
     app.register_blueprint(user_settings_bp)
     app.register_blueprint(crop_bp)
     app.register_blueprint(find_bp)
+    app.register_blueprint(ask_bp)
+    app.register_blueprint(item_ask_bp)
     app.register_blueprint(items_bp)
     app.register_blueprint(sightings_bp)
     app.register_blueprint(debug_bp)
