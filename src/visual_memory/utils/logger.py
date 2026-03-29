@@ -13,6 +13,7 @@ Usage:
 
 Call setup_crash_handler() once at process startup (done in create_app).
 """
+import datetime
 import json
 import sys
 from pathlib import Path
@@ -51,39 +52,18 @@ class _SafeEncoder(json.JSONEncoder):
         return str(obj)
 
 
-def _json_format(record: dict) -> str:
-    """Serialize a loguru record to a JSON line."""
-    extra = record["extra"]
-    data: dict = {
-        "ts":     record["time"].strftime("%Y-%m-%dT%H:%M:%S"),
-        "level":  record["level"].name,
-        "module": extra.get("module", record["name"]),
-    }
-    for k, v in extra.items():
-        if k != "module":
-            data[k] = v
-    msg = record["message"]
-    if msg:
-        data.setdefault("message", msg)
-    exc = record["exception"]
-    if exc is not None:
-        import traceback
-        exc_type, exc_val, exc_tb = exc
-        if exc_type is not None:
-            data["exception"] = "".join(
-                traceback.format_exception(exc_type, exc_val, exc_tb)
-            )
-    return json.dumps(data, cls=_SafeEncoder) + "\n"
-
-
 def _configure_sinks() -> None:
     _LOG_DIR.mkdir(parents=True, exist_ok=True)
     # enqueue=False: sync writes. This server runs a single gunicorn worker (GPU model
     # footprint makes multi-worker impractical), so sync is safe and ensures pre-crash
     # context is flushed. Change to enqueue=True if multi-worker is ever needed.
+    #
+    # format="{message}\n" is intentional: JSON is built inside _BoundLogger._emit
+    # and passed as the full message string. Using a callable format here causes
+    # loguru to apply format_map() on the returned JSON string, breaking on {keys}.
     _logger.add(
         str(_LOG_PATH),
-        format=_json_format,
+        format="{message}\n",
         level="DEBUG",
         rotation="1 day",
         retention="7 days",
@@ -91,8 +71,7 @@ def _configure_sinks() -> None:
     )
     _logger.add(
         str(_LOG_DIR / "important.log"),
-        format=_json_format,
-        filter=lambda record: record["level"].no >= _logger.level("WARNING").no,
+        format="{message}\n",
         level="WARNING",
         rotation="1 week",
         retention="60 days",
@@ -109,21 +88,34 @@ class _BoundLogger:
     Accepts dicts as log messages (preserving the existing call-site convention):
         log.info({"event": "scan_complete", "duration_ms": 1234})
 
-    All dict keys are merged as extra fields in the JSON output.
+    Dict fields are serialized to JSON and written as a single line. The ts,
+    level, and module fields are injected automatically - call sites do not need
+    to supply them.
+
     String messages are also accepted:
         log.warning("something unexpected happened")
     """
 
-    __slots__ = ("_log",)
+    __slots__ = ("_log", "_module_name")
 
     def __init__(self, name: str):
+        self._module_name = name
         self._log = _logger.bind(module=name)
 
     def _emit(self, level: str, msg) -> None:
         if isinstance(msg, dict):
-            getattr(self._log.bind(**msg), level)("")
+            ts = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+            data: dict = {
+                "ts":     ts,
+                "level":  level.upper(),
+                "module": self._module_name,
+            }
+            for k, v in msg.items():
+                data[k] = v
+            line = json.dumps(data, cls=_SafeEncoder)
+            getattr(self._log, level)(line)
         else:
-            getattr(self._log, level)(msg)
+            getattr(self._log, level)(str(msg))
 
     def debug(self, msg)     -> None: self._emit("debug",    msg)
     def info(self, msg)      -> None: self._emit("info",     msg)
@@ -133,10 +125,26 @@ class _BoundLogger:
 
     def exception(self, msg) -> None:
         """Log at ERROR level and attach the current exception traceback."""
+        import traceback as _tb
+        exc_info = sys.exc_info()
         if isinstance(msg, dict):
-            self._log.bind(**msg).exception("")
+            ts = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+            data: dict = {
+                "ts":     ts,
+                "level":  "ERROR",
+                "module": self._module_name,
+            }
+            for k, v in msg.items():
+                data[k] = v
+            if exc_info[0] is not None:
+                data["exception"] = "".join(_tb.format_exception(*exc_info))
+            line = json.dumps(data, cls=_SafeEncoder)
+            self._log.error(line)
         else:
-            self._log.exception(msg)
+            if exc_info[0] is not None:
+                self._log.opt(exception=exc_info).error(str(msg))
+            else:
+                self._log.error(str(msg))
 
 
 def get_logger(name: str) -> _BoundLogger:
@@ -157,7 +165,6 @@ def setup_crash_handler() -> None:
     _orig_hook = sys.excepthook
 
     def _excepthook(exc_type, exc_val, exc_tb):
-        import datetime
         import traceback
         with open(crash_path, "a") as f:
             f.write(f"\n--- CRASH {datetime.datetime.now().isoformat()} ---\n")
