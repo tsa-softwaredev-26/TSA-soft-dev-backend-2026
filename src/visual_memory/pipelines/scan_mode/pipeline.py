@@ -163,6 +163,9 @@ class ScanPipeline:
             "match_ms": 0,
             "dedup_ms": 0,
             "depth_ms": 0,
+            "ocr_batch_requests": 0,
+            "ocr_batch_items": 0,
+            "ocr_batch_non_empty": 0,
         }
         registry.prepare_for_scan()
         timing["prepare_ms"] = round((time.monotonic() - stage_start) * 1000)
@@ -218,19 +221,39 @@ class ScanPipeline:
         matches = []
         ocr_ms = 0.0
         match_ms = 0.0
+        text_likelihoods = [estimate_text_likelihood(crop) for crop in crops]
+        ocr_text_by_index: dict[int, str] = {}
+        text_emb_by_index: dict[int, torch.Tensor] = {}
+
+        if self.ocr_client is not None:
+            ocr_indices = [
+                i for i, likelihood in enumerate(text_likelihoods)
+                if likelihood >= _settings.ocr_text_likelihood_threshold
+            ]
+            if ocr_indices:
+                ocr_t0 = time.monotonic()
+                ocr_results = self.ocr_client.recognize_batch([crops[i] for i in ocr_indices])
+                ocr_ms += (time.monotonic() - ocr_t0) * 1000
+                timing["ocr_batch_requests"] = 1
+                timing["ocr_batch_items"] = len(ocr_indices)
+
+                for idx, ocr_result in zip(ocr_indices, ocr_results):
+                    text = str((ocr_result or {}).get("text", "") or "")
+                    if text:
+                        ocr_text_by_index[idx] = text
+                timing["ocr_batch_non_empty"] = len(ocr_text_by_index)
+
+                if self.text_embedder is not None and ocr_text_by_index:
+                    ordered = sorted(ocr_text_by_index.items(), key=lambda kv: kv[0])
+                    text_batch = self.text_embedder.batch_embed_text([text for _, text in ordered])
+                    for row, (idx, _) in enumerate(ordered):
+                        text_emb_by_index[idx] = text_batch[row:row + 1]
 
         for i, (box, score) in enumerate(zip(boxes, scores)):
             img_emb = img_embs[i:i+1]  # (1, 1024)
-            text_likelihood = estimate_text_likelihood(crops[i])
-            ocr_text = ""
-            text_emb = None
-            if (self.ocr_client is not None
-                    and text_likelihood >= _settings.ocr_text_likelihood_threshold):
-                ocr_t0 = time.monotonic()
-                ocr_result = self.ocr_client.recognize(crops[i])
-                ocr_ms += (time.monotonic() - ocr_t0) * 1000
-                ocr_text = ocr_result["text"]
-                text_emb = self.text_embedder.embed_text(ocr_text) if ocr_text else None
+            text_likelihood = text_likelihoods[i]
+            ocr_text = ocr_text_by_index.get(i, "")
+            text_emb = text_emb_by_index.get(i)
             combined = make_combined_embedding(img_emb, text_emb)
 
             projected_query = self._apply_head(combined)
