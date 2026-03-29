@@ -24,7 +24,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 import torch
+from PIL import Image
 
 try:
     import pillow_heif
@@ -38,12 +40,28 @@ from visual_memory.engine.model_registry import registry
 from visual_memory.engine.text_recognition import TextRecognizer
 from visual_memory.learning import ProjectionHead, ProjectionTrainer
 from visual_memory.utils.image_utils import load_image
+from visual_memory.utils.quality_utils import mean_luminance, estimate_text_likelihood
 from visual_memory.utils.similarity_utils import find_match
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _BENCHMARKS_DIR = _PROJECT_ROOT / "benchmarks"
 _CHECKPOINT = _PROJECT_ROOT / "checkpoints" / "depth_pro.pt"
 _DEFAULT_NEG_IMAGES = _PROJECT_ROOT / "src" / "visual_memory" / "tests" / "input_images"
+
+BLUR_THRESHOLD = 100.0
+
+
+def _blur_score(image: Image.Image) -> float:
+    """
+    Laplacian variance of the image. Higher = sharper.
+    Uses 4-neighbor discrete Laplacian via numpy; no extra dependencies.
+    """
+    gray = np.array(image.convert("L"), dtype=np.float32)
+    lap = (
+        np.roll(gray, 1, 0) + np.roll(gray, -1, 0) +
+        np.roll(gray, 1, 1) + np.roll(gray, -1, 1) - 4.0 * gray
+    )
+    return float(lap.var())
 
 
 # ---- arg parsing ----
@@ -101,6 +119,7 @@ def _embed_rows(
     rows: List[dict],
     images_dir: Path,
     no_ocr: bool,
+    settings: Settings,
 ) -> Dict[str, dict]:
     embedded: Dict[str, dict] = {}
     ocr_client = TextRecognizer() if not no_ocr else None
@@ -113,6 +132,10 @@ def _embed_rows(
             continue
         print(f"  [{i+1}/{n}] {fname}")
         img = load_image(str(img_path))
+
+        lum = mean_luminance(img)
+        blur = _blur_score(img)
+        text_likelihood = estimate_text_likelihood(img)
 
         t0 = time.perf_counter()
         img_emb = registry.img_embedder.embed(img)
@@ -140,6 +163,12 @@ def _embed_rows(
             "lat_embed_img": lat_img,
             "lat_ocr": lat_ocr,
             "lat_embed_txt": lat_txt,
+            "darkness_level": round(lum, 2),
+            "is_dark": lum < settings.darkness_threshold,
+            "blur_score": round(blur, 2),
+            "is_blurry": blur < BLUR_THRESHOLD,
+            "text_likelihood": round(text_likelihood, 3),
+            "should_skip_ocr": text_likelihood < settings.ocr_text_likelihood_threshold,
         }
     return embedded
 
@@ -260,6 +289,12 @@ def _eval_retrieval(
             "lat_embed_txt": data["lat_embed_txt"],
             "lat_retrieve_bl": lat_bl,
             "lat_retrieve_pe": lat_pe,
+            "darkness_level": data["darkness_level"],
+            "is_dark": data["is_dark"],
+            "blur_score": data["blur_score"],
+            "is_blurry": data["is_blurry"],
+            "text_likelihood": data["text_likelihood"],
+            "should_skip_ocr": data["should_skip_ocr"],
         })
     return results
 
@@ -369,6 +404,8 @@ _CSV_FIELDS = [
     "predicted_distance_ft", "depth_absolute_error", "depth_percentage_error",
     "lat_embed_img_s", "lat_ocr_s", "lat_embed_txt_s",
     "lat_retrieve_bl_s", "lat_retrieve_pe_s", "lat_detect_s", "lat_depth_s",
+    "darkness_level", "is_dark", "blur_score", "is_blurry",
+    "text_likelihood", "should_skip_ocr",
 ]
 
 
@@ -407,6 +444,12 @@ def _merge_rows(
             "lat_retrieve_pe_s": round(r["lat_retrieve_pe"], 6),
             "lat_detect_s": round(d["lat_detect"], 4),
             "lat_depth_s": round(dep["lat_depth"], 4),
+            "darkness_level": r["darkness_level"],
+            "is_dark": r["is_dark"],
+            "blur_score": r["blur_score"],
+            "is_blurry": r["is_blurry"],
+            "text_likelihood": r["text_likelihood"],
+            "should_skip_ocr": r["should_skip_ocr"],
         })
     return rows
 
@@ -432,6 +475,7 @@ def _write_output(
     final_loss: float,
     threshold: float,
     train_set: List[str],
+    settings: Settings,
 ) -> None:
     _BENCHMARKS_DIR.mkdir(parents=True, exist_ok=True)
     csv_path = _BENCHMARKS_DIR / "results.csv"
@@ -447,6 +491,11 @@ def _write_output(
         "epochs": args.epochs,
         "lr": args.lr,
         "similarity_threshold": threshold,
+        "darkness_threshold": settings.darkness_threshold,
+        "ocr_text_likelihood_threshold": settings.ocr_text_likelihood_threshold,
+        "blur_threshold": BLUR_THRESHOLD,
+        "detection_quality_low_max": settings.detection_quality_low_max,
+        "detection_quality_high_min": settings.detection_quality_high_min,
         "n_train": len(train_set),
         "n_test": len(rows),
         "n_negatives": len(neg_results),
@@ -571,11 +620,14 @@ def main() -> None:
     print(f"Dataset: {args.dataset}")
     print(f"Images:  {args.images}")
     print(f"Seed:    {args.seed}")
+    print(f"Thresholds: darkness={settings.darkness_threshold:.1f}, "
+          f"ocr_text_likelihood={settings.ocr_text_likelihood_threshold:.2f}, "
+          f"blur={BLUR_THRESHOLD:.1f}")
 
     # Phase 1: Embed
     print("\n[1/7] Loading and embedding images...")
     rows = _load_dataset(args.dataset)
-    embedded = _embed_rows(rows, args.images, args.no_ocr)
+    embedded = _embed_rows(rows, args.images, args.no_ocr, settings)
     if not embedded:
         print("No images found. Check --images path.", file=sys.stderr)
         sys.exit(1)
@@ -617,7 +669,7 @@ def main() -> None:
     if args.negative_dataset.exists():
         print("\n[neg] Evaluating false positive rate on negative images...")
         neg_rows = _load_negative_dataset(args.negative_dataset)
-        neg_embedded = _embed_rows(neg_rows, args.images_neg, args.no_ocr)
+        neg_embedded = _embed_rows(neg_rows, args.images_neg, args.no_ocr, settings)
         if neg_embedded:
             neg_results = _eval_negatives(neg_embedded, database, head, threshold)
             print(f"  {len(neg_results)} negative images evaluated")
@@ -628,7 +680,7 @@ def main() -> None:
     _print_summary(retrieval_results, dino_results, depth_results,
                    neg_results, final_loss, threshold, args.no_depth)
     merged = _merge_rows(retrieval_results, dino_results, depth_results)
-    _write_output(merged, neg_results, args, final_loss, threshold, train_set)
+    _write_output(merged, neg_results, args, final_loss, threshold, train_set, settings)
 
 
 if __name__ == "__main__":

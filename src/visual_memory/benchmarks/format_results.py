@@ -238,6 +238,64 @@ def generate(results_path: Path, output_path: Path) -> None:
     a("---")
     a("")
 
+    # ---- image quality distribution ----
+    a("## Image Quality Distribution")
+    a("")
+    
+    dark_imgs = [r for r in results if r.get("is_dark", False)]
+    blurry_imgs = [r for r in results if r.get("is_blurry", False)]
+    text_imgs = [r for r in results if r.get("text_likelihood", 0.0) >= meta.get("ocr_text_likelihood_threshold", 0.10)]
+    ocr_skip_imgs = [r for r in results if r.get("should_skip_ocr", False)]
+    
+    n_dark = len(dark_imgs)
+    n_blurry = len(blurry_imgs)
+    n_text = len(text_imgs)
+    n_skip = len(ocr_skip_imgs)
+    
+    a(f"- **Dark images** (luminance < {meta.get('darkness_threshold', 30.0):.1f}): "
+      f"**{n_dark}/{total_n} ({_pct(n_dark, total_n)})**")
+    a(f"- **Blurry images** (blur score < {meta.get('blur_threshold', 100.0):.1f}): "
+      f"**{n_blurry}/{total_n} ({_pct(n_blurry, total_n)})**")
+    a(f"- **Text-bearing images** (likelihood >= {meta.get('ocr_text_likelihood_threshold', 0.10):.2f}): "
+      f"**{n_text}/{total_n} ({_pct(n_text, total_n)})**")
+    a(f"- **OCR skipped** (text likelihood too low): **{n_skip}/{total_n} ({_pct(n_skip, total_n)})**")
+    a("")
+    
+    # Quality vs performance
+    a("### Quality Impact on Performance")
+    a("")
+    
+    def _quality_stats(imgs, name):
+        if not imgs:
+            return f"- **{name}**: No images in this category"
+        n = len(imgs)
+        det_success = sum(1 for r in imgs if r.get("dino_detected", 0))
+        bl_correct = sum(r.get("baseline_correct", 0) for r in imgs)
+        pe_correct = sum(r.get("personalized_correct", 0) for r in imgs)
+        return (f"- **{name}** (n={n}): "
+                f"Detection {_pct(det_success, n)}, "
+                f"Retrieval baseline {_pct(bl_correct, n)}, "
+                f"personalized {_pct(pe_correct, n)}")
+    
+    a(_quality_stats(dark_imgs, "Dark images"))
+    a(_quality_stats(blurry_imgs, "Blurry images"))
+    a(_quality_stats(text_imgs, "Text-bearing images"))
+    
+    non_text_imgs = [r for r in results if r.get("text_likelihood", 0.0) < meta.get("ocr_text_likelihood_threshold", 0.10)]
+    if text_imgs and non_text_imgs:
+        text_bl_acc = sum(r.get("baseline_correct", 0) for r in text_imgs) / len(text_imgs)
+        non_text_bl_acc = sum(r.get("baseline_correct", 0) for r in non_text_imgs) / len(non_text_imgs)
+        text_pe_acc = sum(r.get("personalized_correct", 0) for r in text_imgs) / len(text_imgs)
+        non_text_pe_acc = sum(r.get("personalized_correct", 0) for r in non_text_imgs) / len(non_text_imgs)
+        a("")
+        a(f"**Text vs Non-text retrieval**: "
+          f"Baseline {text_bl_acc*100:.1f}% vs {non_text_bl_acc*100:.1f}%, "
+          f"Personalized {text_pe_acc*100:.1f}% vs {non_text_pe_acc*100:.1f}%")
+    
+    a("")
+    a("---")
+    a("")
+
     # ---- per-condition breakdown ----
     a("## By Condition")
     a("")
