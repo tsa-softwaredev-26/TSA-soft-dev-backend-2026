@@ -23,6 +23,7 @@ import io
 import json
 import os
 import sys
+import types
 import tempfile
 import time
 import urllib.error
@@ -32,12 +33,46 @@ from typing import Any, Callable, Optional, Tuple
 import torch
 import torch.nn.functional as F
 from PIL import Image
+from visual_memory.learning.projection_head import ProjectionHead
 
 import warnings
 warnings.filterwarnings("ignore")
 os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 os.environ.setdefault("TQDM_DISABLE", "1")
 os.environ["ENABLE_DEPTH"] = "0"
+
+try:
+    import loguru  # type: ignore
+except ImportError:
+    class _DummyLoguruLogger:
+        def remove(self, *args, **kwargs):
+            return None
+
+        def add(self, *args, **kwargs):
+            return None
+
+        def bind(self, **kwargs):
+            return self
+
+        def opt(self, **kwargs):
+            return self
+
+        def debug(self, *args, **kwargs):
+            return None
+
+        def info(self, *args, **kwargs):
+            return None
+
+        def warning(self, *args, **kwargs):
+            return None
+
+        def error(self, *args, **kwargs):
+            return None
+
+        def critical(self, *args, **kwargs):
+            return None
+
+    sys.modules["loguru"] = types.SimpleNamespace(logger=_DummyLoguruLogger())
 
 _VERBOSE_ENV = os.environ.get("VERBOSE", "0")
 _verbosity_default = 2 if _VERBOSE_ENV == "1" else 1
@@ -82,6 +117,7 @@ class StubScanPipeline:
     def __init__(self):
         self._cached_embeddings: dict = {}
         self._cached_crops: dict = {}
+        self._head = ProjectionHead(dim=1536)
 
     def reload_database(self) -> None:
         pass
@@ -92,6 +128,35 @@ class StubScanPipeline:
     def set_head_weight(self, w: float, r: int) -> None:
         self._head_weight = w
         self._head_ramp_at = r
+
+    def _apply_head(self, emb: torch.Tensor) -> torch.Tensor:
+        if not self._head_trained or not self._enable_learning:
+            return emb
+        alpha = min(
+            self._head_weight,
+            self._head_weight * self._triplet_count / max(self._head_ramp_at, 1),
+        )
+        if alpha <= 0.0:
+            return emb
+        with torch.no_grad():
+            projected = self._head.project(emb)
+        if alpha >= 1.0:
+            return projected
+        blended = (1.0 - alpha) * emb + alpha * projected
+        return F.normalize(blended, dim=1)
+
+    def reload_head(self) -> bool:
+        import visual_memory.api.pipelines as _pm
+        if _pm._database is None:
+            self._head_trained = False
+            return False
+        state = _pm._database.load_projection_head()
+        if state is None:
+            self._head_trained = False
+            return False
+        self._head.load_state_dict(state)
+        self._head_trained = True
+        return True
 
     def get_cached_embeddings(self, scan_id: str, label: str):
         """Return (anchor, query) tensors or None. Configurable per test."""

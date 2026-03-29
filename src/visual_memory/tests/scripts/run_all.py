@@ -37,6 +37,7 @@ _UNIT_TESTS = [
     ("test_database_store",   "unit", ["database"]),
     ("test_ollama_utils",     "unit", ["ollama"]),
     ("test_projection_head",  "unit", ["learning"]),
+    ("test_learning_pipeline","unit", ["learning", "api"]),
     ("test_scan_batching",    "unit", ["scan", "embedding"]),
 ]
 

@@ -1,9 +1,15 @@
 """Triplet loss trainer for the projection head."""
+from __future__ import annotations
+
+import argparse
 from pathlib import Path
 from typing import List, Tuple
 
 import torch
 import torch.nn.functional as F
+
+from visual_memory.config import Settings
+from visual_memory.database import DatabaseStore
 
 from .projection_head import ProjectionHead
 from .feedback_store import FeedbackStore
@@ -70,6 +76,76 @@ class ProjectionTrainer:
         self.head.save(path)
 
 
-# Retraining is triggered via POST /retrain (HTTP API), not CLI.
-# The API endpoint enforces minimum feedback requirements and handles
-# DB access correctly. See visual_memory/api/routes/retrain.py.
+def _build_parser(settings: Settings) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Train projection head weights from SQLite feedback triplets."
+    )
+    parser.add_argument(
+        "--db-path",
+        default=settings.db_path,
+        help=f"Path to SQLite DB (default: {settings.db_path})",
+    )
+    parser.add_argument(
+        "--output",
+        default=settings.projection_head_path,
+        help=f"Output path for trained head weights (default: {settings.projection_head_path})",
+    )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=settings.projection_head_epochs,
+        help=f"Training epochs (default: {settings.projection_head_epochs})",
+    )
+    parser.add_argument(
+        "--lr",
+        type=float,
+        default=1e-4,
+        help="Learning rate (default: 1e-4)",
+    )
+    parser.add_argument(
+        "--dim",
+        type=int,
+        default=settings.projection_head_dim,
+        help=f"Projection head embedding dimension (default: {settings.projection_head_dim})",
+    )
+    parser.add_argument(
+        "--feedback-dir",
+        default=None,
+        help="Deprecated legacy option. Feedback is loaded from --db-path.",
+    )
+    return parser
+
+
+def main() -> int:
+    settings = Settings()
+    args = _build_parser(settings).parse_args()
+
+    if args.feedback_dir:
+        print("warning: --feedback-dir is deprecated and ignored; using --db-path")
+
+    db = DatabaseStore(args.db_path)
+    store = FeedbackStore(db)
+    triplets = store.load_triplets()
+    counts = store.count()
+
+    if not triplets:
+        print(
+            f"no training data: positives={counts['positives']} "
+            f"negatives={counts['negatives']} triplets={counts['triplets']}"
+        )
+        return 1
+
+    head = ProjectionHead(dim=args.dim)
+    trainer = ProjectionTrainer(head, lr=args.lr)
+    final_loss = trainer.train(triplets, epochs=args.epochs)
+    trainer.save(Path(args.output))
+
+    print(
+        f"trained projection head -> {args.output} "
+        f"(triplets={counts['triplets']}, epochs={args.epochs}, loss={final_loss:.6f})"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
