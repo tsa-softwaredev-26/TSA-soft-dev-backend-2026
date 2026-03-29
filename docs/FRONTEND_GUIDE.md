@@ -8,9 +8,9 @@ Integration guide for the Spaitra API. Works for frontend, mobile, and backend d
 
 Spaitra is a spatial memory aid for blind users. The user teaches the app what their things look like; the app tells them where those things are. For someone who cannot quickly re-scan their environment, this replaces the constant mental load of tracking object locations.
 
-The frontend's job is to make this feel immediate. No mode menus, no confirmation dialogs, no help screens. The user speaks, the app responds, and the item is found. Every design decision follows from keeping that loop as tight as possible.
+The frontend's job is to make this feel immediate. No mode menus, no confirmation dialogs, no help screens. The user speaks or performs a touch gesture, the app responds, and the item is found. Every design decision follows from keeping that loop as tight as possible, following Steve Job's design philosophy.
 
-The first time someone opens the app, they do not see instructions. They experience the product: teach two real items from their environment, scan, and hear the app announce what it found with distance and direction. They already know where they placed those items - so when the app names them back, the result is immediately verifiable and immediately impressive. That moment is the whole product.
+The first time someone opens the app, they do not see a tutorial. The app has them experience the product: teach two real items from their environment, scan, and hear the app announce what it found with distance and direction. They already know where they placed those items, so when the app names them back, the result is immediately verifiable and immediately impressive. This is designed to immediatly spark the curiosity so they learn the rest of the features naturally. Little voice hints will be planted to nudge the user to use the more specific features that they haven't tried yet, like "try saying 'export this.'" Since they are blind, voice feedback is a necessity with every user interaction. The plan is to have the user learn the app on their own through the quick demo at the start, and little moments of discovery of new uses for the app. The onboarding emphasizes for the user's experience of those moment so it doesn't feel like a tutorial or lesson, but a seamless addition to their lives. 
 
 ---
 
@@ -161,15 +161,19 @@ After one full cycle: "Swipe left to go back. That is how scan works."
 
 ### Phase 4: Ask demo
 
-Return to home listen state. App says: "Now ask me where you left your [label of first item taught]."
+Return to home listen state. App says: "Now ask me where you left your [label of first item taught], or use specifics about the item or text in it instead."
 
 User asks naturally. Call POST /ask with the spoken query.
 
 Read the narration response. Example: "Your wallet is in the living room, to your left."
 
-Onboarding ends. App says: "You are all set. Say 'Teach', 'Scan', 'Find', or 'Ask' anytime."
+Onboarding ends. App says: "You are all set, 'Teach', 'Scan', 'Find', or 'Ask' anything."
 
-Do not collect any feedback during onboarding. Do not call POST /feedback. Do not prompt the user to confirm detections. The projection head does not train on the onboarding session.
+Do not collect any feedback during onboarding. 
+
+### Phase 5: Ongoing
+
+Hints for small features like "trying saying export, or holding down when in a scan" appear occasionally for features the user hasn't used
 
 ---
 
