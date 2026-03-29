@@ -740,12 +740,9 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 ## TODO
 
 ### Engine / Architecture
-- [ ] Remove redact_receipt.py - not needed, using receipts with no personal info
-- [ ] Run full benchmark - 120 images not yet captured; see `benchmarks/CAPTURE_GUIDE.md` (~1-2 hrs)
+- [ ] Run full benchmark - 120 images not yet captured (~1-2 hrs). No CAPTURE_GUIDE.md exists yet; manually capture dataset images.
 - [ ] Add batched OCR service endpoint support and wire it into pipeline OCR paths to reduce HTTP overhead on multi-crop scans
-- [ ] Wire `detect_all_batch()` into ScanPipeline when processing multiple images per request
-- [ ] Wire `detect_batch()` into RememberPipeline if multi-prompt remember is added
-- [ ] Remove `engine/embedding/projection_head/` empty dir (leftover from earlier experiment)
+- [ ] Wire `detect_all_batch()` (in `detect_all.py`) and `detect_batch()` (in `prompt_based.py`) into ScanPipeline and RememberPipeline to avoid per-crop iteration loops
 - [ ] `str | Path` type hints in pipeline files require Python 3.10+; `pyproject.toml` allows 3.8+ (pre-existing, low priority)
 - [ ] OCR text likelihood threshold tuning: current default 0.10 was chosen heuristically; calibrate against a labelled set of crops with/without text to confirm false-negative rate is acceptable. See `quality_utils.estimate_text_likelihood()`.
 
@@ -753,26 +750,21 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - [ ] `DatabaseStore` methods `save_ml_settings` / `load_ml_settings` merge only changed keys on write - currently the PATCH /settings handler saves the full settings snapshot, which is fine for single-user but would need per-user scoping for multi-user.
 
 ### Testing
-- [ ] Overhaul test runner to exercise all features via HTTP endpoints (Flask test client) rather than calling pipeline code directly. Cover remember, scan, feedback, retrain, find, ask, item/ask, sightings, items, settings end-to-end. See `test_suite_plan.log` for detailed plan.
-- [ ] Implement new test scripts from test_suite_plan.log: test_ollama_utils.py, test_database_store.py, test_find_route.py, test_item_ask_rename.py, test_circuit_breaker_integration.py
-- [ ] Validate Ollama prompts against 20+ real voice queries per extraction type (extract_search_term, extract_item_intent, extract_rename_target). See test_suite_plan.log section 8.
+- [ ] Refactor test_ask_mode.py, test_projection_head.py, test_scan_batching.py to use `TestRunner` instead of module-level print statements so exit codes integrate with run_all.
+- [ ] Overhaul test runner to exercise all features via HTTP endpoints (Flask test client) rather than calling pipeline code directly. Cover remember, scan, feedback, retrain, find, ask, item/ask, sightings, items, settings end-to-end.
+- [ ] Validate Ollama prompts (extract_search_term, extract_item_intent, extract_rename_target) against 20+ real voice queries to confirm extraction reliability.
 
 ### Learning / Personalization
-- [x] Test suite: added `test_learning_pipeline.py` covering FeedbackStore DB roundtrip, triplet loading, trainer convergence, `_apply_head` blending at various triplet counts, `reload_head`, and full /feedback -> /retrain -> /settings endpoint flow
-- [x] CLI trainer now accepts `--db-path` and reads triplets from SQLite feedback table
 
 ### Deployment
-- [ ] `scans/` crop save directory path is hardcoded relative to source; move to a settings.py / env var so it points to a writable location in containers
-- [ ] Add a systemd unit for the OCR microservice and a startup health check dependency
+- [ ] Fix file permissions: `deploy/spaitra.service` and related files are owned by root on the server. Run `sudo chown -R dev:dev /opt/spaitra/TSA-soft-dev-backend-2026/deploy/` to ensure future installs can chmod.
 
-### API
-- [x] OCR service health probe - covered by GET /debug/state (checks OCR health on demand); startup check not wired but `/debug/state` gives the same information on request
+### API & Logging
+- [x] OCR service health probe - covered by GET /debug/state
 - [x] Have fast mode in settings disable second pass detection in remember mode
 - [x] `PATCH /debug/config` now accepts `persist: true` flag that calls `save_ml_settings()` after applying
-- [ ] Add a debug GET to query logs, including performance logs like temp, usage, critical/warning logs if any, etc.
-
-### Logs
-- [ ] Improve performance logs; add stuff like RAM usage, swap usage, VRAM usage, how often it has to unload models to save VRAM, VRAM swap occurences, runtimes, thermals (sensor), crash logs 
+- [x] Add debug GET to query logs - GET /debug/logs returns recent app log entries
+- [x] Performance logs include system metrics - RAM, swap, VRAM, CPU temp, duration_ms. See LOGGING.md for schema and logparse CLI. 
 ---
 
 ## Server Transition Notes
