@@ -62,6 +62,21 @@ Semantic memory retrieval.
 - Continuous adaptation to the user’s environment
 - Minimalist, voice-based interface
 
+---
+
+## UX Design
+
+The interface is voice-first. One core action per screen. There is no tutorial on first launch - the onboarding is the user's first real Teach + Scan + Ask session with actual items in an actual room. They understand the product because they used it, not because they read instructions.
+
+Feedback model decisions that affect the backend:
+- Only explicit negatives are logged as training data. The user says "wrong" to flag a bad detection. Silence is not recorded.
+- No feedback is collected during onboarding. The ProjectionHead does not train until the user has organic sessions with clean, representative data.
+- Implicit acceptance is excluded because unverified positives corrupt triplet training over time.
+
+See [FRONTEND_GUIDE.md](FRONTEND_GUIDE.md) for the full onboarding flow and UX patterns.
+
+---
+
 ## Setup
 
 ### Local Development
@@ -361,7 +376,8 @@ Multi-image (POST /remember with `images[]`):
 - `ProjectionTrainer(head, lr=1e-4)` - Adam optimizer with `weight_decay=1e-4`
 - `train_step(anchor, positive, negative, weight=1.0) -> float` - single gradient step
 - `train(triplets, epochs=20) -> float` - applies linear recency bias (oldest=0.5, newest=1.0); returns avg final loss
-- CLI: `python -m visual_memory.learning.trainer [--feedback-dir feedback/] [--output models/projection_head.pt] [--epochs 20] [--lr 1e-4]`
+- CLI: `python -m visual_memory.learning.trainer [--db-path data/memory.db] [--output models/projection_head.pt] [--epochs 20] [--lr 1e-4] [--dim 1536]`
+- `--feedback-dir` is accepted as a deprecated alias for `--db-path` for backwards compat; logs a warning
 
 ### `learning/feedback_store.py` - `FeedbackStore`
 - `FeedbackStore(db: DatabaseStore)` - thin wrapper; all persistence delegated to `DatabaseStore.feedback` table
@@ -742,8 +758,8 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - [ ] Validate Ollama prompts against 20+ real voice queries per extraction type (extract_search_term, extract_item_intent, extract_rename_target). See test_suite_plan.log section 8.
 
 ### Learning / Personalization
-- [ ] Test suite: add `test_learning_pipeline.py` covering FeedbackStore DB roundtrip, triplet loading, trainer convergence, `_apply_head` blending at various triplet counts, `reload_head`, and full /feedback -> /retrain -> /settings endpoint flow
-- [ ] CLI trainer (`python -m visual_memory.learning.trainer`) still reads from legacy `feedback/` dir; update to accept a `--db-path` arg that reads from SQLite feedback table instead
+- [x] Test suite: added `test_learning_pipeline.py` covering FeedbackStore DB roundtrip, triplet loading, trainer convergence, `_apply_head` blending at various triplet counts, `reload_head`, and full /feedback -> /retrain -> /settings endpoint flow
+- [x] CLI trainer now accepts `--db-path` and reads triplets from SQLite feedback table
 
 ### Deployment
 - [ ] `scans/` crop save directory path is hardcoded relative to source; move to a settings.py / env var so it points to a writable location in containers

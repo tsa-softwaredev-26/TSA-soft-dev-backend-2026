@@ -4,6 +4,16 @@ Integration guide for the Spaitra API. Works for frontend, mobile, and backend d
 
 ---
 
+## The Experience
+
+Spaitra is a spatial memory aid for blind users. The user teaches the app what their things look like; the app tells them where those things are. For someone who cannot quickly re-scan their environment, this replaces the constant mental load of tracking object locations.
+
+The frontend's job is to make this feel immediate. No mode menus, no confirmation dialogs, no help screens. The user speaks, the app responds, and the item is found. Every design decision follows from keeping that loop as tight as possible.
+
+The first time someone opens the app, they do not see instructions. They experience the product: teach two real items from their environment, scan, and hear the app announce what it found with distance and direction. They already know where they placed those items - so when the app names them back, the result is immediately verifiable and immediately impressive. That moment is the whole product.
+
+---
+
 ## Setup
 
 ### Base URL
@@ -107,6 +117,120 @@ The server caches the last 50 scans. Send feedback during the same scan session 
 **`voice_speed`** - read once from `GET /user-settings` at app launch. Apply to your TTS engine.
 
 **Current match index** - 0-based position in the `matches` array from the last scan. Client-owned; server does not track it.
+
+---
+
+## First Launch: Onboarding
+
+Check item count at launch. If items exist, skip onboarding - the user has been here before.
+
+```
+GET /items
+```
+
+If `count == 0`, start onboarding. There is no separate onboarding screen. The onboarding is the first real Teach + Scan + Ask session. The user teaches actual items from their environment and finds them immediately after.
+
+### Phase 1: Teach two items
+
+App says: "I remember where your things are. Grab two items near you, and let's start."
+
+User points camera at the first item and says the name. Run POST /remember as normal. On success: "Got it. Now teach me the second one."
+
+On second success: "Good. Place both items somewhere in the room."
+
+Brief pause, then: "Tap or say 'Scan' when ready."
+
+### Phase 2: Scan
+
+User initiates scan. Run POST /scan, store scan_id.
+
+Read all narration strings in array order. Example: "Wallet, to your left, 2.3 feet. Keys, straight ahead, 4 feet."
+
+After narration, prompt for room name: "What room is this?" (haptic single pulse, enter listening state)
+
+User says room name. Call POST /sightings with room_name and all matched labels from the scan. This links the room to each detection and is what makes the Ask demo in phase 4 work.
+
+### Phase 3: Swipe introduction
+
+App says: "Swipe right to browse each item."
+
+On swipe, re-read the match narration from the cached scan response. No API call. Format: "[label]. [direction]. [distance] feet." Narration is interruptible - if the user swipes again before it finishes, cut it and start the next item.
+
+After one full cycle: "Swipe left to go back. That is how scan works."
+
+### Phase 4: Ask demo
+
+Return to home listen state. App says: "Now ask me where you left your [label of first item taught]."
+
+User asks naturally. Call POST /ask with the spoken query.
+
+Read the narration response. Example: "Your wallet is in the living room, to your left."
+
+Onboarding ends. App says: "You are all set. Say 'Teach', 'Scan', 'Find', or 'Ask' anytime."
+
+Do not collect any feedback during onboarding. Do not call POST /feedback. Do not prompt the user to confirm detections. The projection head does not train on the onboarding session.
+
+---
+
+## UX Patterns
+
+### Modes
+
+| Voice command | Action |
+|---|---|
+| "Teach" | Teach mode - app prompts for item label |
+| "Scan" | Trigger scan |
+| "Find" | App asks "What item?" - direct lookup via GET /find |
+| "Ask" | App asks "What do you want to know?" - semantic query via POST /ask |
+| "Back" | Return to home from any mode |
+| "Settings" | Open settings |
+
+Scan is triggered by voice ("Scan") or by a tap button on the home screen. The tap zone should cover the full lower half of the screen, not a small target - users cannot see where to tap.
+
+### Haptics
+
+| Event | Haptic | Sound |
+|---|---|---|
+| Command recognized | Single pulse | Beep |
+| Mode entered | Single pulse | Mode prompt |
+| Listening for input | Continuous soft buzz | (none) |
+| Action complete | Double pulse | Confirmation phrase |
+| Scan complete | Double pulse | Narration starts |
+| Error / no match | Long buzz | Error message |
+| Location saved | Double pulse | "Saved to [room]" |
+
+### Scan Mode Gestures
+
+| Gesture | Action |
+|---|---|
+| Tap | Rescan - interrupts narration, new scan immediately |
+| Swipe right | Next detection - re-reads its narration |
+| Swipe left | Previous detection - re-reads its narration |
+| Double-tap | Save location for current detection |
+| Hold ~1 sec | Export current detection |
+
+On swipe, read the narration from the cached matches array. No API call. Narration is interruptible on the next swipe.
+
+Double-tap and hold are power user gestures. Do not mention or demonstrate them during onboarding.
+
+### Feedback Model
+
+Feedback is opt-in and voice-only. The user never needs to confirm a correct detection.
+
+| Scenario | Action |
+|---|---|
+| Detection is correct | No action. Do not prompt. Do not log. |
+| Detection is wrong | User says "wrong" - call POST /feedback with `"wrong"` |
+
+Do not use gesture-based feedback. Tap is already reserved for rescan. Do not prompt for feedback during onboarding. The backend pairs explicit negatives against known positives for triplet training - clean signal matters more than volume.
+
+### Room Naming
+
+Call POST /sightings when the user explicitly names a room:
+- After a scan, when the app asks "What room is this?"
+- After a double-tap on a scan result and the user speaks a location
+
+Do not call POST /sightings automatically without a user-spoken room name.
 
 ---
 
@@ -611,7 +735,7 @@ PATCH /user-settings
 
 | Field | Values | Notes |
 |-------|--------|-------|
-| `performance_mode` | `"fast"` / `"balanced"` / `"accurate"` | fast = no depth (~1s), balanced = depth (~3s), accurate = depth + better models (~5s) |
+| `performance_mode` | `"fast"` / `"balanced"` / `"accurate"` | fast = no depth + no LLM query fallback, balanced = depth + LLM query fallback, accurate = depth + LLM query fallback |
 | `voice_speed` | 0.5 - 2.0 | Apply to your TTS rate |
 | `learning_enabled` | bool | Propagated to scan pipeline immediately |
 | `button_layout` | `"default"` / `"swapped"` | UI layout preference |
