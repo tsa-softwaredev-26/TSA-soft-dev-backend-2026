@@ -20,6 +20,28 @@ class ModelRegistry:
         self._gdino_detector  = None
         self._yoloe_detector  = None
 
+    def _log_vram_layout(
+        self,
+        *,
+        mode: str,
+        action: str,
+        offloaded: list[str] | None = None,
+        promoted: list[str] | None = None,
+        duration_ms: int = 0,
+    ) -> None:
+        _log.info({
+            "event": "vram_layout",
+            "tag": LogTag.VRAM,
+            "mode": mode,
+            "action": action,
+            "save_vram_enabled": bool(_settings.save_vram),
+            "offloaded": offloaded or [],
+            "promoted": promoted or [],
+            "swap_count": len(offloaded or []),
+            "duration_ms": duration_ms,
+            **collect_system_metrics(),
+        })
+
     @property
     def img_embedder(self):
         if self._img_embedder is None:
@@ -62,10 +84,15 @@ class ModelRegistry:
         Called at the start of every RememberPipeline.run() / detect_score().
         """
         import torch
-        if not _settings.save_vram or not torch.cuda.is_available():
+        if not _settings.save_vram:
+            self._log_vram_layout(mode="remember", action="skipped_save_vram_off")
+            return
+        if not torch.cuda.is_available():
+            self._log_vram_layout(mode="remember", action="skipped_no_cuda")
             return
         t0 = time.monotonic()
         offloaded = []
+        promoted = []
         if self._yoloe_detector is not None:
             self._yoloe_detector.to_cpu()
             offloaded.append("yoloe")
@@ -75,14 +102,16 @@ class ModelRegistry:
         torch.cuda.empty_cache()
         if self._gdino_detector is not None:
             self._gdino_detector.to_gpu()
-        _log.info({
-            "event": "vram_layout",
-            "tag": LogTag.VRAM,
-            "mode": "remember",
-            "offloaded": offloaded,
-            "duration_ms": round((time.monotonic() - t0) * 1000),
-            **collect_system_metrics(),
-        })
+            promoted.append("gdino")
+        duration_ms = round((time.monotonic() - t0) * 1000)
+        action = "noop" if not offloaded and not promoted else "applied"
+        self._log_vram_layout(
+            mode="remember",
+            action=action,
+            offloaded=offloaded,
+            promoted=promoted,
+            duration_ms=duration_ms,
+        )
 
     def prepare_for_scan(self) -> None:
         """Offload remember-only models to CPU; ensure scan models are on GPU.
@@ -91,26 +120,34 @@ class ModelRegistry:
         Called at the start of every ScanPipeline.run() and after warm_all().
         """
         import torch
-        if not _settings.save_vram or not torch.cuda.is_available():
+        if not _settings.save_vram:
+            self._log_vram_layout(mode="scan", action="skipped_save_vram_off")
+            return
+        if not torch.cuda.is_available():
+            self._log_vram_layout(mode="scan", action="skipped_no_cuda")
             return
         t0 = time.monotonic()
         offloaded = []
+        promoted = []
         if self._gdino_detector is not None:
             self._gdino_detector.to_cpu()
             offloaded.append("gdino")
         torch.cuda.empty_cache()
         if self._yoloe_detector is not None:
             self._yoloe_detector.to_gpu()
+            promoted.append("yoloe")
         if self._depth_estimator is not None and _settings.enable_depth:
             self._depth_estimator.to_gpu()
-        _log.info({
-            "event": "vram_layout",
-            "tag": LogTag.VRAM,
-            "mode": "scan",
-            "offloaded": offloaded,
-            "duration_ms": round((time.monotonic() - t0) * 1000),
-            **collect_system_metrics(),
-        })
+            promoted.append("depth")
+        duration_ms = round((time.monotonic() - t0) * 1000)
+        action = "noop" if not offloaded and not promoted else "applied"
+        self._log_vram_layout(
+            mode="scan",
+            action=action,
+            offloaded=offloaded,
+            promoted=promoted,
+            duration_ms=duration_ms,
+        )
 
     def preload(self, depth: bool = False) -> None:
         # Eagerly load all models. Call at Flask startup to avoid first-request latency.
