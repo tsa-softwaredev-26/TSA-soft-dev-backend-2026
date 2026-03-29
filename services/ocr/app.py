@@ -89,3 +89,27 @@ async def run_ocr(image: UploadFile = File(...)) -> dict:
         return _extract_text(pil_image)
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/ocr/batch")
+async def run_ocr_batch(images: list[UploadFile] = File(...)) -> dict:
+    if not images:
+        raise HTTPException(status_code=400, detail="missing images")
+
+    out = []
+    for image in images:
+        data = await image.read()
+        if not data:
+            out.append({"text": "", "confidence": 0.0, "segments": []})
+            continue
+        try:
+            pil_image = Image.open(io.BytesIO(data))
+        except OSError:
+            out.append({"text": "", "confidence": 0.0, "segments": []})
+            continue
+        try:
+            out.append(_extract_text(pil_image))
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return {"results": out}
