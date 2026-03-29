@@ -1,0 +1,18 @@
+Temporary performance note - OCR batching pass (baseline-2026-03-29-c)
+
+High-level changes:
+- Added OCR batch endpoint in OCR service: POST /ocr/batch
+- Added HTTPOCRRecognizer.recognize_batch() with fallback to per-image OCR on error
+- Wired ScanPipeline to run one OCR batch call per scan for OCR-eligible crops
+- Added batch metrics to scan_complete logs: ocr_batch_requests, ocr_batch_items, ocr_batch_non_empty
+
+Three-suite timing comparison:
+- unit: 11.634s (baseline-a) -> 11.009s (baseline-b) -> 11.027s (baseline-c)
+- api: 12.292s (baseline-a) -> 13.237s (baseline-b) -> 12.253s (baseline-c)
+- system: 20.031s (baseline-a) -> 16.106s (baseline-b) -> 17.871s (baseline-c)
+
+Interpretation:
+- Unit and API remain stable after OCR batching.
+- System suite remains materially faster than original baseline-a, but is slower than baseline-b in this single sample.
+- Latest scan sample shows batched OCR active: ocr_batch_requests=1.0, ocr_batch_items=9.0.
+- OCR still dominates scan latency in this sample (scan_ocr_avg_ms=3084.0, scan_complete_avg_ms=3586.0), so next gains likely require OCR model/runtime optimization in OCR service.
