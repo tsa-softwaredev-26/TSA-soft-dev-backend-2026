@@ -39,19 +39,18 @@ _X = "\033[0m"
 
 VERBOSE = os.environ.get("VERBOSE", "0") == "1"
 
-print(f"\n{_B}OCR Benchmark: OCR Service Text Extraction{_X}")
-print(f"{_B}{'='*60}{_X}\n")
+print(f"\n{_B}OCR Benchmark: OCR Service Text Extraction{_X}\n")
 
 # Load the HTTP OCR recognizer
 from visual_memory.engine.text_recognition import TextRecognizer
 recognizer = TextRecognizer()
-print(f"{_G}✓ OCR recognizer ready{_X}\n")
+print(f"{_G}[PASS] OCR recognizer ready{_X}\n")
 
 # Benchmark images: text_demo/*.jpeg
 test_images = sorted([p for p in TEXT_DEMO.glob("*.jpeg") if p.is_file() and not p.name.startswith(".")])
 print(f"{_B}Test Images ({len(test_images)}){_X}")
 for img_path in test_images:
-    print(f"  • {img_path.name}")
+    print(f"  - {img_path.name}")
 print()
 
 # Extract text
@@ -97,9 +96,9 @@ print(f"  OCR Success: {n_success}/{len(test_images)} images")
 print(f"  Ground truth available: {n_gt} images")
 
 print(f"\n{_B}Key Findings{_X}\n")
-print(f"  • All test images extracted successfully through the OCR service")
-print(f"  • CLIP embedding will be computed in next phase (text similarity tuning)")
-print(f"  • Text confidence and segment counts logged for analysis")
+print(f"  - All test images extracted successfully through the OCR service")
+print(f"  - CLIP embedding will be computed in next phase (text similarity tuning)")
+print(f"  - Text confidence and segment counts logged for analysis")
 print()
 
 sys.exit(0 if n_success == len(test_images) else 1)

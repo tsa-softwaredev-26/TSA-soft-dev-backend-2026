@@ -17,7 +17,7 @@ def _fail(name: str, reason: str) -> None:
     print(f"FAIL  {name}: {reason}")
 
 
-# ---- Test 1: ProjectionHead is identity at init ----
+# Test 1: ProjectionHead is identity at init
 
 def test_identity_at_init():
     name = "ProjectionHead identity at init"
@@ -34,7 +34,7 @@ def test_identity_at_init():
         _fail(name, f"cosine sim={sim:.6f}, expected ~1.0")
 
 
-# ---- Test 2: triplet_loss = 0 when anchor==positive, anchor!=negative ----
+# Test 2: triplet_loss = 0 when anchor==positive, anchor!=negative
 
 def test_triplet_loss_zero():
     name = "triplet_loss=0 (anchor==positive, anchor!=negative)"
@@ -47,7 +47,7 @@ def test_triplet_loss_zero():
         _fail(name, f"loss={loss:.4f}, expected 0.0")
 
 
-# ---- Test 3: triplet_loss > 0 when anchor==negative (bad ordering) ----
+# Test 3: triplet_loss > 0 when anchor==negative (bad ordering)
 
 def test_triplet_loss_nonzero():
     name = "triplet_loss>0 (anchor==negative)"
@@ -60,12 +60,14 @@ def test_triplet_loss_nonzero():
         _fail(name, f"loss={loss:.4f}, expected >0.0")
 
 
-# ---- Test 4: FeedbackStore roundtrip ----
+# Test 4: FeedbackStore roundtrip
 
 def test_feedback_store_roundtrip():
     name = "FeedbackStore write + load_triplets roundtrip"
     with tempfile.TemporaryDirectory() as tmpdir:
-        store = FeedbackStore(store_dir=Path(tmpdir))
+        from visual_memory.database.store import DatabaseStore
+        db = DatabaseStore(str(Path(tmpdir) / "test.db"))
+        store = FeedbackStore(db)
         anc = torch.randn(1, 1536)
         q = torch.randn(1, 1536)
         store.record_positive(anc, q, label="wallet")
@@ -81,7 +83,7 @@ def test_feedback_store_roundtrip():
             _fail(name, f"triplets={len(triplets)}, positives={counts['positives']}, negatives={counts['negatives']}")
 
 
-# ---- Test 5: ProjectionTrainer.train_step returns float, loss decreases ----
+# Test 5: ProjectionTrainer.train_step returns float, loss decreases
 
 def test_trainer_loss_decreases():
     name = "ProjectionTrainer.train_step returns float and loss decreases"
@@ -109,7 +111,7 @@ def test_trainer_loss_decreases():
         _fail(name, f"loss did not decrease: first={first_loss:.4f}, last={last_loss:.4f}")
 
 
-# ---- Runner ----
+# Runner
 
 if __name__ == "__main__":
     print("Running projection head tests (CPU-only, no model loading)")

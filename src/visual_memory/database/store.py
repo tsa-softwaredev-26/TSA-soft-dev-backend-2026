@@ -15,7 +15,7 @@ class DatabaseStore:
         self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
         self._create_tables()
 
-    # ---- schema ----
+    # schema 
 
     def _create_tables(self):
         self._conn.executescript("""
@@ -515,7 +515,7 @@ class DatabaseStore:
             "room_name": room_name,
         }
 
-    # ---- lifecycle ----
+    # lifecycle 
 
     def close(self):
         self._conn.close()

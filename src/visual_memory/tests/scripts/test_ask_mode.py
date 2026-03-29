@@ -3,7 +3,7 @@ Integration tests for Ask Mode: POST /ask, POST /item/ask, GET /find
 (narration, OCR fallback, room query).
 
 These tests use the Flask test client and a real temporary SQLite database.
-No ML models are loaded — embeddings are pre-seeded directly into the DB
+No ML models are loaded - embeddings are pre-seeded directly into the DB
 so tests are fast (< 1 second each).
 
 Run:
@@ -60,7 +60,7 @@ def _dump(data: dict) -> None:
         print(f"     json: {json.dumps(data, indent=2)}")
 
 
-# ---- helpers ----
+# helpers
 
 def _make_embedding(seed: int = 0) -> torch.Tensor:
     """Return a deterministic normalized 1536-dim embedding."""
@@ -98,7 +98,7 @@ def _seed_db(db, label: str, ocr_text: str = "", room_name: str | None = None, e
     )
 
 
-# ---- Test setup ----
+# Test setup
 
 _tmp = tempfile.mkdtemp()
 _db_path = str(Path(_tmp) / "test_ask.db")
@@ -108,9 +108,9 @@ from visual_memory.database.store import DatabaseStore
 from visual_memory.api.routes.find import build_narration, _normalize_room
 
 
-# ===== Section 1: build_narration helper =====
+# Section 1: build_narration helper
 
-_section("[1] build_narration — unit tests")
+_section("[1] build_narration - unit tests")
 
 s_full = {
     "label": "wallet",
@@ -146,9 +146,9 @@ else:
     _fail("narration:minimal", f"unexpected: '{n3}'")
 
 
-# ===== Section 2: room normalization =====
+# Section 2: room normalization
 
-_section("[2] _normalize_room — unit tests")
+_section("[2] _normalize_room - unit tests")
 
 cases = [
     ("In The Kitchen", "kitchen"),
@@ -160,14 +160,14 @@ cases = [
 for raw, expected in cases:
     got = _normalize_room(raw)
     if got == expected:
-        _pass("room_normalize", f"'{raw}' → '{got}'")
+        _pass("room_normalize", f"'{raw}' -> '{got}'")
     else:
-        _fail("room_normalize", f"'{raw}' → '{got}' (expected '{expected}')")
+        _fail("room_normalize", f"'{raw}' -> '{got}' (expected '{expected}')")
 
 
-# ===== Section 3: DB helpers =====
+# Section 3: DB helpers
 
-_section("[3] DatabaseStore — get_items_with_ocr, get_labels_last_seen_in_room")
+_section("[3] DatabaseStore - get_items_with_ocr, get_labels_last_seen_in_room")
 
 db = DatabaseStore(_db_path)
 
@@ -185,7 +185,7 @@ else:
 kitchen_items = db.get_labels_last_seen_in_room("kitchen")
 kitchen_labels = {r["label"] for r in kitchen_items}
 if "wallet" in kitchen_labels and "receipt" in kitchen_labels and "keys" not in kitchen_labels:
-    _pass("db:get_labels_last_seen_in_room", f"kitchen → {kitchen_labels}")
+    _pass("db:get_labels_last_seen_in_room", f"kitchen -> {kitchen_labels}")
 else:
     _fail("db:get_labels_last_seen_in_room", f"unexpected: {kitchen_labels}")
 
@@ -196,9 +196,9 @@ else:
     _fail("db:room_bedroom", f"unexpected: {[r['label'] for r in bedroom_items]}")
 
 
-# ===== Section 4: Flask test client — GET /find =====
+# Section 4: Flask test client - GET /find
 
-_section("[4] GET /find — narration field, room query, exact match")
+_section("[4] GET /find - narration field, room query, exact match")
 
 # Inject singletons directly into the pipelines module so routes use our test DB.
 # Variable names must match pipelines.py exactly: _database, _scan_pipeline, _settings.
@@ -260,7 +260,7 @@ data = resp.get_json()
 _dump(data)
 room_labels = {r["label"] for r in data.get("results", [])}
 if "wallet" in room_labels and "receipt" in room_labels:
-    _pass("find:room_query", f"kitchen → {room_labels}")
+    _pass("find:room_query", f"kitchen -> {room_labels}")
 else:
     _fail("find:room_query", f"unexpected: {room_labels}")
 
@@ -281,9 +281,9 @@ else:
     _fail("find:not_found", f"unexpected: {data}")
 
 
-# ===== Section 5: POST /ask =====
+# Section 5: POST /ask
 
-_section("[5] POST /ask — exact match, not found, narration")
+_section("[5] POST /ask - exact match, not found, narration")
 
 # Re-seed in case section 4 (find) queries affected state (they shouldn't, but be safe)
 _seed_db(db, "wallet", ocr_text="RFID Blocking", room_name="kitchen", emb_seed=1)
@@ -312,18 +312,18 @@ else:
     _fail("ask:missing_query", f"expected 400, got {resp.status_code}")
 
 
-# ===== Section 6: POST /item/ask =====
+# Section 6: POST /item/ask
 
-_section("[6] POST /item/ask — read_ocr, rename, find, no-op rename, describe deferred")
+_section("[6] POST /item/ask - read_ocr, rename, find, no-op rename, describe deferred")
 
-# Re-seed fresh state — rename tests mutate the DB so order matters without this
+# Re-seed fresh state - rename tests mutate the DB so order matters without this
 db.clear_items()
 db.clear_sightings()
 _seed_db(db, "wallet", ocr_text="RFID Blocking", room_name="kitchen", emb_seed=1)
 _seed_db(db, "keys", ocr_text="", room_name="bedroom", emb_seed=2)
 _pm._database = db
 
-# read_ocr — wallet has "RFID Blocking"
+# read_ocr - wallet has "RFID Blocking"
 resp = client.post("/item/ask", json={
     "scan_id": "test-scan-001",
     "label": "wallet",
@@ -336,7 +336,7 @@ if data.get("action") == "read_ocr" and "RFID Blocking" in data.get("ocr_text", 
 else:
     _fail("item_ask:read_ocr", f"unexpected: {data}")
 
-# read_ocr — keys has no OCR text
+# read_ocr - keys has no OCR text
 resp = client.post("/item/ask", json={
     "scan_id": "test-scan-001",
     "label": "keys",
@@ -401,21 +401,20 @@ for missing in [
         _fail("item_ask:missing_field", f"expected 400, got {resp.status_code} for body={missing}")
 
 
-# ===== Summary =====
+# Summary
 
 passed = sum(1 for _, ok, _ in _results if ok)
 failed = sum(1 for _, ok, _ in _results if not ok)
 total = len(_results)
 
-print(f"\n{'='*50}")
-print(f"{_B}Results: {passed}/{total} passed{_X}")
+print(f"\n{_B}Results: {passed}/{total} passed{_X}")
 if failed:
     print(f"{_R}Failed:{_X}")
     for tag, ok, detail in _results:
         if not ok:
-            print(f"  {_R}✗{_X} [{tag}] {detail}")
+            print(f"  {_R}[FAIL]{_X} [{tag}] {detail}")
 else:
     print(f"{_G}All tests passed.{_X}")
-print(f"{'='*50}\n")
+print()
 
 sys.exit(0 if failed == 0 else 1)
