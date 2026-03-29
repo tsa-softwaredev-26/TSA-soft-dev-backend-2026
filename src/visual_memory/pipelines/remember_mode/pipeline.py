@@ -213,8 +213,17 @@ class RememberPipeline:
         prompt: text label from the user
         returns structured result dict
         """
-        t0 = time.time()
+        t0 = time.monotonic()
+        stage_start = t0
+        timing = {
+            "prepare_ms": 0,
+            "detect_ms": 0,
+            "embed_ms": 0,
+            "ocr_ms": 0,
+            "db_ms": 0,
+        }
         registry.prepare_for_remember()
+        timing["prepare_ms"] = round((time.monotonic() - stage_start) * 1000)
         image_path = Path(image_path)
         image = load_image(str(image_path))
 
@@ -227,7 +236,8 @@ class RememberPipeline:
                 "success": False,
                 "reason": "dark",
                 "label": prompt,
-                "duration_ms": round((time.time() - t0) * 1000),
+                "duration_ms": round((time.monotonic() - t0) * 1000),
+                **timing,
                 **collect_system_metrics(),
             })
             return {
@@ -245,7 +255,9 @@ class RememberPipeline:
         is_blurry = blur < _settings.blur_sharpness_threshold
 
         # Detection with optional second pass
+        stage_start = time.monotonic()
         detection, second_pass_prompt = self._detect_with_fallback(image, prompt)
+        timing["detect_ms"] = round((time.monotonic() - stage_start) * 1000)
 
         if not detection:
             _log.info({
@@ -254,7 +266,8 @@ class RememberPipeline:
                 "success": False,
                 "reason": "no_detection",
                 "label": prompt,
-                "duration_ms": round((time.time() - t0) * 1000),
+                "duration_ms": round((time.monotonic() - t0) * 1000),
+                **timing,
                 **collect_system_metrics(),
             })
             return {
@@ -277,7 +290,9 @@ class RememberPipeline:
         cropped = crop_object(image, box)
 
         # Create image embedding
+        stage_start = time.monotonic()
         embedding = self.img_embedder.embed(cropped)
+        timing["embed_ms"] = round((time.monotonic() - stage_start) * 1000)
 
         # OCR: extract text from the crop (skipped if enable_ocr=False or below
         # text likelihood threshold - saves 3-18s per image on plain objects)
@@ -285,6 +300,7 @@ class RememberPipeline:
         ocr_text = ""
         ocr_confidence = 0.0
         text_embedding = None
+        ocr_t0 = time.monotonic()
         if (self.ocr_client is not None
                 and text_likelihood >= _settings.ocr_text_likelihood_threshold):
             ocr_result = self.ocr_client.recognize(cropped)
@@ -292,6 +308,7 @@ class RememberPipeline:
             ocr_confidence = ocr_result["confidence"]
             if ocr_text:
                 text_embedding = self.text_embedder.embed_text(ocr_text)
+        timing["ocr_ms"] = round((time.monotonic() - ocr_t0) * 1000)
 
         _log.info({
             "event": "remember_ocr",
@@ -315,6 +332,7 @@ class RememberPipeline:
 
         # Auto-replace: remove any previous teaches for this label before storing
         # the new one. Queried avg_conf already captured the history above.
+        db_t0 = time.monotonic()
         replaced_count = self.db.delete_items_by_label(label)
 
         self.add_to_database(
@@ -329,6 +347,7 @@ class RememberPipeline:
                 "label_embedding": label_embedding,
             }
         )
+        timing["db_ms"] = round((time.monotonic() - db_t0) * 1000)
 
         quality = _score_quality(score, avg_conf)
 
@@ -357,7 +376,8 @@ class RememberPipeline:
             "label": label,
             "detection_quality": quality,
             "second_pass": second_pass_prompt is not None,
-            "duration_ms": round((time.time() - t0) * 1000),
+            "duration_ms": round((time.monotonic() - t0) * 1000),
+            **timing,
             **collect_system_metrics(),
         })
         return {

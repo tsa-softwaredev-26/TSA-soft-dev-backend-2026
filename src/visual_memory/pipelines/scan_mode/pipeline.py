@@ -154,7 +154,19 @@ class ScanPipeline:
         returns structured JSON dict
         """
         t0 = time.monotonic()
+        stage_start = t0
+        timing = {
+            "prepare_ms": 0,
+            "detect_ms": 0,
+            "embed_ms": 0,
+            "ocr_ms": 0,
+            "match_ms": 0,
+            "dedup_ms": 0,
+            "depth_ms": 0,
+        }
         registry.prepare_for_scan()
+        timing["prepare_ms"] = round((time.monotonic() - stage_start) * 1000)
+        stage_start = time.monotonic()
         _focal = focal_length_px if focal_length_px is not None else self.focal_length_px
 
         lum = mean_luminance(query_image)
@@ -166,6 +178,7 @@ class ScanPipeline:
                 "boxes_detected": 0,
                 "is_dark": True,
                 "duration_ms": round((time.monotonic() - t0) * 1000),
+                **timing,
                 **collect_system_metrics(),
             })
             return {
@@ -177,6 +190,7 @@ class ScanPipeline:
             }
 
         boxes, scores = self.detector.detect_all(query_image)
+        timing["detect_ms"] = round((time.monotonic() - stage_start) * 1000)
 
         if not boxes:
             _log.info({
@@ -185,19 +199,25 @@ class ScanPipeline:
                 "match_count": 0,
                 "boxes_detected": 0,
                 "duration_ms": round((time.monotonic() - t0) * 1000),
+                **timing,
                 **collect_system_metrics(),
             })
             return {"matches": [], "count": 0}
 
         # PASS 1: combined similarity matching
         # batch: crop all first, embed in one forward pass (was: embed() inside per-box loop)
+        stage_start = time.monotonic()
         crops = [crop_object(query_image, box) for box in boxes]
         img_embs = self.img_embedder.batch_embed(crops)  # (N, 1024); one forward pass
 
         # project DB embeddings once for all boxes this scan call
         projected_db = [(p, self._apply_head(e)) for p, e in self.database_embeddings]
+        projected_db_map = {p: e for p, e in projected_db}
+        timing["embed_ms"] = round((time.monotonic() - stage_start) * 1000)
 
         matches = []
+        ocr_ms = 0.0
+        match_ms = 0.0
 
         for i, (box, score) in enumerate(zip(boxes, scores)):
             img_emb = img_embs[i:i+1]  # (1, 1024)
@@ -206,18 +226,22 @@ class ScanPipeline:
             text_emb = None
             if (self.ocr_client is not None
                     and text_likelihood >= _settings.ocr_text_likelihood_threshold):
+                ocr_t0 = time.monotonic()
                 ocr_result = self.ocr_client.recognize(crops[i])
+                ocr_ms += (time.monotonic() - ocr_t0) * 1000
                 ocr_text = ocr_result["text"]
                 text_emb = self.text_embedder.embed_text(ocr_text) if ocr_text else None
             combined = make_combined_embedding(img_emb, text_emb)
 
             projected_query = self._apply_head(combined)
 
+            match_t0 = time.monotonic()
             match_path, similarity = find_match(
                 projected_query,
                 projected_db,
                 _settings.similarity_threshold,
             )
+            match_ms += (time.monotonic() - match_t0) * 1000
 
             if match_path:
                 matched_label = Path(match_path).stem
@@ -229,9 +253,7 @@ class ScanPipeline:
                     "ocr_text_length": len(ocr_text),
                 })
                 if scan_id is not None:
-                    anchor_emb = next(
-                        (e for p, e in projected_db if p == match_path), None
-                    )
+                    anchor_emb = projected_db_map.get(match_path)
                     if anchor_emb is not None:
                         if scan_id not in self._emb_cache:
                             if len(self._emb_cache) >= _SCAN_CACHE_MAX:
@@ -254,13 +276,17 @@ class ScanPipeline:
                 if ocr_text:
                     entry["ocr_text"] = ocr_text
                 matches.append(entry)
+        timing["ocr_ms"] = round(ocr_ms)
+        timing["match_ms"] = round(match_ms)
 
         if not matches:
             return {"matches": [], "count": 0}
 
         # Deduplicate
+        dedup_t0 = time.monotonic()
         if _settings.enable_dedup:
             matches = deduplicate_matches(matches, iou_threshold=_settings.dedup_iou_threshold)
+        timing["dedup_ms"] = round((time.monotonic() - dedup_t0) * 1000)
 
         if not matches:
             return {"matches": [], "count": 0}
@@ -301,10 +327,12 @@ class ScanPipeline:
                 "boxes_detected": len(boxes),
                 "depth": False,
                 "duration_ms": round((time.monotonic() - t0) * 1000),
+                **timing,
                 **collect_system_metrics(),
             })
             return {"matches": output_matches, "count": len(output_matches)}
 
+        depth_t0 = time.monotonic()
         depth_map = self.estimator.estimate(query_image, focal_length_px=_focal)
 
         output_matches = []
@@ -339,6 +367,7 @@ class ScanPipeline:
 
         if scan_id is not None:
             self._store_crops(scan_id, output_crops)
+        timing["depth_ms"] = round((time.monotonic() - depth_t0) * 1000)
 
         _log.info({
             "event": "scan_complete",
@@ -347,6 +376,7 @@ class ScanPipeline:
             "boxes_detected": len(boxes),
             "depth": True,
             "duration_ms": round((time.monotonic() - t0) * 1000),
+            **timing,
             **collect_system_metrics(),
         })
         return {
