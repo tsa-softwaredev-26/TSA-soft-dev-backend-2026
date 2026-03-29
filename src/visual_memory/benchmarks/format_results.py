@@ -345,6 +345,31 @@ def generate(results_path: Path, output_path: Path) -> None:
             outlier_cell,
         ))
     a("")
+    a("### Pipeline stage latency (derived)")
+    a("")
+    stage_phases = [
+        ("pipeline_prepare", "lat_pipeline_prepare_s"),
+        ("pipeline_detect", "lat_pipeline_detect_s"),
+        ("pipeline_embed", "lat_pipeline_embed_s"),
+        ("pipeline_ocr", "lat_pipeline_ocr_s"),
+        ("pipeline_match", "lat_pipeline_match_s"),
+        ("pipeline_dedup", "lat_pipeline_dedup_s"),
+        ("pipeline_depth", "lat_pipeline_depth_s"),
+        ("pipeline_db", "lat_pipeline_db_s"),
+    ]
+    a(_row("Stage", "Mean", "Min", "Max"))
+    a(_sep(18, 8, 8, 8))
+    for stage_name, col in stage_phases:
+        vals = [r.get(col, 0) for r in results if r.get(col, 0) > 0]
+        if not vals:
+            continue
+        a(_row(
+            stage_name,
+            f"{(sum(vals) / len(vals)):.3f}s",
+            f"{min(vals):.3f}s",
+            f"{max(vals):.3f}s",
+        ))
+    a("")
     a("---")
     a("")
 

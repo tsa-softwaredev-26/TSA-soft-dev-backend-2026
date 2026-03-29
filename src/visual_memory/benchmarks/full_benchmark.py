@@ -404,6 +404,9 @@ _CSV_FIELDS = [
     "predicted_distance_ft", "depth_absolute_error", "depth_percentage_error",
     "lat_embed_img_s", "lat_ocr_s", "lat_embed_txt_s",
     "lat_retrieve_bl_s", "lat_retrieve_pe_s", "lat_detect_s", "lat_depth_s",
+    "lat_pipeline_prepare_s", "lat_pipeline_detect_s", "lat_pipeline_embed_s",
+    "lat_pipeline_ocr_s", "lat_pipeline_match_s", "lat_pipeline_dedup_s",
+    "lat_pipeline_depth_s", "lat_pipeline_db_s",
     "darkness_level", "is_dark", "blur_score", "is_blurry",
     "text_likelihood", "should_skip_ocr",
 ]
@@ -444,6 +447,15 @@ def _merge_rows(
             "lat_retrieve_pe_s": round(r["lat_retrieve_pe"], 6),
             "lat_detect_s": round(d["lat_detect"], 4),
             "lat_depth_s": round(dep["lat_depth"], 4),
+            # Derived stage timing fields aligned with live pipeline perf logs.
+            "lat_pipeline_prepare_s": 0.0,
+            "lat_pipeline_detect_s": round(d["lat_detect"], 4),
+            "lat_pipeline_embed_s": round(r["lat_embed_img"] + r["lat_embed_txt"], 4),
+            "lat_pipeline_ocr_s": round(r["lat_ocr"], 4),
+            "lat_pipeline_match_s": round(r["lat_retrieve_pe"], 6),
+            "lat_pipeline_dedup_s": 0.0,
+            "lat_pipeline_depth_s": round(dep["lat_depth"], 4),
+            "lat_pipeline_db_s": 0.0,
             "darkness_level": r["darkness_level"],
             "is_dark": r["is_dark"],
             "blur_score": r["blur_score"],
@@ -500,6 +512,7 @@ def _write_output(
         "n_test": len(rows),
         "n_negatives": len(neg_results),
         "final_triplet_loss": round(final_loss, 6),
+        "pipeline_stage_latency_mode": "derived_from_component_phases",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     with open(json_path, "w") as f:
@@ -608,6 +621,23 @@ def _print_summary(
             vals, fnames if len(vals) == len(fnames) else None)
         outlier_str = f"  outliers: {', '.join(outliers[:3])}" if outliers else ""
         print(f"  {phase_name:<14} mean {mean:.3f}s  [{lo:.3f}s - {hi:.3f}s]{outlier_str}")
+
+    # Pipeline stage latency from remember/scan logs (if available in retrieval rows)
+    stage_phases = [
+        ("pipeline_prepare", [r.get("lat_pipeline_prepare", 0.0) for r in retrieval if r.get("lat_pipeline_prepare", 0.0) > 0]),
+        ("pipeline_detect",  [r.get("lat_pipeline_detect", 0.0) for r in retrieval if r.get("lat_pipeline_detect", 0.0) > 0]),
+        ("pipeline_embed",   [r.get("lat_pipeline_embed", 0.0) for r in retrieval if r.get("lat_pipeline_embed", 0.0) > 0]),
+        ("pipeline_ocr",     [r.get("lat_pipeline_ocr", 0.0) for r in retrieval if r.get("lat_pipeline_ocr", 0.0) > 0]),
+        ("pipeline_match",   [r.get("lat_pipeline_match", 0.0) for r in retrieval if r.get("lat_pipeline_match", 0.0) > 0]),
+        ("pipeline_dedup",   [r.get("lat_pipeline_dedup", 0.0) for r in retrieval if r.get("lat_pipeline_dedup", 0.0) > 0]),
+        ("pipeline_depth",   [r.get("lat_pipeline_depth", 0.0) for r in retrieval if r.get("lat_pipeline_depth", 0.0) > 0]),
+        ("pipeline_db",      [r.get("lat_pipeline_db", 0.0) for r in retrieval if r.get("lat_pipeline_db", 0.0) > 0]),
+    ]
+    for phase_name, vals in stage_phases:
+        if not vals:
+            continue
+        mean, lo, hi, _ = _latency_stats(vals)
+        print(f"  {phase_name:<14} mean {mean:.3f}s  [{lo:.3f}s - {hi:.3f}s]")
 
 
 # main
