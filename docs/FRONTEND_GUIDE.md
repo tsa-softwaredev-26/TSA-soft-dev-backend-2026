@@ -84,7 +84,7 @@ the OCR service unreachable, the OCR microservice is down (core API still works 
 | POST | /feedback | User confirms or denies a scan match |
 | POST | /ask | User asks anything in natural language |
 | POST | /item/ask | User asks about a specific focused scan item |
-| GET | /find | Direct label lookup — "where is my [object]?" |
+| GET | /find | Direct label lookup - "where is my [object]?" |
 | GET | /items | User opens the memory list |
 | DELETE | /items/<label> | User deletes a memory |
 | POST | /items/<label>/rename | User renames a memory |
@@ -546,9 +546,9 @@ Content-Type: application/json
 ```
 
 `matched_by` values:
-- `"exact"` — label matched directly
-- `"fuzzy_label"` — matched via text embedding similarity on label names
-- `"ocr"` — matched via OCR text content of a taught item
+- `"exact"` - label matched directly
+- `"fuzzy_label"` - matched via text embedding similarity on label names
+- `"ocr"` - matched via OCR text content of a taught item
 
 `ollama_used: false` means Ollama was unavailable; search ran on raw query text.
 
@@ -594,7 +594,7 @@ Set `export: true` when the user wants to copy/share the text rather than just h
   "replaced_existing": false
 }
 ```
-Rename auto-replaces any existing memory with the same name — no confirmation step. If the new name is the same as the current name:
+Rename auto-replaces any existing memory with the same name - no confirmation step. If the new name is the same as the current name:
 ```json
 { "action": "rename", "narration": "That's already called wallet.", "unchanged": true }
 ```
@@ -654,7 +654,7 @@ GET /find?label=wallet
 
 **All objects:** `GET /find` (omit `label`) - ordered most-recently-seen first.
 
-**Room query** — all items last seen in a room:
+**Room query** - all items last seen in a room:
 ```
 GET /find?room=kitchen
 ```

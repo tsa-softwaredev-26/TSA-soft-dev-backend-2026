@@ -59,9 +59,9 @@ class ScanPipeline:
         items = self.db.get_all_items()
         self.database_embeddings = [(item["label"], item["combined_embedding"]) for item in items]
 
-        # scan_id -> {label -> (anchor_emb, query_emb)} — capped at _SCAN_CACHE_MAX entries
+        # scan_id -> {label -> (anchor_emb, query_emb)}; capped at _SCAN_CACHE_MAX entries
         self._emb_cache: OrderedDict = OrderedDict()
-        # scan_id -> [PIL Image, ...] in left-to-right match order — for /crop by index
+        # scan_id -> [PIL Image, ...] in left-to-right match order; for /crop by index
         self._crop_cache: OrderedDict = OrderedDict()
 
     def _load_head(self) -> bool:
@@ -189,10 +189,10 @@ class ScanPipeline:
             })
             return {"matches": [], "count": 0}
 
-        # ---- PASS 1: combined similarity matching ----
+        # PASS 1: combined similarity matching
         # batch: crop all first, embed in one forward pass (was: embed() inside per-box loop)
         crops = [crop_object(query_image, box) for box in boxes]
-        img_embs = self.img_embedder.batch_embed(crops)  # (N, 1024) — one forward pass
+        img_embs = self.img_embedder.batch_embed(crops)  # (N, 1024); one forward pass
 
         # project DB embeddings once for all boxes this scan call
         projected_db = [(p, self._apply_head(e)) for p, e in self.database_embeddings]
@@ -268,7 +268,7 @@ class ScanPipeline:
         # Sort left to right by box center x (explicit spatial order for narration)
         matches.sort(key=lambda m: (m["box"][0] + m["box"][2]) / 2)
 
-        # ---- PASS 2: Depth (only once, only if enabled) ----
+        # PASS 2: Depth (only once, only if enabled)
         if not _settings.enable_depth:
             output_matches = []
             output_crops = []

@@ -133,7 +133,7 @@ curl "$BASE/health"
 # {"status":"ok"}
 ```
 
-### Remember — teach the model an object
+### Remember; teach the model an object
 
 Upload a photo and associate it with a label.
 
@@ -145,16 +145,16 @@ curl -X POST "$BASE/remember" \
 ```
 
 **Response fields:**
-- `success` — boolean
-- `result.label` — stored label
-- `result.confidence` — detector confidence (0–1)
-- `result.detection_quality` — `"low"` / `"medium"` / `"high"`
-- `result.detection_hint` — human-readable quality tip
-- `result.box` — `[x1, y1, x2, y2]` pixel coordinates
-- `result.ocr_text` — extracted text (if any)
-- `result.is_blurry`, `result.blur_score` — sharpness feedback
+- `success`; boolean
+- `result.label`; stored label
+- `result.confidence`; detector confidence (0-1)
+- `result.detection_quality`; `"low"` / `"medium"` / `"high"`
+- `result.detection_hint`; human-readable quality tip
+- `result.box`; `[x1, y1, x2, y2]` pixel coordinates
+- `result.ocr_text`; extracted text (if any)
+- `result.is_blurry`, `result.blur_score`; sharpness feedback
 
-### Scan — find known objects in a frame
+### Scan; find known objects in a frame
 
 ```bash
 curl -X POST "$BASE/scan" \
@@ -164,13 +164,13 @@ curl -X POST "$BASE/scan" \
 ```
 
 **Response fields per match:**
-- `label` — matched object name
-- `similarity` — cosine similarity (0–1, higher = better match)
-- `confidence` — `"low"` / `"medium"` / `"high"`
-- `direction` — `"to your left"` / `"slightly left"` / `"ahead"` / `"slightly right"` / `"to your right"`
-- `distance_ft` — estimated distance in feet (when depth enabled)
-- `narration` — ready-to-speak string for assistive output
-- `box` — `[x1, y1, x2, y2]`
+- `label`; matched object name
+- `similarity`; cosine similarity (0-1, higher = better match)
+- `confidence`; `"low"` / `"medium"` / `"high"`
+- `direction`; `"to your left"` / `"slightly left"` / `"ahead"` / `"slightly right"` / `"to your right"`
+- `distance_ft`; estimated distance in feet (when depth enabled)
+- `narration`; ready-to-speak string for assistive output
+- `box`; `[x1, y1, x2, y2]`
 
 ### Submit match feedback (improve accuracy over time)
 
@@ -200,7 +200,7 @@ curl -X DELETE "$BASE/items/red%20mug" -H "X-API-Key: $KEY"
 ### Trigger model retraining
 
 Retraining only runs when at least 10 positive+negative feedback pairs have
-been collected. Safe to call anytime — returns `insufficient_data` if not
+been collected. Safe to call anytime; returns `insufficient_data` if not
 enough feedback yet.
 
 ```bash

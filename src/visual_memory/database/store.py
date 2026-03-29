@@ -94,8 +94,6 @@ class DatabaseStore:
         except Exception:
             pass  # column already exists
 
-    # ---- serialization helpers ----
-
     def _tensor_to_blob(self, tensor: torch.Tensor) -> bytes:
         buf = io.BytesIO()
         torch.save(tensor.detach().cpu(), buf)
@@ -104,8 +102,6 @@ class DatabaseStore:
     def _blob_to_tensor(self, blob: bytes) -> torch.Tensor:
         buf = io.BytesIO(blob)
         return torch.load(buf, map_location="cpu", weights_only=True)
-
-    # ---- items table ----
 
     def add_item(
         self,
@@ -255,8 +251,6 @@ class DatabaseStore:
         self._conn.commit()
         return cur.rowcount
 
-    # ---- user_state table ----
-
     def save_projection_head(self, state_dict: dict) -> None:
         buf = io.BytesIO()
         torch.save(state_dict, buf)
@@ -317,8 +311,6 @@ class DatabaseStore:
             return json.loads(row[0])
         except (json.JSONDecodeError, TypeError):
             return None
-
-    # ---- feedback table ----
 
     def add_feedback(
         self,
@@ -388,8 +380,6 @@ class DatabaseStore:
         ).fetchall()
         triplets = sum(p * n for _, p, n in label_rows)
         return {"positives": positives, "negatives": negatives, "triplets": triplets}
-
-    # ---- sightings table ----
 
     def add_sighting(
         self,

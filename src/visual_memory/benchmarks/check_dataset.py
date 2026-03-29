@@ -41,7 +41,7 @@ def main() -> None:
     args = _parse_args()
     all_ok = True
 
-    # ---- positive images ----
+    # positive images
     print(f"Dataset: {args.dataset}")
     print(f"Images:  {args.images}")
     entries = _load_csv(args.dataset)
@@ -60,7 +60,7 @@ def main() -> None:
     else:
         print("  ok")
 
-    # ---- negative images ----
+    # negative images
     if args.negative_dataset.exists():
         neg_entries = _load_csv(args.negative_dataset)
         neg_missing = [r["image"] for r in neg_entries
@@ -75,13 +75,13 @@ def main() -> None:
         else:
             print("  ok")
     else:
-        print(f"Negative: negative_dataset.csv not found — skipping")
+        print(f"Negative: negative_dataset.csv not found; skipping")
 
-    # ---- receipt ground truth ----
+    # receipt ground truth
     gt_dir = _BENCHMARKS_DIR / "ground_truth"
     for rid in ("receipt_grocery", "receipt_cvs"):
         gt_file = gt_dir / f"{rid}.txt"
-        status = "ok" if gt_file.exists() else "MISSING — run: python -m visual_memory.benchmarks.redact_receipt"
+        status = "ok" if gt_file.exists() else "MISSING; run: python -m visual_memory.benchmarks.redact_receipt"
         print(f"Ground truth {rid}: {status}")
         if not gt_file.exists():
             all_ok = False

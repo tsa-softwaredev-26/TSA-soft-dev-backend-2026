@@ -1,1 +1,1 @@
-"""Visual Memory — object detection and spatial awareness system."""
+"""Visual Memory; object detection and spatial awareness system."""

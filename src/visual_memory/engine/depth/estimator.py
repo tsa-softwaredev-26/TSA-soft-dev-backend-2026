@@ -15,7 +15,7 @@ import depth_pro
 from depth_pro.depth_pro import DEFAULT_MONODEPTH_CONFIG_DICT
 from PIL import Image
 
-# Absolute path to the checkpoint — resolved at import time from this file's location,
+# Absolute path to the checkpoint; resolved at import time from this file's location,
 # so it works regardless of the current working directory or platform.
 _CHECKPOINT_PATH = Path(__file__).resolve().parents[4] / "checkpoints" / "depth_pro.pt"
 
@@ -52,7 +52,7 @@ class DepthEstimator:
     def estimate(self, image: Image.Image, focal_length_px: float = None) -> torch.Tensor:
         # focal_length_px from Android: (focalLengthMm / sensorWidthMm) * imageWidthPx
         # None = Depth Pro infers (~75% error vs ~26% calibrated at close range)
-        # Call once per query image — reuse depth_map for all matched objects
+        # Call once per query image; reuse depth_map for all matched objects
         # depth_pro.load_rgb expects a file path, so we use transform directly on the PIL image
         image_tensor = self.transform(image).to(self.device)
         f_px = torch.tensor(focal_length_px, dtype=torch.float32).to(self.device) if focal_length_px else None
@@ -71,7 +71,7 @@ class DepthEstimator:
             return 0.0
         return region.mean().item() * 3.28084  # meters → feet
 
-    # Previously used 12-hour clock position (e.g. "3 o'clock") — switched to plain
+    # Previously used 12-hour clock position (e.g. "3 o'clock"); switched to plain
     # directions to remove mental translation step for blind users. Could revert if
     # finer granularity is needed, but 5 zones map directly to body movement.
     def get_direction(self, bbox: list, img_w: int) -> str:

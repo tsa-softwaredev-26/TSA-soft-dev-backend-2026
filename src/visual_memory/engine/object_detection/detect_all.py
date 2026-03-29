@@ -13,7 +13,7 @@ from PIL import Image
 
 from visual_memory.config import Settings
 
-# Resolved once at import time — always points to the .pt next to this file,
+# Resolved once at import time; always points to the .pt next to this file,
 # regardless of the working directory the process was started from.
 _DEFAULT_MODEL = str(Path(__file__).parent / "yoloe-26l-seg-pf.pt")
 _defaults = Settings()

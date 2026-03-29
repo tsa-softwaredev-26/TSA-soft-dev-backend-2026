@@ -29,9 +29,7 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 
-# ---------------------------------------------------------------------------
 # Paths
-# ---------------------------------------------------------------------------
 SCRIPTS_DIR = Path(__file__).resolve().parent
 TESTS_DIR   = SCRIPTS_DIR.parent
 INPUT_DIR   = TESTS_DIR / "input_images"
@@ -48,9 +46,7 @@ OBJECT_GROUPS: dict[str, list[str]] = {
 TEXT_STEMS     = ["marker", "pen", "pencil", "typed"]
 ALL_TEXT_STEMS = ["marker", "pen", "pencil", "typed", "random_printed_notes", "malarkey"]
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 def _cosine(a: torch.Tensor, b: torch.Tensor) -> float:
     return float(F.cosine_similarity(a, b, dim=1).item())
 
@@ -71,9 +67,7 @@ def _load_gt(stem: str) -> str | None:
     return p.read_text().strip() if p.exists() else None
 
 
-# ---------------------------------------------------------------------------
 # Section A - DINOv3 intra/inter class + scan match test
-# ---------------------------------------------------------------------------
 def section_a(img_embedder):
     print("\n" + "=" * 60)
     print("SECTION A - Intra-class vs Inter-class (DINOv3 image)")
@@ -137,9 +131,7 @@ def section_a(img_embedder):
         print(f"| {fname:<23} | {sim:.4f}     |")
 
 
-# ---------------------------------------------------------------------------
 # Section B - CLIPText similarity on ground-truth text
-# ---------------------------------------------------------------------------
 def section_b(txt_embedder):
     print("\n" + "=" * 60)
     print("SECTION B - CLIPText similarity on ground-truth text")
@@ -190,9 +182,7 @@ def section_b(txt_embedder):
     print(f"Gap                      : {avg_m - avg_mm:.4f}")
 
 
-# ---------------------------------------------------------------------------
 # Section C - Combined (DINOv3 + CLIPText) similarity matrix
-# ---------------------------------------------------------------------------
 def section_c(img_embedder, txt_embedder):
     print("\n" + "=" * 60)
     print("SECTION C - Combined embedding similarity matrix (text_demo)")
@@ -236,9 +226,7 @@ def section_c(img_embedder, txt_embedder):
         print(f"Off-diagonal mean  : {sum(off_diag)/len(off_diag):.4f}")
 
 
-# ---------------------------------------------------------------------------
 # main
-# ---------------------------------------------------------------------------
 def main():
     from visual_memory.engine.embedding import ImageEmbedder, CLIPTextEmbedder
 

@@ -1,5 +1,5 @@
 """
-DepthEstimator manual test — add your own image paths and run.
+DepthEstimator manual test; add your own image paths and run.
 
 Run from project root:
     python -m visual_memory.tests.scripts.test_estimator
@@ -19,7 +19,7 @@ FOCAL_LENGTH_PX_IPHONE15 = 3094.0
 
 # ── Configure your tests here ────────────────────────────────────────────────
 # (image_path, prompt, ground_truth_ft)
-# ground_truth_ft is the actual measured distance — used to compute error %
+# ground_truth_ft is the actual measured distance; used to compute error %
 # Set to None if you just want to see the narration without error checking
 
 FOCAL_LENGTH_PX = FOCAL_LENGTH_PX_IPHONE15

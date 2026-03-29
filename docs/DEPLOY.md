@@ -20,7 +20,7 @@ Two services run on the same host and communicate over localhost:
 - [ ] `venv-ocr` created, `pip install -e ".[ocr]"` done
 - [ ] GPU PyTorch installed (GPU hosts only)
 - [ ] HuggingFace authenticated, `setup_weights.py` completed (includes Ollama model pull)
-- [ ] Ollama daemon installed and running (optional — API degrades gracefully without it)
+- [ ] Ollama daemon installed and running (optional; API degrades gracefully without it)
 - [ ] `/opt/spaitra/.env` created and edited
 - [ ] `/opt/spaitra/.ocr.env` created and edited
 - [ ] Smoke tests pass (manual service run + curl)
@@ -44,7 +44,7 @@ apt-get install -y \
 ```
 
 > **Python version:** any Python ≥ 3.11 works. On Debian 12+ `python3` is 3.11.
-> On Debian 13 it may be 3.12 or 3.13 — that is fine. Do not pin to 3.11 specifically.
+> On Debian 13 it may be 3.12 or 3.13; that is fine. Do not pin to 3.11 specifically.
 
 **GPU hosts only:** make sure NVIDIA drivers are installed and `nvidia-smi` works before
 continuing. The PyTorch GPU wheel is installed in step 4.
@@ -81,7 +81,7 @@ git clone https://github.com/tsa-softwaredev-26/TSA-soft-dev-backend-2026.git
 > The clone creates `/opt/spaitra/TSA-soft-dev-backend-2026/`. All paths below
 > assume this **subdirectory layout**. Adjust `REPO` if you cloned elsewhere.
 
-Set a shell variable for convenience — used throughout this guide:
+Set a shell variable for convenience; used throughout this guide:
 
 ```bash
 export REPO=/opt/spaitra/TSA-soft-dev-backend-2026
@@ -138,7 +138,7 @@ pip install -e ".[core]"
 deactivate
 ```
 
-**GPU hosts — install the matching PyTorch CUDA wheel:**
+**GPU hosts; install the matching PyTorch CUDA wheel:**
 
 ```bash
 source $REPO/venv-core/bin/activate
@@ -202,7 +202,7 @@ $REPO/src/visual_memory/engine/object_detection/yoloe-26l-seg-pf.pt  (~80 MB)
 
 ---
 
-## 6. Ollama (optional — enables natural language search)
+## 6. Ollama (optional; enables natural language search)
 
 Ollama powers the `/ask` and `/item/ask` natural language query parsing. The API
 degrades gracefully without it (embedding-only search, keyword intent detection).
@@ -257,7 +257,7 @@ to every request. The API continues to work in embedding-only mode during that w
 
 ## 8. Environment files
 
-### Core backend — `/opt/spaitra/.env`
+### Core backend; `/opt/spaitra/.env`
 
 ```bash
 cp $REPO/deploy/env.example /opt/spaitra/.env
@@ -272,11 +272,11 @@ GPU VRAM guide:
 | GPU VRAM | `ENABLE_DEPTH` | `SAVE_VRAM` | Notes |
 |---|---|---|---|
 | ≥ 8 GB | `1` | `0` | All models warm on GPU, no swap overhead |
-| 6–8 GB | `1` | `1` | Swaps GDino↔YOLOE+Depth between calls (~1–5 s per swap) |
+| 6-8 GB | `1` | `1` | Swaps GDino↔YOLOE+Depth between calls (~1-5 s per swap) |
 | < 6 GB | `0` | `0` | Disable depth; depth model alone is ~2 GB |
 | CPU-only | `0` | `0` | No GPU, all inference on CPU |
 
-Full reference — all supported variables:
+Full reference; all supported variables:
 
 ```dotenv
 # Auth
@@ -301,13 +301,13 @@ OCR_TIMEOUT_SECONDS=10.0
 # Requires ~16 GB system RAM. See ARCHITECTURE.md → VRAM Management.
 SAVE_VRAM=0
 
-# Ollama LLM (optional — enables natural language /ask and /item/ask parsing)
+# Ollama LLM (optional; enables natural language /ask and /item/ask parsing)
 # Leave OLLAMA_HOST commented out to use the default localhost:11434.
 # OLLAMA_HOST=http://127.0.0.1:11434
 OLLAMA_TIMEOUT_SECONDS=5.0
 ```
 
-### OCR service — `/opt/spaitra/.ocr.env`
+### OCR service; `/opt/spaitra/.ocr.env`
 
 ```bash
 cp $REPO/deploy/ocr.env.example /opt/spaitra/.ocr.env
@@ -373,14 +373,14 @@ The service files in `deploy/` assume the flat layout (`/opt/spaitra/venv-core`)
 If your venvs are inside the repo subdir, edit the two paths before copying:
 
 ```bash
-# For subdirectory layout — create adjusted copies:
+# For subdirectory layout; create adjusted copies:
 sed 's|/opt/spaitra/venv-core|'"$REPO"'/venv-core|g; s|/opt/spaitra/venv-ocr|'"$REPO"'/venv-ocr|g; s|WorkingDirectory=/opt/spaitra$|WorkingDirectory='"$REPO"'|' \
   $REPO/deploy/spaitra-core.service > /etc/systemd/system/spaitra-core.service
 
 sed 's|/opt/spaitra/venv-ocr|'"$REPO"'/venv-ocr|g; s|WorkingDirectory=/opt/spaitra$|WorkingDirectory='"$REPO"'|' \
   $REPO/deploy/spaitra-ocr.service > /etc/systemd/system/spaitra-ocr.service
 
-# For flat layout — copy directly:
+# For flat layout; copy directly:
 # cp $REPO/deploy/spaitra-core.service /etc/systemd/system/
 # cp $REPO/deploy/spaitra-ocr.service /etc/systemd/system/
 
@@ -421,7 +421,7 @@ API_BASE=http://127.0.0.1:5000
 KEY=$(grep '^API_KEY=' "$API_KEY_FILE" | cut -d= -f2-)
 RESP=$(curl -sf -X POST "$API_BASE/retrain" \
     -H "X-API-Key: $KEY" 2>&1) || {
-    echo "[auto_retrain] ERROR: curl failed — is spaitra-core running?" >&2
+    echo "[auto_retrain] ERROR: curl failed; is spaitra-core running?" >&2
     exit 1
 }
 echo "[auto_retrain] $(date -Iseconds) $RESP"
@@ -459,7 +459,7 @@ Test the script manually before waiting for the nightly run:
 ```bash
 su - spaitra -s /bin/bash -c "/opt/spaitra/bin/auto_retrain.sh"
 # Expected output: {"started": false, "reason": "insufficient_data", ...}
-# This is correct — it means the script runs and the API responds.
+# This is correct; it means the script runs and the API responds.
 # Training will start automatically once 10+ feedback triplets accumulate.
 ```
 
