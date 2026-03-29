@@ -773,8 +773,6 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 
 ### Logs
 - [ ] Improve performance logs; add stuff like RAM usage, swap usage, VRAM usage, how often it has to unload models to save VRAM, VRAM swap occurences, runtimes, thermals (sensor), crash logs 
-- [ ] Give logs severity tags so logs can be filtered easily (could add parse logs CLI tool scrpts to sort for severity and certain topics)
-- [ ] Make logs automatically run from server, deletes old unimportant logs, keeps important logs for much longer
 ---
 
 ## Server Transition Notes
