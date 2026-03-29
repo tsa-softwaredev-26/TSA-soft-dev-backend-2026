@@ -544,6 +544,51 @@ python -m visual_memory.benchmarks.format_results
 
 Run from project root (`python -m visual_memory.tests.scripts.<name>`).
 
+### Fast test suite (no model loading, ~20-25s)
+
+Covers all API endpoints and core utilities via Flask test client + stubs. No GPU required.
+
+```bash
+# All unit + API tests
+python -m visual_memory.tests.scripts.run_all
+
+# Unit only (pure logic, DB, utils)
+python -m visual_memory.tests.scripts.run_all --suite unit
+
+# API only (every endpoint via Flask test client)
+python -m visual_memory.tests.scripts.run_all --suite api
+
+# Filter by tag
+python -m visual_memory.tests.scripts.run_all --tag remember,scan
+
+# Verbose (show response bodies on failure)
+TEST_VERBOSITY=2 python -m visual_memory.tests.scripts.run_all
+
+# Stop on first failure
+python -m visual_memory.tests.scripts.run_all --fail-fast
+```
+
+Test modules:
+
+| Module | Coverage |
+|---|---|
+| `test_remember_route` | POST /remember - all branches including multi-image, dark, blur |
+| `test_scan_route` | POST /scan + GET /crop |
+| `test_feedback_retrain` | POST /feedback, POST /retrain, GET /retrain/status |
+| `test_items_crud` | GET /items, DELETE /items/<label>, POST /items/<label>/rename |
+| `test_sightings_route` | POST /sightings |
+| `test_settings_routes` | GET/PATCH /settings, GET/PATCH /user-settings |
+| `test_health_debug` | GET /health, POST /debug/wipe, PATCH /debug/config |
+| `test_ask_mode` | POST /ask, POST /item/ask |
+| `test_quality_utils` | mean_luminance, estimate_text_likelihood (synthetic images) |
+| `test_similarity_utils` | cosine_similarity, find_match, iou, deduplicate_matches |
+| `test_database_store` | All DatabaseStore methods with temp SQLite |
+| `test_ollama_utils` | Circuit breaker state machine (mocked HTTP) |
+| `test_projection_head` | ProjectionHead forward pass, save/load |
+| `test_scan_batching` | Batch embedding shape and similarity consistency |
+
+### System tests (real models, ~5-30 min)
+
 ```bash
 # Integration test runner - DEPTH=0 (default) skips Depth Pro; DEPTH=1 includes it (~2GB, memory-heavy)
 python -m visual_memory.tests.scripts.run_tests
@@ -552,8 +597,12 @@ VERBOSE=1 python -m visual_memory.tests.scripts.run_tests   # show OCR text diff
 
 # OCR benchmark - extract text from text_demo/ images, check accuracy
 python -m visual_memory.tests.scripts.test_ocr_benchmark
+```
 
-# Standalone CLI scripts
+### Probe and diagnostic scripts
+
+```bash
+# Standalone pipeline scripts
 python -m visual_memory.tests.scripts.test_remember <image_path> "<prompt>"
 python -m visual_memory.tests.scripts.test_scan <image_path> [--db <dir>] [--focal <f_px>]
 python -m visual_memory.tests.scripts.test_text_recognition [image_path]
@@ -563,11 +612,11 @@ python -m visual_memory.tests.scripts.test_estimator
 python -m visual_memory.tests.scripts.probe_detector <image_path> --prompt "<prompt>"
 python -m visual_memory.tests.scripts.probe_detector --batch wallet
 python -m visual_memory.tests.scripts.probe_detector <image_path> --detector yoloe
+```
 
-# Projection head unit tests (CPU-only, no model loading, ~2s)
-python -m visual_memory.tests.scripts.test_projection_head
+### Projection head training
 
-# Train projection head from collected feedback
+```bash
 python -m visual_memory.learning.trainer
 python -m visual_memory.learning.trainer --epochs 50 --lr 5e-5
 ```
