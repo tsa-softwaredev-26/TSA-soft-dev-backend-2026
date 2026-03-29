@@ -176,7 +176,7 @@ def find():
 
     db = get_database()
 
-    # ---- room query: list all items last seen in a room ----
+    # room query: list all items last seen in a room
     if room_raw and not label:
         room = _normalize_room(room_raw)
         rows = db.get_labels_last_seen_in_room(room)
@@ -185,7 +185,7 @@ def find():
             s["narration"] = build_narration(s["label"], s)
         return jsonify({"room": room, "results": results, "count": len(results)})
 
-    # ---- list all known items (no label, no room) ----
+    # list all known items (no label, no room)
     if not label:
         labels = db.get_known_labels()
         results = []
@@ -197,7 +197,7 @@ def find():
                 results.append(s)
         return jsonify({"results": results, "count": len(results)})
 
-    # ---- label lookup ----
+    # label lookup
     rows = db.get_sightings(label=label, limit=limit, since=since, before=before)
 
     fuzzy_matched: Optional[str] = None
@@ -211,7 +211,7 @@ def find():
             fuzzy_matched = candidates[0]
             rows = db.get_sightings(label=fuzzy_matched, limit=limit, since=since, before=before)
 
-    # ---- OCR content fallback ----
+    # OCR content fallback
     if not rows:
         from visual_memory.api.pipelines import get_settings
         settings = get_settings()

@@ -1,4 +1,4 @@
-"""POST /ask — open-ended natural language memory search.
+"""POST /ask; open-ended natural language memory search.
 
 The user asks anything about their stored world in plain speech.
 Backend parses intent (via Ollama when available), runs semantic search
@@ -59,7 +59,7 @@ def ask():
     settings = get_settings()
     db = get_database()
 
-    # ---- Step 1: exact label match on raw query (skip Ollama if already a known label) ----
+    # Step 1: exact label match on raw query (skip Ollama if already a known label)
     rows = db.get_sightings(label=query, limit=1)
     matched_label: str | None = None
     matched_by: str | None = None
@@ -70,7 +70,7 @@ def ask():
         matched_label = query
         matched_by = "exact"
 
-    # ---- Step 2: Ollama query extraction (only when enabled and raw query didn't match) ----
+    # Step 2: Ollama query extraction (only when enabled and raw query didn't match)
     if not rows and settings.llm_query_fallback_enabled:
         extracted = extract_search_term(query)
         if extracted and extracted.lower() != query.lower():
@@ -90,7 +90,7 @@ def ask():
         "ollama_used": ollama_used,
     })
 
-    # ---- Step 3: fuzzy label match ----
+    # Step 3: fuzzy label match
     if not rows:
         candidates = _fuzzy_label_match(search_term, settings.text_similarity_threshold)
         if candidates:
@@ -98,7 +98,7 @@ def ask():
             matched_by = "fuzzy_label"
             rows = db.get_sightings(label=matched_label, limit=1)
 
-    # ---- Step 4: OCR content match ----
+    # Step 4: OCR content match
     if not rows:
         ocr_label = _ocr_content_match(search_term, settings.text_similarity_threshold)
         if ocr_label:

@@ -17,7 +17,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _BENCHMARKS_DIR = _PROJECT_ROOT / "benchmarks"
 
 
-# ---- arg parsing ----
+# arg parsing
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Format benchmark results into BENCHMARKS.md")
@@ -26,7 +26,7 @@ def _parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-# ---- stats helpers ----
+# stats helpers
 
 def _pct(n: int, d: int) -> str:
     if d == 0:
@@ -45,7 +45,7 @@ def _condition_of(image: str) -> str:
     return "_".join(parts[-3:])
 
 
-# ---- per-label aggregation ----
+# per-label aggregation
 
 def _per_label(results: List[dict]) -> Dict[str, dict]:
     by_label: Dict[str, dict] = {}
@@ -75,7 +75,7 @@ def _per_label(results: List[dict]) -> Dict[str, dict]:
     return by_label
 
 
-# ---- per-condition aggregation ----
+# per-condition aggregation
 
 def _per_condition(results: List[dict]) -> Dict[str, dict]:
     by_cond: Dict[str, dict] = {}
@@ -97,7 +97,7 @@ def _mean(xs: list) -> Optional[float]:
     return sum(xs) / len(xs)
 
 
-# ---- markdown generation ----
+# markdown generation
 
 def _row(*cells: str) -> str:
     return "| " + " | ".join(str(c) for c in cells) + " |"
@@ -120,7 +120,7 @@ def generate(results_path: Path, output_path: Path) -> None:
     lines: List[str] = []
     a = lines.append
 
-    # ---- header ----
+    # header
     a("# Benchmark Results - VisualMemory")
     a("")
     a(f"**Date**: {meta['timestamp'][:10]}")
@@ -132,7 +132,7 @@ def generate(results_path: Path, output_path: Path) -> None:
     a("---")
     a("")
 
-    # ---- retrieval table ----
+    # retrieval table
     a("## Retrieval")
     a("")
     total_n = sum(s["n"] for s in by_label.values())
@@ -179,7 +179,7 @@ def generate(results_path: Path, output_path: Path) -> None:
     a("---")
     a("")
 
-    # ---- detection table ----
+    # detection table
     a("## Detection (GroundingDINO)")
     a("")
     total_det = sum(s["detected"] for s in by_label.values())
@@ -202,7 +202,7 @@ def generate(results_path: Path, output_path: Path) -> None:
     a("---")
     a("")
 
-    # ---- depth table ----
+    # depth table
     a("## Depth Estimation (detected images with ground truth distance)")
     a("")
     all_depth_abs = [v for s in by_label.values() for v in s["depth_abs"]]
@@ -238,7 +238,7 @@ def generate(results_path: Path, output_path: Path) -> None:
     a("---")
     a("")
 
-    # ---- image quality distribution ----
+    # image quality distribution
     a("## Image Quality Distribution")
     a("")
     
@@ -296,7 +296,7 @@ def generate(results_path: Path, output_path: Path) -> None:
     a("---")
     a("")
 
-    # ---- per-condition breakdown ----
+    # per-condition breakdown
     a("## By Condition")
     a("")
     a(_row("Condition", "N", "Baseline Acc", "Personalized Acc", "Detection Rate"))
@@ -314,7 +314,7 @@ def generate(results_path: Path, output_path: Path) -> None:
     a("")
     a("---")
     a("")
-    # ---- latency table ----
+    # latency table
     a("## Latency")
     a("")
     lat_phases = [
@@ -348,7 +348,7 @@ def generate(results_path: Path, output_path: Path) -> None:
     a("---")
     a("")
 
-    # ---- false positive table ----
+    # false positive table
     negatives = data.get("negatives", [])
     a("## False Positive Rate (Negative Images)")
     a("")

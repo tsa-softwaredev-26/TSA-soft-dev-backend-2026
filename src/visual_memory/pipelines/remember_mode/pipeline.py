@@ -28,7 +28,7 @@ _SECOND_PASS_TEMPLATES = [
 ]
 
 
-# ---- image quality helpers ----
+# image quality helpers
 
 def _blur_score(image: Image.Image) -> float:
     """
@@ -43,7 +43,7 @@ def _blur_score(image: Image.Image) -> float:
     return float(lap.var())
 
 
-# ---- detection quality helpers ----
+# detection quality helpers
 
 def _score_quality(score: float, avg_conf: Optional[float]) -> str:
     """
@@ -95,7 +95,7 @@ def _quality_hint(quality: str, is_blurry: bool) -> str:
     )
 
 
-# ---- pipeline ----
+# pipeline
 
 class RememberPipeline:
     def __init__(self):

@@ -1,8 +1,8 @@
-"""POST /item/ask — item-context voice dispatcher.
+"""POST /item/ask; item-context voice dispatcher.
 
 The user is focused on a specific item (scrolling through scan results) and
 asks something about it. Frontend provides scan_id + label so the backend
-knows exactly which item is in focus — no search needed.
+knows exactly which item is in focus; no search needed.
 
 Supported actions:
     read_ocr   - read the OCR text aloud
@@ -118,8 +118,8 @@ def item_ask():
     if not query:
         return jsonify({"error": "missing field: query"}), 400
 
-    # ---- Resolve intent: keywords first, Ollama for ambiguous cases only ----
-    # Keywords are unambiguous signals — use them as the primary classifier.
+    # Resolve intent: keywords first, Ollama for ambiguous cases only
+    # Keywords are unambiguous signals; use them as the primary classifier.
     # Ollama supplements only when no keyword pattern fires.
     intent = _keyword_intent(query)
     ollama_used = False
@@ -140,7 +140,7 @@ def item_ask():
 
     db = get_database()
 
-    # ---- read_ocr / export_ocr ----
+    # read_ocr / export_ocr
     if intent in ("read_ocr", "export_ocr"):
         rows = db.get_items_metadata(label=label)
         ocr_text = rows[0]["ocr_text"] if rows else ""
@@ -162,7 +162,7 @@ def item_ask():
             "export": intent == "export_ocr",
         })
 
-    # ---- rename ----
+    # rename
     if intent == "rename":
         # Keyword extraction first (deterministic), Ollama as fallback
         new_label = _extract_rename_target_keyword(query)
@@ -196,7 +196,7 @@ def item_ask():
             "replaced_existing": result["replaced"] > 0,
         })
 
-    # ---- find ----
+    # find
     if intent == "find":
         row = db.get_last_sighting(label)
         if row is None:
@@ -215,7 +215,7 @@ def item_ask():
             "last_sighting": sighting,
         })
 
-    # ---- describe (deferred) ----
+    # describe (deferred)
     if intent == "describe":
         return jsonify({
             "action": "describe",

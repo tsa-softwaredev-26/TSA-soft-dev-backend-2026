@@ -64,7 +64,7 @@ def _blur_score(image: Image.Image) -> float:
     return float(lap.var())
 
 
-# ---- arg parsing ----
+# arg parsing
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Full system benchmark")
@@ -83,7 +83,7 @@ def _parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-# ---- phase 1: load & embed ----
+# phase 1: load & embed
 
 def _load_dataset(csv_path: Path) -> List[dict]:
     rows = []
@@ -173,7 +173,7 @@ def _embed_rows(
     return embedded
 
 
-# ---- phase 2: train/test split ----
+# phase 2: train/test split
 
 def _split(
     embedded: Dict[str, dict],
@@ -201,7 +201,7 @@ def _split(
     return train_set, test_set
 
 
-# ---- phase 3: build reference database ----
+# phase 3: build reference database
 
 def _build_database(
     train_set: List[str],
@@ -210,7 +210,7 @@ def _build_database(
     return [(embedded[f]["label"], embedded[f]["embedding"]) for f in train_set]
 
 
-# ---- phase 4: generate triplets and train projection head ----
+# phase 4: generate triplets and train projection head
 
 def _build_triplets(
     train_set: List[str],
@@ -238,7 +238,7 @@ def _train_head(
     head = ProjectionHead()
     triplets = _build_triplets(train_set, embedded)
     if not triplets:
-        print("  [warn] no triplets — need >= 2 labels with >= 2 train images each")
+        print("  [warn] no triplets; need >= 2 labels with >= 2 train images each")
         head.eval()
         return head, 0.0
     print(f"  {len(triplets)} triplets, {epochs} epochs")
@@ -249,7 +249,7 @@ def _train_head(
     return head, final_loss
 
 
-# ---- phase 5: retrieval evaluation ----
+# phase 5: retrieval evaluation
 
 def _eval_retrieval(
     test_set: List[str],
@@ -299,7 +299,7 @@ def _eval_retrieval(
     return results
 
 
-# ---- phase 6: grounding dino evaluation ----
+# phase 6: grounding dino evaluation
 
 def _eval_detection(
     test_set: List[str],
@@ -321,7 +321,7 @@ def _eval_detection(
     return results
 
 
-# ---- phase 7: depth evaluation ----
+# phase 7: depth evaluation
 
 def _load_depth_estimator():
     if not _CHECKPOINT.exists():
@@ -344,7 +344,7 @@ def _eval_depth(
 
     estimator = _load_depth_estimator()
     if estimator is None:
-        print("  [info] depth checkpoint not found — skipping")
+        print("  [info] depth checkpoint not found; skipping")
         return results
 
     for fname in test_set:
@@ -367,7 +367,7 @@ def _eval_depth(
     return results
 
 
-# ---- negative FP evaluation ----
+# negative FP evaluation
 
 def _eval_negatives(
     neg_embedded: Dict[str, dict],
@@ -394,7 +394,7 @@ def _eval_negatives(
     return results
 
 
-# ---- output ----
+# output
 
 _CSV_FIELDS = [
     "image", "label", "ground_truth_distance_ft",
@@ -588,7 +588,7 @@ def _print_summary(
                 if r["personalized_fp"]:
                     tags.append(f"PL matched {r['personalized_match']} ({r['personalized_sim']:.3f})")
                 if tags:
-                    print(f"  FP: {r['image']} — {', '.join(tags)}")
+                    print(f"  FP: {r['image']}; {', '.join(tags)}")
         print()
     # Latency summary
     print("--- Latency ---")
@@ -607,10 +607,10 @@ def _print_summary(
         mean, lo, hi, outliers = _latency_stats(
             vals, fnames if len(vals) == len(fnames) else None)
         outlier_str = f"  outliers: {', '.join(outliers[:3])}" if outliers else ""
-        print(f"  {phase_name:<14} mean {mean:.3f}s  [{lo:.3f}s – {hi:.3f}s]{outlier_str}")
+        print(f"  {phase_name:<14} mean {mean:.3f}s  [{lo:.3f}s - {hi:.3f}s]{outlier_str}")
 
 
-# ---- main ----
+# main
 
 def main() -> None:
     args = _parse_args()
@@ -674,7 +674,7 @@ def main() -> None:
             neg_results = _eval_negatives(neg_embedded, database, head, threshold)
             print(f"  {len(neg_results)} negative images evaluated")
     else:
-        print(f"\n[neg] negative_dataset.csv not found — skipping FP evaluation")
+        print(f"\n[neg] negative_dataset.csv not found; skipping FP evaluation")
 
     # Output
     _print_summary(retrieval_results, dino_results, depth_results,

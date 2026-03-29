@@ -20,8 +20,6 @@ import time
 
 _OLLAMA_MODEL = "llama3.2:1b"
 
-# ---- Circuit breaker ----
-
 _CB_FAILURE_THRESHOLD = 3
 _CB_COOLDOWN_SECONDS = 60.0
 
@@ -54,8 +52,6 @@ def _cb_record_success() -> None:
         _cb_state["opened_at"] = None
 
 
-# ---- Settings helpers ----
-
 def _get_max_retries() -> int:
     try:
         from visual_memory.config.settings import Settings
@@ -76,8 +72,6 @@ def _get_host() -> str | None:
     """Return the Ollama host URL from env, or None to use the library default."""
     return os.environ.get("OLLAMA_HOST")
 
-
-# ---- Core chat helper ----
 
 def _chat_raw(
     prompt: str,
@@ -130,8 +124,6 @@ def _chat(prompt: str, max_retries: int | None = None) -> str | None:
     """Plain-text chat call. Used by remember pipeline for third-pass detection."""
     return _chat_raw(prompt, max_retries, json_mode=False)
 
-
-# ---- Structured extraction functions ----
 
 def extract_search_term(query: str) -> str | None:
     """Extract the core item the user is searching for from a natural language query.

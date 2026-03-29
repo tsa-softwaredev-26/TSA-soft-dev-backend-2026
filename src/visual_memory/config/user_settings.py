@@ -8,8 +8,6 @@ if TYPE_CHECKING:
     from visual_memory.database.store import DatabaseStore
 
 
-# -----------------------------------------------------------------------
-
 class PerformanceMode(str, Enum):
     FAST     = "fast"
     BALANCED = "balanced"
@@ -45,8 +43,6 @@ class PerformanceConfig:
         return _MAP[mode]
 
 
-# -----------------------------------------------------------------------
-
 # Valid values for button_layout (stub - mobile UI not yet shipped)
 _BUTTON_LAYOUTS = {"default", "swapped"}
 
@@ -72,8 +68,6 @@ class UserSettings:
     # "swapped" = remember left / scan right.
     # Extend this field when the mobile layout ships.
     button_layout: str = "default"
-
-    # -------------------------------------------------------------------
 
     def get_performance_config(self) -> PerformanceConfig:
         return PerformanceConfig.for_mode(self.performance_mode)

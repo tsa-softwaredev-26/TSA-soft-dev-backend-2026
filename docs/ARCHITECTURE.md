@@ -141,7 +141,7 @@ src/visual_memory/
 │   └── scan_mode/pipeline.py
 │
 ├── engine/
-│   ├── model_registry.py               # ModelRegistry singleton — lazy-loads all models; prepare_for_remember() / prepare_for_scan() for VRAM swapping
+│   ├── model_registry.py               # ModelRegistry singleton; lazy-loads all models; prepare_for_remember() / prepare_for_scan() for VRAM swapping
 │   ├── embedding/
 │   │   ├── embed_image.py              # ImageEmbedder (DINOv3, 1024-dim)
 │   │   ├── embed_text.py              # CLIPTextEmbedder (CLIP text encoder, 512-dim)
@@ -191,7 +191,7 @@ src/visual_memory/
 │       ├── items.py                    # GET /items, DELETE /items/<label>, POST /items/<label>/rename
 │       ├── sightings.py               # POST /sightings - user-confirmed location update
 │       ├── crop.py                    # GET /crop - fetch cropped image from cached scan
-│       └── debug.py                   # GET /debug/state, POST /debug/echo, POST /debug/image, GET /debug/db, GET /debug/logs, GET /debug/test-remember, GET /debug/test-scan, POST /debug/wipe, PATCH /debug/config
+│       └── debug.py                   # GET /debug/state, POST /debug/echo, POST /debug/image, GET /debug/db, GET /debug/logs, GET /debug/perf, GET /debug/test-remember, GET /debug/test-scan, POST /debug/wipe, PATCH /debug/config
 └── tests/                             # Test scripts + test data
     ├── scripts/                        # Runnable .py test scripts
     ├── input_images/                   # Object test images
@@ -218,8 +218,8 @@ pipeline `run()` invocation:
 DINOv3 and CLIP stay on GPU in both modes (shared, small, ~480 MB combined).
 
 **When to enable:** set `SAVE_VRAM=1` in `.env` for GPUs with < 8 GB VRAM.
-Requires ~16 GB system RAM. Transfer cost per swap: ~1–2 s (GDino) / ~3–5 s (Depth Pro).
-On GPUs ≥ 8 GB, leave `SAVE_VRAM=0` (default) — all models stay warm on GPU with no
+Requires ~16 GB system RAM. Transfer cost per swap: ~1-2 s (GDino) / ~3-5 s (Depth Pro).
+On GPUs ≥ 8 GB, leave `SAVE_VRAM=0` (default); all models stay warm on GPU with no
 per-request overhead.
 
 At startup (`warm_all()`), the registry settles into scan-mode layout so the most
@@ -656,7 +656,7 @@ Single worker is required - model state is process-local.
 
 Models are loaded once at startup via `warm_all()` in `create_app()`. Upload cap: 50MB.
 
-**Endpoints:** GET /health, POST /remember, POST /scan, POST /feedback, POST /retrain, GET /retrain/status, GET /settings, PATCH /settings, GET /user-settings, PATCH /user-settings, GET /find, POST /ask, POST /item/ask, GET /crop, GET /items, DELETE /items/<label>, POST /items/<label>/rename, POST /sightings, GET /debug/state, POST /debug/echo, POST /debug/image, GET /debug/db, GET /debug/logs, GET /debug/test-remember, GET /debug/test-scan, POST /debug/wipe, PATCH /debug/config.
+**Endpoints:** GET /health, POST /remember, POST /scan, POST /feedback, POST /retrain, GET /retrain/status, GET /settings, PATCH /settings, GET /user-settings, PATCH /user-settings, GET /find, POST /ask, POST /item/ask, GET /crop, GET /items, DELETE /items/<label>, POST /items/<label>/rename, POST /sightings, GET /debug/state, POST /debug/echo, POST /debug/image, GET /debug/db, GET /debug/logs, GET /debug/perf, GET /debug/test-remember, GET /debug/test-scan, POST /debug/wipe, PATCH /debug/config.
 
 See `FRONTEND_GUIDE.md` for full request/response schemas, field reference, and integration patterns.
 
@@ -730,7 +730,7 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - Image embedder: DINOv3 ViT-S/16 (`facebook/dinov3-vits16-pretrain-lvd1689m`, gated on HuggingFace)
 - Text embedder: CLIP text encoder only (`openai/clip-vit-base-patch32`, 512-dim, ~180MB)
 - Deployment: `deploy/setup_server.sh` automates full Debian server setup; `deploy/spaitra.service` for systemd
-- Debug endpoints: /debug/state, /debug/echo, /debug/image, /debug/db, /debug/logs, /debug/test-remember, /debug/test-scan, /debug/wipe (selective), /debug/config (live settings patch)
+- Debug endpoints: /debug/state, /debug/echo, /debug/image, /debug/db, /debug/logs, /debug/perf, /debug/test-remember, /debug/test-scan, /debug/wipe (selective), /debug/config (live settings patch)
 - Ask Mode: POST /ask (NL query -> embedding search -> narration), POST /item/ask (item-context dispatcher: read_ocr, export_ocr, rename, find, describe)
 - Ollama integration: llama3.2:1b via `ollama_utils.py`; structured JSON output (format="json"); circuit breaker (3-strike, 60 s cooldown); configurable timeout via OLLAMA_TIMEOUT_SECONDS; OLLAMA_HOST env for non-localhost daemon
 - OCR pre-embedding: `add_to_database()` embeds OCR text at teach time and stores in `items.ocr_embedding`; `/ask` OCR content match uses stored embedding, re-embeds only for legacy items
@@ -763,8 +763,9 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - [x] OCR service health probe - covered by GET /debug/state
 - [x] Have fast mode in settings disable second pass detection in remember mode
 - [x] `PATCH /debug/config` now accepts `persist: true` flag that calls `save_ml_settings()` after applying
-- [x] Add debug GET to query logs - GET /debug/logs returns recent app log entries
+- [x] Add debug GET to query logs - GET /debug/logs supports app/important/crash sources with event, level, tag, contains filters
 - [x] Performance logs include system metrics - RAM, swap, VRAM, CPU temp, duration_ms. See LOGGING.md for schema and logparse CLI. 
+- [x] Add debug GET for performance telemetry summary - GET /debug/perf returns live metrics, perf/vram aggregates, warning/error counts, and crash count
 ---
 
 ## Server Transition Notes

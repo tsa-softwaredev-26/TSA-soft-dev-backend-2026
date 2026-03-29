@@ -110,7 +110,7 @@ def _download_hf_model(repo_id: str, size_hint: str, gated: bool = False):
 def _pull_ollama_model():
     """Pull the Ollama LLM used by /ask and /item/ask.
 
-    Skips silently if Ollama is not installed — the API degrades gracefully
+    Skips silently if Ollama is not installed. The API degrades gracefully
     without it (falls back to pure embedding search).
     """
     import shutil

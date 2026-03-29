@@ -60,7 +60,7 @@ def remember():
     return _remember_single(image_file, prompt)
 
 
-# ---- helpers ----
+# helpers
 
 def _save_temp(image_file) -> Path:
     suffix = Path(image_file.filename).suffix if image_file.filename else ".jpg"
