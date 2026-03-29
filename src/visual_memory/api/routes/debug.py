@@ -6,6 +6,7 @@ includes a destructive wipe, and allows direct config mutation.
 """
 import dataclasses
 import io
+import json
 import time
 import urllib.error
 import urllib.parse
@@ -24,7 +25,7 @@ from visual_memory.api.pipelines import (
 )
 from visual_memory.config.settings import Settings as _Settings
 from visual_memory.utils.device_utils import get_device
-from visual_memory.utils.logger import tail_logs
+from visual_memory.utils.metrics import collect_system_metrics
 from visual_memory.utils.quality_utils import mean_luminance
 
 debug_bp = Blueprint("debug", __name__)
@@ -33,6 +34,10 @@ _TEST_IMAGE = (
     Path(__file__).resolve().parents[2] / "tests" / "input_images" / "wallet_1ft_table.jpg"
 )
 _TEST_PROMPT = "wallet"
+_LOG_DIR = Path(__file__).resolve().parents[4] / "logs"
+_APP_LOG = _LOG_DIR / "app.log"
+_IMPORTANT_LOG = _LOG_DIR / "important.log"
+_CRASH_LOG = _LOG_DIR / "crash.log"
 
 # Build type map for PATCH /debug/config from Settings defaults.
 # Only primitive fields (bool, int, float, str) are settable at runtime.
@@ -82,6 +87,148 @@ def _blur_score(image: Image.Image) -> float:
         np.roll(gray, 1, 1) + np.roll(gray, -1, 1) - 4.0 * gray
     )
     return float(lap.var())
+
+
+def _tail_json_log(
+    path: Path,
+    n: int,
+    *,
+    since_line: int = 0,
+    event: str | None = None,
+    level: str | None = None,
+    tag: str | None = None,
+    contains: str | None = None,
+) -> list[dict]:
+    if not path.exists():
+        return []
+    contains_l = contains.lower() if contains else None
+    level_u = level.upper() if level else None
+    all_lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    lines = all_lines[max(since_line, 0):]
+    out = []
+    for line in reversed(lines):
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event is not None and rec.get("event") != event:
+            continue
+        if level_u is not None and str(rec.get("level", "")).upper() != level_u:
+            continue
+        if tag is not None and rec.get("tag") != tag:
+            continue
+        if contains_l is not None and contains_l not in json.dumps(rec).lower():
+            continue
+        out.append(rec)
+        if len(out) >= n:
+            break
+    out.reverse()
+    return out
+
+
+def _tail_crash_blocks(path: Path, n: int, contains: str | None = None) -> list[str]:
+    if not path.exists():
+        return []
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if not text.strip():
+        return []
+    blocks = [b.strip() for b in text.split("--- CRASH ") if b.strip()]
+    if contains:
+        term = contains.lower()
+        blocks = [b for b in blocks if term in b.lower()]
+    selected = blocks[-n:]
+    return [f"--- CRASH {b}" for b in selected]
+
+
+def _summarize_perf(entries: list[dict]) -> dict:
+    durations: dict[str, list[float]] = {}
+    ram = []
+    swap = []
+    vram_alloc = []
+    vram_res = []
+    cpu_temp = []
+    vram_layout_count = 0
+    vram_swap_count = 0
+    stage_keys = (
+        "prepare_ms",
+        "detect_ms",
+        "embed_ms",
+        "ocr_ms",
+        "match_ms",
+        "dedup_ms",
+        "depth_ms",
+        "db_ms",
+    )
+    stage_values: dict[str, list[float]] = {k: [] for k in stage_keys}
+
+    for entry in entries:
+        event = entry.get("event")
+        duration = entry.get("duration_ms")
+        if event and duration is not None:
+            try:
+                durations.setdefault(event, []).append(float(duration))
+            except (TypeError, ValueError):
+                pass
+        if event == "vram_layout":
+            vram_layout_count += 1
+            if int(entry.get("swap_count", 0)) > 0:
+                vram_swap_count += 1
+
+        for key in stage_keys:
+            value = entry.get(key)
+            if value is None:
+                continue
+            try:
+                stage_values[key].append(float(value))
+            except (TypeError, ValueError):
+                pass
+
+        for key, bucket in (
+            ("ram_used_mb", ram),
+            ("swap_used_mb", swap),
+            ("vram_allocated_mb", vram_alloc),
+            ("vram_reserved_mb", vram_res),
+            ("cpu_temp_c", cpu_temp),
+        ):
+            value = entry.get(key)
+            if value is None:
+                continue
+            try:
+                bucket.append(float(value))
+            except (TypeError, ValueError):
+                pass
+
+    duration_summary = {}
+    for event, values in durations.items():
+        duration_summary[event] = {
+            "count": len(values),
+            "avg_ms": round(sum(values) / len(values), 1),
+            "max_ms": round(max(values), 1),
+        }
+    stage_summary = {}
+    for key, values in stage_values.items():
+        if not values:
+            continue
+        stage_summary[key] = {
+            "count": len(values),
+            "avg_ms": round(sum(values) / len(values), 1),
+            "max_ms": round(max(values), 1),
+        }
+
+    return {
+        "event_count": len(entries),
+        "vram_layout_count": vram_layout_count,
+        "vram_swap_count": vram_swap_count,
+        "duration_ms": duration_summary,
+        "stage_ms": stage_summary,
+        "peaks": {
+            "ram_used_mb": round(max(ram), 1) if ram else None,
+            "swap_used_mb": round(max(swap), 1) if swap else None,
+            "vram_allocated_mb": round(max(vram_alloc), 1) if vram_alloc else None,
+            "vram_reserved_mb": round(max(vram_res), 1) if vram_res else None,
+            "cpu_temp_c": round(max(cpu_temp), 1) if cpu_temp else None,
+        },
+    }
 
 
 @debug_bp.get("/debug/state")
@@ -211,16 +358,91 @@ def debug_db():
 
 @debug_bp.get("/debug/logs")
 def debug_logs():
-    """Return recent log entries from app.log.
+    """Return recent log entries from app, important, or crash logs.
 
     Query params:
-        n     - number of entries to return (default 50, max 200)
-        event - filter by event type (e.g. scan_text_match, remember_ocr)
+        n          - number of entries to return (default 50, max 500)
+        source     - app | important | crash (default app)
+        event      - exact event filter for app/important logs
+        level      - exact level filter for app/important logs
+        tag        - exact tag filter for app/important logs
+        contains   - case-insensitive text filter
+        since_line - skip the first N lines before filtering
     """
-    n = min(max(request.args.get("n", 50, type=int), 1), 200)
+    n = min(max(request.args.get("n", 50, type=int), 1), 500)
+    source = (request.args.get("source") or "app").strip().lower()
     event = request.args.get("event") or None
-    entries = tail_logs(event=event, n=n)
-    return jsonify({"count": len(entries), "filter": event, "entries": entries})
+    level = request.args.get("level") or None
+    tag = request.args.get("tag") or None
+    contains = request.args.get("contains") or None
+    since_line = max(request.args.get("since_line", 0, type=int), 0)
+
+    if source not in {"app", "important", "crash"}:
+        return jsonify({"error": "source must be one of: app, important, crash"}), 400
+
+    if source == "crash":
+        entries = _tail_crash_blocks(_CRASH_LOG, n=n, contains=contains)
+        return jsonify({
+            "source": source,
+            "path": str(_CRASH_LOG),
+            "count": len(entries),
+            "filters": {"contains": contains},
+            "entries": entries,
+        })
+
+    path = _APP_LOG if source == "app" else _IMPORTANT_LOG
+    entries = _tail_json_log(
+        path,
+        n,
+        since_line=since_line,
+        event=event,
+        level=level,
+        tag=tag,
+        contains=contains,
+    )
+    return jsonify({
+        "source": source,
+        "path": str(path),
+        "count": len(entries),
+        "filters": {
+            "event": event,
+            "level": level,
+            "tag": tag,
+            "contains": contains,
+            "since_line": since_line,
+        },
+        "entries": entries,
+    })
+
+
+@debug_bp.get("/debug/perf")
+def debug_perf():
+    """Return current and recent performance metrics without SSH log parsing."""
+    n = min(max(request.args.get("n", 100, type=int), 1), 500)
+    app_entries = _tail_json_log(_APP_LOG, n=2000)
+    perf_entries = [
+        e for e in app_entries
+        if e.get("tag") in {"perf", "vram"} or e.get("event") == "vram_layout"
+    ]
+    recent_perf = perf_entries[-n:]
+    important = _tail_json_log(_IMPORTANT_LOG, n=2000)
+    warning_count = sum(
+        1 for e in important if str(e.get("level", "")).upper() == "WARNING"
+    )
+    error_count = sum(
+        1 for e in important if str(e.get("level", "")).upper() in {"ERROR", "CRITICAL"}
+    )
+    crash_recent = _tail_crash_blocks(_CRASH_LOG, n=20)
+    return jsonify({
+        "metrics_now": collect_system_metrics(),
+        "summary": _summarize_perf(perf_entries),
+        "recent_perf_entries": recent_perf,
+        "important_counts": {
+            "warning": warning_count,
+            "error_or_critical": error_count,
+        },
+        "crash_count_recent_20": len(crash_recent),
+    })
 
 
 @debug_bp.get("/debug/test-remember")
