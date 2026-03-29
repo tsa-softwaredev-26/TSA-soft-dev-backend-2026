@@ -766,6 +766,9 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - [x] Add debug GET to query logs - GET /debug/logs supports app/important/crash sources with event, level, tag, contains filters
 - [x] Performance logs include system metrics - RAM, swap, VRAM, CPU temp, duration_ms. See LOGGING.md for schema and logparse CLI. 
 - [x] Add debug GET for performance telemetry summary - GET /debug/perf returns live metrics, perf/vram aggregates, warning/error counts, and crash count
+- [x] Add stage timing breakdown in performance logs - remember_complete and scan_complete now include prepare, detect, embed, OCR, match, dedup, depth, and DB timing fields (as applicable)
+- [x] Optimize scan anchor lookup - use O(1) projected DB map for feedback cache anchor lookup instead of per-match linear scan
+- [x] Expand VRAM layout telemetry - vram_layout logs now include action (applied, noop, skipped), swap_count, and save_vram_enabled for clearer baseline comparisons
 ---
 
 ## Server Transition Notes
