@@ -15,7 +15,7 @@ def _fail(name: str, reason: str) -> None:
     print(f"FAIL  {name}: {reason}")
 
 
-# ---- Mock embedder that records call counts ----
+# Mock embedder that records call counts
 
 class _MockEmbedder:
     """Returns deterministic L2-normalized tensors without loading any model."""
@@ -37,7 +37,7 @@ class _MockEmbedder:
         return F.normalize(t, dim=1)
 
 
-# ---- Test 1: empty database returns [] without error ----
+# Test 1: empty database returns [] without error
 
 def test_empty_database():
     name = "empty database returns []"
@@ -54,7 +54,7 @@ def test_empty_database():
         _fail(name, str(e))
 
 
-# ---- Test 2: zip(*list) unpack with single item ----
+# Test 2: zip(*list) unpack with single item
 
 def test_zip_unpack_single():
     name = "zip unpack with 1 item"
@@ -68,7 +68,7 @@ def test_zip_unpack_single():
         _fail(name, str(e))
 
 
-# ---- Test 3: zip(*list) unpack with multiple items ----
+# Test 3: zip(*list) unpack with multiple items
 
 def test_zip_unpack_multi():
     name = "zip unpack with N items"
@@ -82,7 +82,7 @@ def test_zip_unpack_multi():
         _fail(name, str(e))
 
 
-# ---- Test 4: batch_embed slice [i:i+1] gives (1, D) not (D,) ----
+# Test 4: batch_embed slice [i:i+1] gives (1, D) not (D,)
 
 def test_batch_slice_shape():
     name = "batch_embed slice preserves (1, D) shape"
@@ -94,7 +94,7 @@ def test_batch_slice_shape():
         for i in range(4):
             sliced = embs[i:i+1]
             assert sliced.shape == (1, 1024), f"slice {i} shape {sliced.shape} != (1, 1024)"
-            # wrong way: embs[i] gives (1024,) — ensure we're not doing that
+            # wrong way: embs[i] gives (1024,) - ensure we're not doing that
             wrong = embs[i]
             assert wrong.shape == (1024,), "sanity: embs[i] should be 1D"
         _pass(name)
@@ -102,7 +102,7 @@ def test_batch_slice_shape():
         _fail(name, str(e))
 
 
-# ---- Test 5: sliced embedding works with make_combined_embedding ----
+# Test 5: sliced embedding works with make_combined_embedding
 
 def test_sliced_emb_combined():
     name = "sliced batch embedding compatible with make_combined_embedding"
@@ -120,7 +120,7 @@ def test_sliced_emb_combined():
         _fail(name, str(e))
 
 
-# ---- Test 6: batch_embed called once for N items (not N times) ----
+# Test 6: batch_embed called once for N items (not N times)
 
 def test_batch_embed_call_count():
     name = "batch_embed called once for N database images"
@@ -142,7 +142,7 @@ def test_batch_embed_call_count():
         _fail(name, str(e))
 
 
-# ---- Test 7: crops list length matches boxes list length ----
+# Test 7: crops list length matches boxes list length
 
 def test_crops_length_matches_boxes():
     name = "crops list length matches boxes count"
@@ -162,7 +162,7 @@ def test_crops_length_matches_boxes():
         _fail(name, str(e))
 
 
-# ---- Test 8: single-box edge case (N=1 batch) ----
+# Test 8: single-box edge case (N=1 batch)
 
 def test_single_box_batch():
     name = "single-box batch (N=1 edge case)"

@@ -1,6 +1,38 @@
 # Testing Guide
 
-## Quick start
+## Fast test suite (no models, < 30s)
+
+```bash
+# All unit + API tests (default)
+python -m visual_memory.tests.scripts.run_all
+
+# Unit only: pure logic, utils, DB - no Flask (~5s)
+python -m visual_memory.tests.scripts.run_all --suite unit
+
+# API only: every endpoint via Flask test client + stubs (~25s)
+python -m visual_memory.tests.scripts.run_all --suite api
+
+# Filter by feature tag
+python -m visual_memory.tests.scripts.run_all --tag remember,scan
+
+# Verbose output (shows response bodies on failure)
+TEST_VERBOSITY=2 python -m visual_memory.tests.scripts.run_all
+
+# Stop on first failure
+python -m visual_memory.tests.scripts.run_all --fail-fast
+
+# Run a single module
+python -m visual_memory.tests.scripts.test_remember_route
+python -m visual_memory.tests.scripts.test_scan_route
+python -m visual_memory.tests.scripts.test_feedback_retrain
+python -m visual_memory.tests.scripts.test_items_crud
+```
+
+Run all commands from project root. No model loading required.
+
+---
+
+## System tests (real models)
 
 ```bash
 # Full test suite (all core models, plus OCR HTTP calls when ENABLE_OCR=1)
@@ -18,8 +50,6 @@ VERBOSE=1 python -m visual_memory.tests.scripts.run_tests
 # Combine flags
 FAST=1 VERBOSE=1 python -m visual_memory.tests.scripts.run_tests
 ```
-
-Run all commands from project root.
 
 ---
 
