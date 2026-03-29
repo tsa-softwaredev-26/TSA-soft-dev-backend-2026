@@ -46,6 +46,7 @@ class HTTPOCRRecognizer(BaseTextRecognizer):
             data = json.loads(raw) if raw.strip() else {}
             text = str(data.get("text", "") or "")
             confidence = float(data.get("confidence", 0.0) or 0.0)
+            ocr_time_ms = float(data.get("_ocr_time_ms", 0.0) or 0.0)
             out = {
                 "text": text,
                 "confidence": confidence,
@@ -57,6 +58,7 @@ class HTTPOCRRecognizer(BaseTextRecognizer):
                 "status": "success" if text else "no_text",
                 "text_length": len(text),
                 "confidence": round(confidence, 4),
+                "ocr_time_ms": round(ocr_time_ms, 1),
             })
             return out
         except (urlerror.URLError, TimeoutError, ValueError, OSError, json.JSONDecodeError) as exc:
@@ -97,11 +99,18 @@ class HTTPOCRRecognizer(BaseTextRecognizer):
                 })
             if len(out) < len(images):
                 out.extend([{"text": "", "confidence": 0.0, "segments": []}] * (len(images) - len(out)))
+
+            batch_total_ms = float(data.get("_batch_total_ms", 0.0) or 0.0)
+            per_item_avg_ms = float(data.get("_per_item_avg_ms", 0.0) or 0.0)
+            batch_size = int(data.get("_batch_size", len(images)) or len(images))
+
             _log.info({
                 "event": "text_recognition_batch",
                 "engine": "http",
                 "count": len(images),
                 "non_empty": sum(1 for r in out if r.get("text")),
+                "batch_total_ms": round(batch_total_ms, 1),
+                "per_item_avg_ms": round(per_item_avg_ms, 1),
             })
             return out[: len(images)]
         except (urlerror.URLError, TimeoutError, ValueError, OSError, json.JSONDecodeError) as exc:
