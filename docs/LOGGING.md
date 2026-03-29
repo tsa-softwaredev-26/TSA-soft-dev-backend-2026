@@ -56,6 +56,20 @@ Every record has these base fields:
 | `vram_reserved_mb` | MB | CUDA memory reserved by PyTorch allocator |
 | `vram_total_mb` | MB | Total GPU VRAM |
 | `cpu_temp_c` | C | CPU temperature (Linux only, absent on macOS) |
+| `prepare_ms` | ms | Pipeline prep and model layout stage time |
+| `detect_ms` | ms | Detector stage time |
+| `embed_ms` | ms | Image embedding stage time |
+| `ocr_ms` | ms | OCR stage time |
+| `match_ms` | ms | Similarity matching stage time |
+| `dedup_ms` | ms | Duplicate suppression stage time |
+| `depth_ms` | ms | Depth estimation stage time |
+| `db_ms` | ms | DB write/read timing in remember mode |
+| `ocr_batch_requests` | count | OCR batch HTTP requests in the pipeline call |
+| `ocr_batch_items` | count | Number of OCR crops sent in batch |
+| `ocr_batch_non_empty` | count | OCR batch results with non-empty text |
+| `action` | string | VRAM layout action: `applied`, `noop`, `skipped` |
+| `swap_count` | count | Number of models offloaded/promoted in vram layout |
+| `save_vram_enabled` | bool | Whether save-vram mode was enabled at decision time |
 
 ### Key event names
 
@@ -64,6 +78,8 @@ Every record has these base fields:
 | `scan_complete` | `perf` | End of ScanPipeline.run() |
 | `remember_complete` | `perf` | End of RememberPipeline.run() |
 | `vram_layout` | `vram` | Model offload between pipeline modes |
+| `text_recognition_batch` | `ocr` | OCR batch call summary from HTTP recognizer |
+| `text_recognition_batch_error` | `ocr` | OCR batch call failed; client fell back to per-image calls |
 | `scan_text_match` | - | Object matched in scan |
 | `remember_ocr` | - | OCR result during remember |
 | `remember_second_pass` | - | Detection succeeded on second-pass prompt |

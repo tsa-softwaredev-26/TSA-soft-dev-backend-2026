@@ -97,6 +97,7 @@ the OCR service unreachable, the OCR microservice is down (core API still works 
 | POST | /debug/image | Check why an image was rejected |
 | GET | /debug/db | Inspect database contents |
 | GET | /debug/logs | Read server log entries |
+| GET | /debug/perf | Read performance summary (perf/vram/runtime counters) |
 | GET | /debug/test-remember | Smoke test remember pipeline |
 | GET | /debug/test-scan | Smoke test scan pipeline |
 | POST | /debug/wipe | Reset test state |
@@ -860,6 +861,16 @@ GET /debug/logs?n=50&event=scan_text_match
 ```
 
 Useful `event` filters: `remember_ocr`, `scan_text_match`, `text_recognition`.
+
+Use `source=important` for warning and error only logs, or `source=crash` to read crash blocks.
+
+### Performance summary
+
+```
+GET /debug/perf
+```
+
+Use this when tuning scan latency. Key fields include stage timing aggregates (`prepare_ms`, `detect_ms`, `embed_ms`, `ocr_ms`, `match_ms`) and resource peaks (RAM, swap, VRAM, CPU temp). For OCR batching checks, monitor `ocr_batch_requests`, `ocr_batch_items`, and `ocr_batch_non_empty` in recent perf records.
 
 ### Live threshold patch
 
