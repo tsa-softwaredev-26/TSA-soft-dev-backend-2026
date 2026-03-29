@@ -85,8 +85,12 @@ def patch_user_settings():
         get_scan_pipeline().set_enable_learning(us.learning_enabled)
 
     # fast mode disables second pass to cut remember-mode latency
+    # and disables LLM query fallback. Balanced/accurate keep both enabled.
     if "performance_mode" in applied:
-        get_settings().detection_second_pass_enabled = (us.performance_mode != PerformanceMode.FAST)
+        s = get_settings()
+        is_fast = us.performance_mode == PerformanceMode.FAST
+        s.detection_second_pass_enabled = not is_fast
+        s.llm_query_fallback_enabled = not is_fast
 
     us.save(get_database())
 

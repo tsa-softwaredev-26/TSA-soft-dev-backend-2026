@@ -98,6 +98,9 @@ class Settings:
 
     # Ollama LLM (used by /ask and /item/ask for query parsing, and remember mode
     # enhanced second-pass detection prompt generation)
+    # llm_query_fallback_enabled: gate LLM query parsing fallback in /ask and /item/ask.
+    # User settings map this by performance mode (fast=False, balanced/accurate=True).
+    llm_query_fallback_enabled: bool = True
     # ollama_max_retries: number of times to retry a failed Ollama call before
     # falling back to embedding-only search or keyword matching.
     ollama_max_retries: int = 2

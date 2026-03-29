@@ -70,8 +70,8 @@ def ask():
         matched_label = query
         matched_by = "exact"
 
-    # ---- Step 2: Ollama query extraction (only when raw query didn't match) ----
-    if not rows:
+    # ---- Step 2: Ollama query extraction (only when enabled and raw query didn't match) ----
+    if not rows and settings.llm_query_fallback_enabled:
         extracted = extract_search_term(query)
         if extracted and extracted.lower() != query.lower():
             ollama_used = True

@@ -107,6 +107,7 @@ def test_fast_mode_disables_second_pass():
     assert_status(resp, 200)
     s = _pm._settings
     assert s.detection_second_pass_enabled is False
+    assert s.llm_query_fallback_enabled is False
 
 
 def test_accurate_mode_enables_second_pass():
@@ -114,6 +115,15 @@ def test_accurate_mode_enables_second_pass():
     assert_status(resp, 200)
     s = _pm._settings
     assert s.detection_second_pass_enabled is True
+    assert s.llm_query_fallback_enabled is True
+
+
+def test_balanced_mode_enables_llm_fallback():
+    resp = client.patch("/user-settings", json={"performance_mode": "balanced"})
+    assert_status(resp, 200)
+    s = _pm._settings
+    assert s.detection_second_pass_enabled is True
+    assert s.llm_query_fallback_enabled is True
 
 
 for name, fn in [
@@ -131,6 +141,7 @@ for name, fn in [
     ("user_settings:patch_valid_voice_speed", test_patch_user_settings_valid_voice_speed),
     ("user_settings:fast_mode_disables_second_pass", test_fast_mode_disables_second_pass),
     ("user_settings:accurate_mode_enables_second_pass", test_accurate_mode_enables_second_pass),
+    ("user_settings:balanced_mode_enables_llm_fallback", test_balanced_mode_enables_llm_fallback),
 ]:
     _runner.run(name, fn)
 

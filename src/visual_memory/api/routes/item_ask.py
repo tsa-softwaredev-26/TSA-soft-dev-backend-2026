@@ -14,7 +14,7 @@ Supported actions:
 import re
 from flask import Blueprint, request, jsonify
 
-from visual_memory.api.pipelines import get_database, get_scan_pipeline
+from visual_memory.api.pipelines import get_database, get_scan_pipeline, get_settings
 from visual_memory.api.routes.find import _format_sighting, build_narration
 from visual_memory.utils.ollama_utils import (
     extract_item_intent,
@@ -123,7 +123,7 @@ def item_ask():
     # Ollama supplements only when no keyword pattern fires.
     intent = _keyword_intent(query)
     ollama_used = False
-    if intent is None:
+    if intent is None and get_settings().llm_query_fallback_enabled:
         intent = extract_item_intent(query)
         if intent is not None:
             ollama_used = True
@@ -166,7 +166,7 @@ def item_ask():
     if intent == "rename":
         # Keyword extraction first (deterministic), Ollama as fallback
         new_label = _extract_rename_target_keyword(query)
-        if new_label is None:
+        if new_label is None and get_settings().llm_query_fallback_enabled:
             new_label = extract_rename_target(query)
         if not new_label:
             return jsonify({
