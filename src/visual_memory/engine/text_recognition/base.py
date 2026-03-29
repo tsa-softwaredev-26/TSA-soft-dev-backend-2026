@@ -15,3 +15,11 @@ class BaseTextRecognizer(ABC):
                 "confidence": float - average confidence across accepted segments
                 "segments": list of (text, confidence) tuples
         """
+
+    def recognize_batch(self, images: list[Image.Image]) -> list[dict]:
+        """Run OCR over a batch of PIL Images.
+
+        Default behavior calls recognize() per image to preserve compatibility
+        for recognizers that do not implement a true batch backend.
+        """
+        return [self.recognize(img) for img in images]
