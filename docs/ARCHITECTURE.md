@@ -360,6 +360,7 @@ Multi-image (POST /remember with `images[]`):
 ### `engine/text_recognition/http_recognizer.py` - `HTTPOCRRecognizer`
 - Backend: external HTTP OCR microservice
 - Input: PIL Image (encoded as PNG multipart form-data, field name: `image`)
+- Batch input: multiple PIL Images over multipart form-data (field name: `images`) to `/ocr/batch`
 - Output: `{"text": str, "confidence": float, "segments": list}`
 - Response contract: JSON with at least `text` (string), optional `confidence` (float)
 
@@ -741,7 +742,7 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 
 ### Engine / Architecture
 - [ ] Run full benchmark - 120 images not yet captured (~1-2 hrs). No CAPTURE_GUIDE.md exists yet; manually capture dataset images.
-- [ ] Add batched OCR service endpoint support and wire it into pipeline OCR paths to reduce HTTP overhead on multi-crop scans
+- [x] Add batched OCR service endpoint support and wire it into pipeline OCR paths to reduce HTTP overhead on multi-crop scans
 - [ ] Wire `detect_all_batch()` (in `detect_all.py`) and `detect_batch()` (in `prompt_based.py`) into ScanPipeline and RememberPipeline to avoid per-crop iteration loops
 - [ ] `str | Path` type hints in pipeline files require Python 3.10+; `pyproject.toml` allows 3.8+ (pre-existing, low priority)
 - [ ] OCR text likelihood threshold tuning: current default 0.10 was chosen heuristically; calibrate against a labelled set of crops with/without text to confirm false-negative rate is acceptable. See `quality_utils.estimate_text_likelihood()`.
@@ -800,7 +801,7 @@ All server-transition items are complete as of March 2026.
 - **Grounding DINO for remember** - Handles vague natural language; much stronger than prompted YOLOE for this use case.
 - **Depth Pro** - Only monocular model with metric (absolute) depth; no scale factor needed.
 - **Actionability over accuracy** - "May be a wallet two feet to your right, focus to verify" is actionable. A raw confidence percentage is not.
-- **OCR moved out of core backend (March 2026)** - OCR is now an external HTTP microservice so backend deployment avoids Paddle dependency conflicts. The core backend only sends crop images to `OCR_SERVICE_URL` and consumes a stable JSON response (`text`, `confidence`).
+- **OCR moved out of core backend (March 2026)** - OCR is now an external HTTP microservice so backend deployment avoids Paddle dependency conflicts. The core backend sends crop images to `OCR_SERVICE_URL` (`/ocr` single and `/ocr/batch` for multi-crop scans) and consumes a stable JSON response (`text`, `confidence`).
 - **Combined embedding over hybrid matching** - `max(image_sim, text_sim)` could false-match two white documents with different text (image similarity alone passes threshold). The combined embedding `normalize(img) || normalize(text)` means cosine similarity is approximately the average of both sub-similarities, so both image AND text must match. Non-document objects get a zero text slot; image similarity dominates unchanged.
 - **Lean backend venv** - Core backend install no longer includes PaddleOCR. OCR dependencies live in the separate OCR service environment.
 - **Projection head: identity-at-init residual design** - A single `Linear(1536, 1536, bias=False)` initialized to zeros. At init `output = normalize(x + 0) = x`, so the head is a strict no-op before any training. Safe to wire in by default with zero runtime cost. After triplet training, the head learns a small residual correction that pulls user-confirmed matches closer and pushes mismatches apart. Raw base embeddings are stored; projection applied on-the-fly at match time, so retraining only requires reloading weights - no re-embedding the database.
