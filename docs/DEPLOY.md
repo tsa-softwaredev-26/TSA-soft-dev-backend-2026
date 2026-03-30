@@ -292,7 +292,8 @@ Full reference; all supported variables:
 # Auth
 API_KEY=replace-with-a-long-random-api-key
 # Enable SQLCipher at rest encryption on Python <= 3.12.
-# Leave empty on Python 3.13+ until pysqlcipher3 adds support.
+# On Python 3.13 this is currently unavailable because pysqlcipher3 fails to build.
+# Leave empty on Python 3.13+ until SQLCipher Python bindings catch up.
 DB_ENCRYPTION_KEY=
 
 # Bind address (keep 127.0.0.1; expose via tunnel or reverse proxy)
@@ -629,7 +630,7 @@ Common causes:
 | `401 Unauthorized` from OCR | Missing or wrong `X-API-Key` from core, or key mismatch between `/opt/spaitra/.env` and `/opt/spaitra/.ocr.env` |
 | OCR `500` with `ConvertPirAttribute2RuntimeAttribute` | Set `OCR_ENABLE_MKLDNN=0` in `/opt/spaitra/.ocr.env`, restart `spaitra-ocr` |
 | OCR service restarts or times out on large photos | Lower `OCR_MAX_SIDE` (for example `1600`) and restart `spaitra-ocr` |
-| `500` at startup with `DB_ENCRYPTION_KEY is set but SQLCipher is unavailable` | On Python 3.13, clear `DB_ENCRYPTION_KEY` until SQLCipher bindings catch up; on <=3.12 reinstall core deps with `libsqlcipher-dev` |
+| `500` at startup with `DB_ENCRYPTION_KEY is set but SQLCipher is unavailable` | On Python 3.13, clear `DB_ENCRYPTION_KEY` until SQLCipher bindings catch up (current `pysqlcipher3` build fails on 3.13); on <=3.12 reinstall core deps with `libsqlcipher-dev` |
 | `Failed to unlock encrypted database` | `DB_ENCRYPTION_KEY` mismatch; restore the correct key or start with a fresh DB |
 | `Permission denied` on model files | `chown -R spaitra:spaitra $REPO/checkpoints` |
 | `CUDA out of memory` | Enable `SAVE_VRAM=1` in `.env` and restart |
