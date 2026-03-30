@@ -1,6 +1,7 @@
 from collections import OrderedDict
 from pathlib import Path
 import time
+from typing import Optional, Union
 import torch
 import torch.nn.functional as F
 from visual_memory.config import Settings
@@ -44,7 +45,7 @@ def _confidence_label(similarity: float) -> str:
 
 
 class ScanPipeline:
-    def __init__(self, focal_length_px: float, db_path: str | Path = None):
+    def __init__(self, focal_length_px: float, db_path: Optional[Union[str, Path]] = None):
         self.img_embedder    = registry.img_embedder
         self.text_embedder   = registry.text_embedder   if _settings.enable_ocr   else None
         self.detector        = registry.yoloe_detector
@@ -154,7 +155,7 @@ class ScanPipeline:
         blended = (1.0 - alpha) * emb + alpha * projected
         return F.normalize(blended, dim=1)
 
-    def run(self, query_image, scan_id: str | None = None, focal_length_px: float | None = None):
+    def run(self, query_image, scan_id: Optional[str] = None, focal_length_px: Optional[float] = None):
         """
         query_image: PIL Image
         scan_id: optional UUID string; if provided, caches embeddings for /feedback
@@ -200,7 +201,8 @@ class ScanPipeline:
                 "message": "Image is too dark for detection. Enable the flashlight and retry.",
             }
 
-        boxes, scores = self.detector.detect_all(query_image)
+        batch_detections = self.detector.detect_all_batch([query_image])
+        boxes, scores = batch_detections[0]
         timing["detect_ms"] = round((time.monotonic() - stage_start) * 1000)
 
         if not boxes:

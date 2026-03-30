@@ -97,13 +97,23 @@ def _remember_multi(image_files, prompt: str):
             tmp_paths.append(_save_temp(f))
 
         # Rank by detection score (lightweight, no embedding/DB write)
-        scores = []
-        for p in tmp_paths:
-            try:
-                s = pipeline.detect_score(p, prompt)
-            except Exception:
-                s = {"detected": False, "score": 0.0, "blur_score": 0.0, "second_pass_prompt": None}
-            scores.append(s)
+        try:
+            scores = pipeline.detect_score_batch(tmp_paths, prompt)
+        except Exception:
+            scores = []
+            for p in tmp_paths:
+                try:
+                    s = pipeline.detect_score(p, prompt)
+                except Exception:
+                    s = {
+                        "detected": False,
+                        "score": 0.0,
+                        "blur_score": 0.0,
+                        "is_dark": False,
+                        "darkness_level": 0.0,
+                        "second_pass_prompt": None,
+                    }
+                scores.append(s)
 
         detected_count = sum(1 for s in scores if s["detected"])
 

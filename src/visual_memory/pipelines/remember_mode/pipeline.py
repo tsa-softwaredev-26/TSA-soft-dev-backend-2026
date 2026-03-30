@@ -1,7 +1,7 @@
 from __future__ import annotations
 import time
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Sequence, Tuple, Union
 import numpy as np
 import pillow_heif
 from PIL import Image
@@ -123,6 +123,33 @@ class RememberPipeline:
             ocr_embedding=ocr_embedding,
         )
 
+    def _detect_with_ollama_fallback(
+        self,
+        image: Image.Image,
+        prompt: str,
+    ) -> Tuple[Optional[dict], Optional[str]]:
+        """Try Ollama-suggested prompt variants and return first successful detect."""
+        from visual_memory.utils.ollama_utils import _chat
+        n = max(1, _settings.ollama_detection_retries)
+        ollama_prompt = (
+            f"A vision model failed to detect '{prompt}' in an image. "
+            f"Give {n} alternative phrasings that a vision model might recognize better. "
+            f"Reply with only the phrases, one per line, no numbering, no explanation."
+        )
+        suggestions_raw = _chat(ollama_prompt)
+        if suggestions_raw:
+            suggestions = [s.strip() for s in suggestions_raw.splitlines() if s.strip()][:n]
+            for suggestion in suggestions:
+                detection = self.detector.detect(image, suggestion)
+                if detection is not None:
+                    _log.info({
+                        "event": "remember_third_pass_ollama",
+                        "original_prompt": prompt,
+                        "successful_prompt": suggestion,
+                    })
+                    return detection, suggestion
+        return None, None
+
     def _detect_with_fallback(self, image: Image.Image, prompt: str):
         """
         Run detection on image. If nothing is found, retry with second-pass
@@ -148,32 +175,91 @@ class RememberPipeline:
                 })
                 return detection, alt_prompt
 
-        # Third pass: ask Ollama for alternative phrasings, try each one.
-        # ollama_detection_retries controls how many LLM suggestions to attempt.
-        # Skipped silently if Ollama is unavailable.
-        from visual_memory.utils.ollama_utils import _chat
-        n = max(1, _settings.ollama_detection_retries)
-        ollama_prompt = (
-            f"A vision model failed to detect '{prompt}' in an image. "
-            f"Give {n} alternative phrasings that a vision model might recognize better. "
-            f"Reply with only the phrases, one per line, no numbering, no explanation."
-        )
-        suggestions_raw = _chat(ollama_prompt)
-        if suggestions_raw:
-            suggestions = [s.strip() for s in suggestions_raw.splitlines() if s.strip()][:n]
-            for suggestion in suggestions:
-                detection = self.detector.detect(image, suggestion)
-                if detection is not None:
-                    _log.info({
-                        "event": "remember_third_pass_ollama",
-                        "original_prompt": prompt,
-                        "successful_prompt": suggestion,
-                    })
-                    return detection, suggestion
+        return self._detect_with_ollama_fallback(image, prompt)
 
-        return None, None
+    def detect_score_batch(
+        self,
+        image_paths: Sequence[Union[str, Path]],
+        prompt: str,
+    ) -> List[dict]:
+        """
+        Batched detection-only pass for multi-image remember ranking.
 
-    def detect_score(self, image_path: str | Path, prompt: str) -> dict:
+        Uses Grounding DINO detect_batch() for first and second pass prompts.
+        """
+        registry.prepare_for_remember()
+        paths = [Path(p) for p in image_paths]
+        images = [load_image(str(p)) for p in paths]
+
+        luminances = [mean_luminance(img) for img in images]
+        blurs = [_blur_score(img) for img in images]
+        is_dark = [lum < _settings.darkness_threshold for lum in luminances]
+
+        results: List[dict] = []
+        detections: List[Optional[dict]] = [None] * len(images)
+        second_pass_prompt: List[Optional[str]] = [None] * len(images)
+
+        active_indices = [i for i, dark in enumerate(is_dark) if not dark]
+        if active_indices:
+            first_pass = self.detector.detect_batch(
+                [images[i] for i in active_indices],
+                [prompt] * len(active_indices),
+            )
+            for idx, detection in zip(active_indices, first_pass):
+                detections[idx] = detection
+
+            if _settings.detection_second_pass_enabled:
+                pending = [i for i in active_indices if detections[i] is None]
+                for template in _SECOND_PASS_TEMPLATES:
+                    if not pending:
+                        break
+                    alt_prompt = template.format(prompt=prompt)
+                    second_pass = self.detector.detect_batch(
+                        [images[i] for i in pending],
+                        [alt_prompt] * len(pending),
+                    )
+                    unresolved = []
+                    for idx, detection in zip(pending, second_pass):
+                        if detection is None:
+                            unresolved.append(idx)
+                            continue
+                        detections[idx] = detection
+                        second_pass_prompt[idx] = alt_prompt
+                        _log.info({
+                            "event": "remember_second_pass",
+                            "original_prompt": prompt,
+                            "successful_prompt": alt_prompt,
+                        })
+                    pending = unresolved
+
+                for idx in pending:
+                    detection, third_pass_prompt = self._detect_with_ollama_fallback(images[idx], prompt)
+                    detections[idx] = detection
+                    second_pass_prompt[idx] = third_pass_prompt
+
+        for i in range(len(images)):
+            if is_dark[i]:
+                results.append({
+                    "detected": False,
+                    "score": 0.0,
+                    "blur_score": blurs[i],
+                    "is_dark": True,
+                    "darkness_level": round(luminances[i], 2),
+                    "second_pass_prompt": None,
+                })
+                continue
+            detection = detections[i]
+            results.append({
+                "detected": detection is not None,
+                "score": detection["score"] if detection else 0.0,
+                "blur_score": blurs[i],
+                "is_dark": False,
+                "darkness_level": round(luminances[i], 2),
+                "second_pass_prompt": second_pass_prompt[i],
+            })
+        return results
+
+    def detect_score(self, image_path: Union[str, Path], prompt: str) -> dict:
         """
         Detection-only pass - no embedding or DB write. Used by the multi-image
         endpoint to rank candidates before committing to a full run.
@@ -181,7 +267,7 @@ class RememberPipeline:
         Returns:
             detected (bool), score (float), blur_score (float),
             is_dark (bool), darkness_level (float),
-            second_pass_prompt (str | None)
+            second_pass_prompt (Optional[str])
         """
         registry.prepare_for_remember()
         image = load_image(str(Path(image_path)))
@@ -207,7 +293,7 @@ class RememberPipeline:
             "second_pass_prompt": second_pass_prompt,
         }
 
-    def run(self, image_path: str | Path, prompt: str):
+    def run(self, image_path: Union[str, Path], prompt: str):
         """
         image_path: path to image file
         prompt: text label from the user
