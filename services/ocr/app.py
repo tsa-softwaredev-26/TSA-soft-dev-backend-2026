@@ -81,11 +81,29 @@ def _extract_text(image: Image.Image) -> tuple[dict, float]:
     confidences: list[float] = []
 
     for line in lines or []:
-        if not line or len(line) < 2:
+        text: str | None = None
+        confidence: float | None = None
+
+        if isinstance(line, dict):
+            text = line.get("text")
+            confidence = line.get("score", line.get("confidence"))
+        elif isinstance(line, (list, tuple)):
+            if len(line) >= 2 and isinstance(line[1], (list, tuple)):
+                pair = line[1]
+                if len(pair) >= 2:
+                    text = pair[0]
+                    confidence = pair[1]
+            elif len(line) >= 1:
+                text = line[0]
+                if len(line) >= 2:
+                    confidence = line[1]
+        else:
+            text = str(line)
+
+        if text is None:
             continue
-        text, confidence = line[1]
-        if not text:
-            continue
+        if confidence is None:
+            confidence = 1.0
         confidence = float(confidence)
         if confidence < min_conf:
             continue
