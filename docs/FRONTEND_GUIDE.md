@@ -109,6 +109,21 @@ the OCR service unreachable, the OCR microservice is down (core API still works 
 
 ---
 
+### Unified endpoint note
+
+This branch uses `POST /voice` as the main command endpoint.
+
+Direct standalone command routes are not part of the public frontend contract in this branch:
+- `POST /remember`
+- `POST /scan`
+- `POST /ask`
+- `POST /item/ask`
+- `POST /transcribe`
+
+Those behaviors are routed through `/voice` with `request_type` and optional state context.
+
+---
+
 ## What to Store Client-Side
 
 **`scan_id`** - returned by scan results from `POST /voice`. Store it immediately. Needed for:
