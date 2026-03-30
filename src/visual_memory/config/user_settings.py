@@ -23,6 +23,8 @@ class PerformanceConfig:
     """
     depth_enabled: bool
     target_latency: float  # seconds (advisory; pipeline does not enforce)
+    vlm_enabled: bool
+    vlm_timeout_seconds: float
 
     @staticmethod
     def for_mode(mode: PerformanceMode) -> PerformanceConfig:
@@ -30,14 +32,20 @@ class PerformanceConfig:
             PerformanceMode.FAST: PerformanceConfig(
                 depth_enabled=False,
                 target_latency=1.0,
+                vlm_enabled=False,
+                vlm_timeout_seconds=0.0,
             ),
             PerformanceMode.BALANCED: PerformanceConfig(
                 depth_enabled=True,
                 target_latency=2.0,
+                vlm_enabled=True,
+                vlm_timeout_seconds=3.0,
             ),
             PerformanceMode.ACCURATE: PerformanceConfig(
                 depth_enabled=True,
                 target_latency=4.0,
+                vlm_enabled=True,
+                vlm_timeout_seconds=10.0,
             ),
         }
         return _MAP[mode]
@@ -104,5 +112,7 @@ class UserSettings:
             "performance_config": {
                 "depth_enabled": cfg.depth_enabled,
                 "target_latency": cfg.target_latency,
+                "vlm_enabled": cfg.vlm_enabled,
+                "vlm_timeout_seconds": cfg.vlm_timeout_seconds,
             },
         }
