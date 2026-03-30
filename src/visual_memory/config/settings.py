@@ -110,6 +110,16 @@ class Settings:
     # ollama_timeout_seconds: seconds to wait for one Ollama chat response before
     # giving up. Lower values keep /ask latency predictable when Ollama is slow.
     ollama_timeout_seconds: float = field(default_factory=lambda: float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "5.0")))
+    # Per-mode Ollama models. Fast mode disables LLM parsing.
+    ollama_model_balanced: str = field(default_factory=lambda: os.environ.get("OLLAMA_MODEL_BALANCED", "llama3.2:1b"))
+    ollama_model_accurate: str = field(default_factory=lambda: os.environ.get("OLLAMA_MODEL_ACCURATE", "phi3:mini"))
+
+    def get_ollama_model(self, mode: str = "balanced") -> str | None:
+        if mode == "fast":
+            return None
+        if mode == "accurate":
+            return self.ollama_model_accurate
+        return self.ollama_model_balanced
 
     # Whisper speech recognition (voice input)
     whisper_model: str = "openai/whisper-large-v3-turbo"
