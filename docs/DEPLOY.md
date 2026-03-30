@@ -263,6 +263,21 @@ prompt-injection or harmful markers return HTTP 400 with `blocked: true` and
 
 ---
 
+## 7. Unified voice endpoint
+
+This branch exposes `POST /voice` as the primary command surface.
+
+- `/voice` accepts audio or text plus optional frontend state
+- `/voice` can route remember, scan, ask, item context actions, and location confirmation
+- transcribe, ask, and item logic are kept as internal helpers for voice routing
+
+Deployment impact:
+- no new dependencies
+- no extra service required
+- existing API key and OCR service setup stays the same
+
+---
+
 ## 8. Environment files
 
 ### Core backend; `/opt/spaitra/.env`
