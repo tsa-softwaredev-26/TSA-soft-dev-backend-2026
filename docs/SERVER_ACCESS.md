@@ -253,6 +253,22 @@ python -m visual_memory.tests.scripts.test_ollama_injection \
   --api-key "$KEY"
 ```
 
+### Stress and pentest suite run (dev clone)
+
+```bash
+cd /home/dev/TSA-soft-dev-backend-2026
+source /opt/spaitra/TSA-soft-dev-backend-2026/venv-core/bin/activate
+export PYTHONPATH=/home/dev/TSA-soft-dev-backend-2026/src
+
+python -m visual_memory.tests.scripts.run_all --suite unit
+python -m visual_memory.tests.scripts.run_all --suite api
+python -m visual_memory.tests.scripts.run_all --suite stress
+python -m visual_memory.tests.scripts.run_all --suite pentest
+```
+
+Stress and pentest artifacts are written to:
+`benchmarks/baslines/stress_tests/`
+
 ---
 
 ## 7. Service management (SSH, as root or sudo)
