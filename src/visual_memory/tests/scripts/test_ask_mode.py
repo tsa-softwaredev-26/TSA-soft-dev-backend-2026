@@ -181,7 +181,8 @@ def test_item_ask_describe_deferred():
     assert_status(resp, 200)
     data = resp.get_json()
     assert data.get("action") == "describe"
-    assert data.get("deferred") is True
+    assert data.get("method") in ("vlm", "attributes", "minimal")
+    assert isinstance(data.get("latency_ms"), int)
 
 
 def test_item_ask_missing_fields():
