@@ -12,6 +12,10 @@ EnvironmentFile=/opt/spaitra/.ocr.env
 ExecStart=__REPO_ROOT__/venv-ocr/bin/python -m services.ocr.run
 Restart=always
 RestartSec=10
+MemoryMax=8G
+MemoryHigh=7G
+StartLimitIntervalSec=300
+StartLimitBurst=5
 StandardOutput=journal
 StandardError=journal
 
