@@ -13,7 +13,7 @@ from visual_memory.api.routes.find import (
     _format_sighting,
     build_narration,
 )
-from visual_memory.utils.ollama_utils import extract_search_term
+from visual_memory.utils.ollama_utils import extract_search_term, is_unsafe_query
 from visual_memory.utils import get_logger
 
 _log = get_logger(__name__)
@@ -55,6 +55,21 @@ def ask():
 
     if not query:
         return jsonify({"error": "missing field: query"}), 400
+
+    if is_unsafe_query(query):
+        _log.warning({
+            "event": "ask_blocked_unsafe_query",
+            "query": query,
+        })
+        return jsonify({
+            "query": query,
+            "search_term": None,
+            "ollama_used": False,
+            "found": False,
+            "blocked": True,
+            "reason": "unsafe_query",
+            "narration": "I can only help with memory-related object lookup requests.",
+        }), 400
 
     settings = get_settings()
     db = get_database()
