@@ -233,6 +233,28 @@ curl "$BASE/debug/logs" -H "X-API-Key: $KEY"
 
 ---
 
+## 6.1 Security validation snapshot (March 2026)
+
+Latest online jailbreak run against public URL (`$BASE`) with valid auth:
+
+- Health endpoint reachable and auth checks behaved correctly.
+- Prompt-injection suite blocked 26/32 attack attempts.
+- Remaining failures were semantic retrieval bypasses (query still matched a remembered item),
+  not harmful instruction generation or system prompt leakage.
+- `/ask` now supports explicit unsafe-query block responses (`blocked: true`, `reason: "unsafe_query"`).
+
+Re-run command:
+
+```bash
+cd /opt/spaitra/TSA-soft-dev-backend-2026
+source /opt/spaitra/TSA-soft-dev-backend-2026/venv-core/bin/activate
+python -m visual_memory.tests.scripts.test_ollama_injection \
+  --base-url "$BASE" \
+  --api-key "$KEY"
+```
+
+---
+
 ## 7. Service management (SSH, as root or sudo)
 
 ```bash

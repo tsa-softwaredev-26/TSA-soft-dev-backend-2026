@@ -734,6 +734,7 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
  - Ask Mode: POST /ask (NL query -> embedding search -> narration), POST /item/ask (item-context dispatcher: read_ocr, export_ocr, rename, find, describe)
  - Voice transcription: POST /transcribe (Whisper Turbo) with optional context bias from known item labels and room names
  - Ollama integration: llama3.2:1b via `ollama_utils.py`; structured JSON output (format="json"); circuit breaker (3-strike, 60 s cooldown); configurable timeout via OLLAMA_TIMEOUT_SECONDS; OLLAMA_HOST env for non-localhost daemon
+ - Jailbreak resistance: `/ask` now applies an unsafe-query gate before retrieval. Queries with prompt-injection or harmful markers are blocked with `400` (`blocked: true`, `reason: "unsafe_query"`) instead of running fuzzy search.
 - OCR pre-embedding: `add_to_database()` embeds OCR text at teach time and stores in `items.ocr_embedding`; `/ask` OCR content match uses stored embedding, re-embeds only for legacy items
 
 ---
@@ -756,6 +757,7 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - [ ] Validate Ollama prompts (extract_search_term, extract_item_intent, extract_rename_target) against 20+ real voice queries to confirm extraction reliability.
 - [ ] Add Whisper transcription quality test set (20+ real voice queries) and track exact-query and intent-success rates across noise, accent, and speaking-speed variants.
 - [ ] Add Whisper context-bias A/B tests (`context=0` vs `context=1`) against user-specific labels and room names; report wins and regressions before tuning defaults.
+- [ ] Continue prompt-injection hardening for Ollama parsing and `/ask` retrieval. Current security run blocked 26/32 attacks; remaining failures are semantic bypasses, not harmful-content generation.
 
 ### Learning / Personalization
 
