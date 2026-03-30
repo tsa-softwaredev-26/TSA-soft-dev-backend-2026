@@ -6,6 +6,7 @@ After=network.target
 Type=simple
 User=spaitra
 Group=spaitra
+UMask=0077
 WorkingDirectory=__REPO_ROOT__
 EnvironmentFile=/opt/spaitra/.ocr.env
 ExecStart=__REPO_ROOT__/venv-ocr/bin/python -m services.ocr.run

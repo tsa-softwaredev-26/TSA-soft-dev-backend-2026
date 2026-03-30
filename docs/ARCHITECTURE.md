@@ -646,7 +646,8 @@ Production (Ubuntu/NVIDIA): `gunicorn -w 1 -b 0.0.0.0:5000 "visual_memory.api.ap
 Single worker is required - model state is process-local.
 
 **Environment variables:**
-- `API_KEY=<secret>` - enforce `X-API-Key` header on all routes except `/health` (opt-in; unset = no auth)
+- `API_KEY=<secret>` - enforce `X-API-Key` header on all routes except `/health` (required for production, minimum length enforced)
+- `DB_ENCRYPTION_KEY=<secret>` - enable SQLCipher encryption for `data/memory.db` when SQLCipher bindings are available. On Python 3.13 this is currently unavailable; leave unset there.
 - `ENABLE_DEPTH=0` - skip Depth Pro (~2GB VRAM savings)
 - `ENABLE_OCR=0` - skip OCR requests
 - `OCR_SERVICE_URL=http://127.0.0.1:8001/ocr` - external OCR endpoint
@@ -729,7 +730,7 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - OCR backend: external HTTP service (`ocr_backend = "http"`, `ocr_health_url` settable via `OCR_HEALTH_URL`)
 - Image embedder: DINOv3 ViT-S/16 (`facebook/dinov3-vits16-pretrain-lvd1689m`, gated on HuggingFace)
 - Text embedder: CLIP text encoder only (`openai/clip-vit-base-patch32`, 512-dim, ~180MB)
-- Deployment: `deploy/setup_server.sh` automates full Debian server setup; `deploy/spaitra.service` for systemd
+- Deployment: `deploy/install.sh` installs systemd units from templates; primary units are `deploy/spaitra-core.service` and `deploy/spaitra-ocr.service`
  - Debug endpoints: /debug/state, /debug/echo, /debug/image, /debug/db, /debug/logs, /debug/perf, /debug/test-remember, /debug/test-scan, /debug/wipe (selective), /debug/config (live settings patch)
  - Ask Mode: POST /ask (NL query -> embedding search -> narration), POST /item/ask (item-context dispatcher: read_ocr, export_ocr, rename, find, describe)
  - Voice transcription: POST /transcribe (Whisper Turbo) with optional context bias from known item labels and room names
@@ -762,7 +763,8 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 ### Learning / Personalization
 
 ### Deployment
-- [ ] Fix file permissions: `deploy/spaitra.service` and related files are owned by root on the server. Run `sudo chown -R dev:dev /opt/spaitra/TSA-soft-dev-backend-2026/deploy/` to ensure future installs can chmod.
+- [ ] Validate SQLCipher package availability (`libsqlcipher-dev`) and startup behavior when `DB_ENCRYPTION_KEY` is configured.
+- [ ] Keep strict permissions after deploy updates by running `deploy/secure_permissions.sh`.
 
 ### API & Logging
 - [x] OCR service health probe - covered by GET /debug/state
@@ -783,7 +785,7 @@ All server-transition items are complete as of March 2026.
 1. [x] **Async /retrain** - `threading.Thread` with module-level `_status` dict; `GET /retrain/status` returns `{"running": bool, "last_result": {...}}`.
 2. [x] **Persist ML settings** - `PATCH /settings` saves full ML settings snapshot to `user_state.ml_settings` (JSON); `warm_all()` calls `_apply_persisted_ml_settings()` at startup.
 3. [x] **FeedbackStore -> SQLite** - `feedback` table in DatabaseStore; `FeedbackStore` is now a thin wrapper; flat `.pt` file approach removed.
-4. [x] **Automated server setup** - `deploy/setup_server.sh` automates all DEPLOY.md steps (apt, user, venv, HF login, weights, systemd, optional tunnel).
+4. [x] **Automated unit install** - `deploy/install.sh` renders systemd templates with repo path and installs `spaitra-core` and `spaitra-ocr`.
 
 ---
 
