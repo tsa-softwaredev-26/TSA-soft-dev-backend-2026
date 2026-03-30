@@ -45,19 +45,12 @@ def remember():
             }
         }
     """
-    prompt = request.form.get("prompt", "").strip()
-    if not prompt:
-        return jsonify({"error": "missing field: prompt"}), 400
-
-    # Accept "images[]" (multi) or "image" (single, backward-compat)
-    multi_files = request.files.getlist("images[]")
-    if multi_files:
-        return _remember_multi(multi_files, prompt)
-
-    image_file = request.files.get("image")
-    if not image_file:
-        return jsonify({"error": "missing field: image or images[]"}), 400
-    return _remember_single(image_file, prompt)
+    result, status = process_remember_request(
+        prompt=request.form.get("prompt", ""),
+        image_file=request.files.get("image"),
+        image_files=request.files.getlist("images[]"),
+    )
+    return jsonify(result), status
 
 
 # helpers
@@ -70,22 +63,22 @@ def _save_temp(image_file) -> Path:
     return Path(tmp.name)
 
 
-def _remember_single(image_file, prompt: str):
+def _remember_single(image_file, prompt: str) -> tuple[dict, int]:
     tmp_path = _save_temp(image_file)
     try:
         result = get_remember_pipeline().run(tmp_path, prompt)
     except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+        return {"error": str(exc)}, 500
     finally:
         tmp_path.unlink(missing_ok=True)
 
     if result.get("success"):
         get_scan_pipeline().reload_database()
 
-    return jsonify(result)
+    return result, 200
 
 
-def _remember_multi(image_files, prompt: str):
+def _remember_multi(image_files, prompt: str) -> tuple[dict, int]:
     """
     Save all images to temp files, run detect_score on each to find the best
     candidate, then run the full pipeline only on the winner.
@@ -121,18 +114,18 @@ def _remember_multi(image_files, prompt: str):
         best_idx = max(range(len(scores)), key=lambda i: scores[i]["score"])
 
         if not scores[best_idx]["detected"]:
-            return jsonify({
+            return {
                 "success": False,
                 "message": "No object detected in any of the provided images.",
                 "images_tried": len(tmp_paths),
                 "images_with_detection": 0,
                 "result": None,
-            })
+            }, 200
 
         try:
             result = pipeline.run(tmp_paths[best_idx], prompt)
         except Exception as exc:
-            return jsonify({"error": str(exc)}), 500
+            return {"error": str(exc)}, 500
 
     finally:
         for p in tmp_paths:
@@ -143,4 +136,17 @@ def _remember_multi(image_files, prompt: str):
         result["images_tried"] = len(tmp_paths)
         result["images_with_detection"] = detected_count
 
-    return jsonify(result)
+    return result, 200
+
+
+def process_remember_request(prompt: str, image_file, image_files) -> tuple[dict, int]:
+    prompt = (prompt or "").strip()
+    if not prompt:
+        return {"error": "missing field: prompt"}, 400
+
+    if image_files:
+        return _remember_multi(image_files, prompt)
+
+    if not image_file:
+        return {"error": "missing field: image or images[]"}, 400
+    return _remember_single(image_file, prompt)
