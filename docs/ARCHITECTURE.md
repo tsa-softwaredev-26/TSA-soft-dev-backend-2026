@@ -424,7 +424,7 @@ image_path + text prompt
     -> load_image()
     -> mean_luminance(image)                    -> darkness check; return early if dark
     -> _blur_score(image)                       -> blur_score, is_blurry
-    -> GroundingDinoDetector.detect(image, prompt)
+    -> GroundingDinoDetector.detect_batch([image], [prompt]) or detect(image, prompt)
         [if None] -> retry with _SECOND_PASS_TEMPLATES  -> detection or None
     -> [if still None] return failure + blur info
     -> crop_object(image, box)
@@ -440,7 +440,7 @@ image_path + text prompt
     -> return {"success": bool, "result": {...}}
 
 Multi-image path (POST /remember with images[]):
-    -> detect_score(each image)                 -> rank by score (no embed/DB)
+    -> detect_score_batch(images, prompt)       -> rank by score (no embed/DB)
     -> pick best
     -> run(best image)                          -> single DB write
 ```
@@ -453,7 +453,7 @@ init:
 
 run(query_image):
     -> mean_luminance(query_image)              -> darkness check; return early if dark
-    -> YoloeDetector.detect_all()
+    -> YoloeDetector.detect_all_batch([query_image]) or detect_all(query_image)
     -> PASS 1: for each box -> crop -> embed (combined 1536-dim)
         -> if _head_trained: project query + all DB embeddings via ProjectionHead
         -> find_match() -> collect matches
@@ -745,8 +745,8 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 ### Engine / Architecture
 - [ ] Run full benchmark - 120 images not yet captured (~1-2 hrs). No CAPTURE_GUIDE.md exists yet; manually capture dataset images.
 - [x] Add batched OCR service endpoint support and wire it into pipeline OCR paths to reduce HTTP overhead on multi-crop scans
-- [ ] Wire `detect_all_batch()` (in `detect_all.py`) and `detect_batch()` (in `prompt_based.py`) into ScanPipeline and RememberPipeline to avoid per-crop iteration loops
-- [ ] `str | Path` type hints in pipeline files require Python 3.10+; `pyproject.toml` allows 3.8+ (pre-existing, low priority)
+- [x] Wire `detect_all_batch()` (in `detect_all.py`) and `detect_batch()` (in `prompt_based.py`) into ScanPipeline and RememberPipeline to avoid per-crop iteration loops
+- [x] `str | Path` type hints in pipeline files require Python 3.10+; `pyproject.toml` allows 3.8+ (pre-existing, low priority)
 - [ ] OCR text likelihood threshold tuning: current default 0.10 was chosen heuristically; calibrate against a labelled set of crops with/without text to confirm false-negative rate is acceptable. See `quality_utils.estimate_text_likelihood()`.
 
 ### Database
