@@ -13,6 +13,7 @@ the API, and integrate from the frontend.
 | Tailscale IP | `100.114.39.23` |
 | Public hostname | `https://nre5bjw44wddpu2zjg4fe4iehq.srv.us` |
 | OS | Debian 13 |
+| Core/OCR Python runtime | 3.12.10 (migrated March 30, 2026) |
 | GPU | NVIDIA GTX 1060 6 GB |
 | Core API port | `5000` (localhost only, exposed through tunnel) |
 | OCR service port | `8001` (localhost only) |
