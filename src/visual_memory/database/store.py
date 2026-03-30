@@ -420,8 +420,12 @@ class DatabaseStore:
             "  SUM(CASE WHEN feedback_type = 'negative' THEN 1 ELSE 0 END) "
             "FROM feedback"
         ).fetchone()
-        positives = row[0] or 0
-        negatives = row[1] or 0
+        if row is None:
+            positives = 0
+            negatives = 0
+        else:
+            positives = row[0] or 0
+            negatives = row[1] or 0
         # triplets = cartesian product of pos x neg per label
         label_rows = self._conn.execute(
             "SELECT label, "
