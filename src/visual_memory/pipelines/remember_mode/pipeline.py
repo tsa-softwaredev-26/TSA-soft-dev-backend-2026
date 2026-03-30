@@ -10,6 +10,7 @@ from visual_memory.config import Settings
 from visual_memory.utils import load_image, crop_object, get_logger, mean_luminance, estimate_text_likelihood, collect_system_metrics
 from visual_memory.utils.logger import LogTag
 from visual_memory.engine.embedding import make_combined_embedding
+from visual_memory.engine.visual_attributes import extract_visual_attributes
 from visual_memory.engine.model_registry import registry
 from visual_memory.engine.text_recognition import TextRecognizer
 from visual_memory.database import DatabaseStore
@@ -121,6 +122,7 @@ class RememberPipeline:
             timestamp=time.time(),
             label_embedding=metadata.get("label_embedding"),
             ocr_embedding=ocr_embedding,
+            visual_attributes=metadata.get("visual_attributes", {}),
         )
 
     def _detect_with_ollama_fallback(
@@ -431,6 +433,7 @@ class RememberPipeline:
                 "image_path": str(image_path),
                 "ocr_text": ocr_text,
                 "label_embedding": label_embedding,
+                "visual_attributes": extract_visual_attributes(image_path),
             }
         )
         timing["db_ms"] = round((time.monotonic() - db_t0) * 1000)
