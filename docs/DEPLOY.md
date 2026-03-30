@@ -337,7 +337,14 @@ OCR_LANG=en             # language pack; en covers most Latin-script text
 OCR_MIN_CONFIDENCE=0.3  # drop OCR segments below this score
 OCR_USE_ANGLE_CLS=0     # angle correction; keep 0 unless text is frequently rotated
 OCR_ENABLE_MKLDNN=0     # keep 0 on CPU hosts to avoid Paddle runtime crash
-OCR_MAX_SIDE=2000       # pre-resize large images to keep OCR memory bounded
+OCR_MAX_SIDE=1280       # pre-resize large images to keep OCR memory bounded
+OCR_REQUEST_TIMEOUT_SECONDS=40
+OCR_MAX_CONCURRENCY=1
+OCR_TIMEOUT_KEEP_ALIVE_SECONDS=5
+OMP_NUM_THREADS=1
+OPENBLAS_NUM_THREADS=1
+MKL_NUM_THREADS=1
+NUMEXPR_NUM_THREADS=1
 API_KEY=replace-with-the-same-core-api-key
 ```
 
@@ -575,6 +582,28 @@ curl -sf http://127.0.0.1:5000/debug/test-scan    -H "X-API-Key: $KEY" | python3
 curl -sf -X POST http://127.0.0.1:5000/retrain -H "X-API-Key: $KEY"
 ```
 
+### OCR soak check (required)
+
+Run this after deploys that touch OCR, OCR env, or service config:
+
+```bash
+KEY=$(grep ^API_KEY= /opt/spaitra/.env | cut -d= -f2-)
+for i in 1 2 3 4 5 6 7 8; do
+  curl -s -o /dev/null -w "trial_${i} code=%{http_code} time=%{time_total}\n" \
+    --max-time 90 -H "Expect:" \
+    -X POST -F image=@$REPO/src/visual_memory/tests/text_demo/typed.jpeg \
+    -H "X-API-Key: $KEY" \
+    http://127.0.0.1:8001/ocr
+done
+
+journalctl -u spaitra-ocr --since "5 min ago" --no-pager \
+  | egrep -i "timeout|504|oom|killed|internal server error" | tail -n 20 | cat
+```
+
+Success criteria:
+- all soak requests return `200`
+- no new timeout/504/oom lines after the soak start time
+
 ---
 
 ## 13. Updating the deployment
@@ -599,6 +628,53 @@ exit
 sudo systemctl restart spaitra-ocr
 sudo systemctl restart spaitra-core
 ```
+
+### DB migration runbook: plaintext -> encrypted
+
+Use this only when turning on `DB_ENCRYPTION_KEY` for an existing plaintext DB.
+
+```bash
+sudo systemctl stop spaitra-core
+
+# Backup
+sudo cp /opt/spaitra/TSA-soft-dev-backend-2026/data/memory.db \
+  /opt/spaitra/TSA-soft-dev-backend-2026/data/memory.db.plaintext.bak
+
+# Export plaintext DB into encrypted DB using SQLCipher
+DBK=$(sudo grep '^DB_ENCRYPTION_KEY=' /opt/spaitra/.env | cut -d= -f2-)
+sudo /opt/spaitra/TSA-soft-dev-backend-2026/venv-core/bin/python - <<PY
+from sqlcipher3 import dbapi2 as sqlite3
+old="/opt/spaitra/TSA-soft-dev-backend-2026/data/memory.db.plaintext.bak"
+enc="/opt/spaitra/TSA-soft-dev-backend-2026/data/memory.db"
+key="""$DBK"""
+conn = sqlite3.connect(old)
+escaped = key.replace("'", "''")
+conn.execute(f"ATTACH DATABASE '{enc}' AS encrypted KEY '{escaped}'")
+conn.execute("SELECT sqlcipher_export('encrypted')")
+conn.execute("DETACH DATABASE encrypted")
+conn.close()
+PY
+
+sudo chown spaitra:spaitra /opt/spaitra/TSA-soft-dev-backend-2026/data/memory.db
+sudo chmod 600 /opt/spaitra/TSA-soft-dev-backend-2026/data/memory.db
+sudo systemctl restart spaitra-core
+```
+
+Validation:
+
+```bash
+KEY=$(grep ^API_KEY= /opt/spaitra/.env | cut -d= -f2-)
+curl -s -o /dev/null -w "core health=%{http_code}\n" http://127.0.0.1:5000/health
+curl -s -o /dev/null -w "core debug=%{http_code}\n" \
+  -H "X-API-Key: $KEY" \
+  http://127.0.0.1:5000/debug/state
+```
+
+Rollback:
+- stop `spaitra-core`
+- restore `memory.db.plaintext.bak` to `memory.db`
+- clear or correct `DB_ENCRYPTION_KEY` in `/opt/spaitra/.env`
+- restart `spaitra-core`
 
 If model weights changed (new checkpoint in `setup_weights.py`):
 
@@ -632,6 +708,7 @@ Common causes:
 | OCR service restarts or times out on large photos | Lower `OCR_MAX_SIDE` (for example `1600`) and restart `spaitra-ocr` |
 | `500` at startup with `DB_ENCRYPTION_KEY is set but SQLCipher is unavailable` | On Python 3.13, clear `DB_ENCRYPTION_KEY` until SQLCipher bindings catch up (current `pysqlcipher3` build fails on 3.13); on <=3.12 reinstall core deps with `libsqlcipher-dev` |
 | `Failed to unlock encrypted database` | `DB_ENCRYPTION_KEY` mismatch; restore the correct key or start with a fresh DB |
+| `PermissionError` on `logs/app.log` during tests or startup | `sudo chown -R spaitra:spaitra $REPO/logs && sudo chmod 750 $REPO/logs && sudo find $REPO/logs -maxdepth 1 -type f -name "*.log" -exec chmod 640 {} \;` |
 | `Permission denied` on model files | `chown -R spaitra:spaitra $REPO/checkpoints` |
 | `CUDA out of memory` | Enable `SAVE_VRAM=1` in `.env` and restart |
 | Source files owned by root | `chown -R spaitra:spaitra $REPO/src $REPO/services` |
