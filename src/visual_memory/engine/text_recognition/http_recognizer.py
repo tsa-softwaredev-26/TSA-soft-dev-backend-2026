@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from io import BytesIO
 from urllib import error as urlerror
@@ -38,7 +39,7 @@ class HTTPOCRRecognizer(BaseTextRecognizer):
                 self.url,
                 data=payload,
                 method="POST",
-                headers={"Content-Type": content_type, "Accept": "application/json"},
+                headers=self._request_headers(content_type),
             )
             with urlrequest.urlopen(req, timeout=self.timeout_s) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
@@ -82,3 +83,11 @@ class HTTPOCRRecognizer(BaseTextRecognizer):
             "Content-Type: image/png\r\n\r\n"
         ).encode("utf-8") + img_bytes + f"\r\n--{boundary}--\r\n".encode("utf-8")
         return body, f"multipart/form-data; boundary={boundary}"
+
+    @staticmethod
+    def _request_headers(content_type: str) -> dict[str, str]:
+        headers = {"Content-Type": content_type, "Accept": "application/json"}
+        api_key = os.environ.get("API_KEY", "").strip()
+        if api_key:
+            headers["X-API-Key"] = api_key
+        return headers
