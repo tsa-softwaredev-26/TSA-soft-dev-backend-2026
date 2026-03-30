@@ -129,6 +129,7 @@ class StubScanPipeline:
         self._head_weight = w
         self._head_ramp_at = r
 
+
     def _apply_head(self, emb: torch.Tensor) -> torch.Tensor:
         if not self._head_trained or not self._enable_learning:
             return emb
