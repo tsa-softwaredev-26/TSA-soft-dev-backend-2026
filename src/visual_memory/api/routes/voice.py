@@ -20,6 +20,19 @@ from visual_memory.utils.ollama_utils import extract_search_term
 voice_bp = Blueprint("voice", __name__)
 _log = get_logger(__name__)
 _ROOM_PREFIX = re.compile(r"^(in (the|my) |the |my )", re.IGNORECASE)
+_ALLOWED_REQUEST_TYPES = {
+    "ask",
+    "find",
+    "remember",
+    "scan",
+    "item_ask",
+    "rename",
+    "read_ocr",
+    "export_ocr",
+    "describe",
+    "set_location",
+    "confirm_action",
+}
 
 
 def _extract_audio_bytes(payload: dict) -> bytes:
@@ -139,8 +152,13 @@ def _process_set_location_request(label: str, location_text: str) -> tuple[dict,
         return {"error": "missing field: state.context.label"}, 400
     if not room_name:
         return {"error": "missing room name"}, 400
+    if not get_database().get_items_metadata(label=label):
+        return {"error": "unknown label in state context"}, 404
 
-    get_database().add_sighting(label=label, room_name=room_name)
+    try:
+        get_database().add_sighting(label=label, room_name=room_name)
+    except Exception as exc:
+        return {"error": "failed to save location", "detail": str(exc)}, 500
     return {
         "action": "set_location",
         "label": label,
@@ -215,6 +233,8 @@ def voice():
     mode, state_context = _extract_state(payload)
 
     forced_type = (payload.get("request_type") or request.form.get("request_type", "")).strip().lower()
+    if forced_type and forced_type not in _ALLOWED_REQUEST_TYPES:
+        return jsonify({"error": "invalid request_type", "request_type": forced_type}), 400
     provided_text = (payload.get("text") or request.form.get("text", "")).strip()
     scan_id = (payload.get("scan_id") or request.form.get("scan_id", "") or state_context.get("scan_id", "")).strip()
     label = (payload.get("label") or request.form.get("label", "") or state_context.get("label", "")).strip()
@@ -222,7 +242,8 @@ def voice():
     transcription = {"text": provided_text, "source": "client", "context_used": False}
     status = 200
 
-    if not provided_text:
+    should_transcribe = not provided_text and forced_type not in {"remember", "scan"}
+    if should_transcribe:
         audio_bytes = _extract_audio_bytes(payload)
         transcription, status = transcribe_audio_bytes(audio_bytes, use_context=use_context)
         if status != 200:
