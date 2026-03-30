@@ -1,7 +1,8 @@
 import os
+import sys
 
 from flask import Flask, request, jsonify
-from visual_memory.utils.logger import setup_crash_handler
+from visual_memory.utils.logger import get_logger, setup_crash_handler
 
 from visual_memory.api.routes.health import health_bp
 from visual_memory.api.routes.remember import remember_bp
@@ -20,10 +21,31 @@ from visual_memory.api.routes.debug import debug_bp
 from visual_memory.api.routes.transcribe import transcribe_bp
 
 _API_KEY = os.environ.get("API_KEY", "")
+_logger = get_logger(__name__)
+
+
+def _validate_api_key() -> None:
+    if not _API_KEY:
+        _logger.warning({"event": "api_key_unset", "message": "API auth disabled"})
+        return
+    if len(_API_KEY) < 32:
+        _logger.error({"event": "api_key_weak", "reason": "too_short", "length": len(_API_KEY)})
+        raise SystemExit("API_KEY must be at least 32 characters. Generate with: openssl rand -hex 32")
+    weak_patterns = ("password", "test", "demo", "admin", "12345", "changeme")
+    lowered = _API_KEY.lower()
+    if any(token in lowered for token in weak_patterns):
+        _logger.error({"event": "api_key_weak", "reason": "weak_pattern"})
+        raise SystemExit("API_KEY appears weak. Generate with: openssl rand -hex 32")
+    _logger.info({"event": "api_key_valid", "length": len(_API_KEY)})
 
 
 def create_app():
     setup_crash_handler()
+    try:
+        _validate_api_key()
+    except SystemExit as exc:
+        print(str(exc), file=sys.stderr)
+        raise
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB
 
