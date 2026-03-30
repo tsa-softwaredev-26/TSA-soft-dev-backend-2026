@@ -761,6 +761,9 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - [ ] Validate Ollama prompts (extract_search_term, extract_item_intent, extract_rename_target) against 20+ real voice queries to confirm extraction reliability.
 - [ ] Add Whisper transcription quality test set (20+ real voice queries) and track exact-query and intent-success rates across noise, accent, and speaking-speed variants.
 - [ ] Add Whisper context-bias A/B tests (`context=0` vs `context=1`) against user-specific labels and room names; report wins and regressions before tuning defaults.
+- [ ] Implement `/item/ask` `describe` intent with a real VLM backend (currently returns `deferred: true`); define latency budget and fallback narration when VLM is unavailable.
+- [ ] Add teach-voice phrase support validation (`"remember this as ..."`, `"this is my ..."`) end-to-end from `/transcribe` output to remember/rename flows, including conflict handling.
+- [ ] Add voice command router contract tests for non-query utterances (`"scan"`, `"find"`, `"ask"`, `"settings"`) so transcription output maps deterministically to frontend actions.
 - [x] Continue prompt-injection hardening for Ollama parsing and `/ask` retrieval. Added pentest suites for ask/find/item/transcribe/settings payload abuse and unsafe-query assertions.
 
 ### Learning / Personalization
