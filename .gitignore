@@ -75,3 +75,4 @@ benchmarks/CAPTURE_GUIDE.md
 benchmarks/ground_truth/
 BENCHMARKS.md
 src/visual_memory/benchmarks/redact_receipt.py
+benchmarks/baslines/stress_tests/
