@@ -6,6 +6,7 @@ After=network.target
 Type=simple
 User=spaitra
 Group=spaitra
+UMask=0077
 WorkingDirectory=__REPO_ROOT__
 EnvironmentFile=/opt/spaitra/.env
 ExecStart=__REPO_ROOT__/venv-core/bin/gunicorn \

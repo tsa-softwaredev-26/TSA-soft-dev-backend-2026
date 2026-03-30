@@ -6,6 +6,7 @@ After=network.target
 Type=simple
 User=spaitra
 Group=spaitra
+UMask=0077
 WorkingDirectory=/opt/spaitra
 EnvironmentFile=/opt/spaitra/.env
 # Legacy alias for the core backend. Prefer deploy/spaitra-core.service.
