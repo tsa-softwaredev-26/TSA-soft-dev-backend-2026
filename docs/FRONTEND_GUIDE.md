@@ -146,7 +146,7 @@ Brief pause, then: "Tap or say 'Scan' when ready."
 
 User initiates scan. Run POST /scan, store scan_id.
 
-Read all narration strings in array order. Example: "Wallet, to your left, 2.3 feet. Keys, straight ahead, 4 feet."
+Read all narration strings in array order. Example: "Wallet, to your left, 2.3 feet. Keys look down, ahead."
 
 After narration, prompt for room name: "What room is this?" (haptic single pulse, enter listening state)
 
@@ -156,7 +156,7 @@ User says room name. Call POST /sightings with room_name and all matched labels 
 
 App says: "Swipe right to browse each item."
 
-On swipe, re-read the match narration from the cached scan response. No API call. Format: "[label]. [direction]. [distance] feet." Narration is interruptible - if the user swipes again before it finishes, cut it and start the next item.
+On swipe, re-read the match narration from the cached scan response. No API call. Format: "[label]. [optional gaze cue]. [direction]. [distance] feet." Narration is interruptible - if the user swipes again before it finishes, cut it and start the next item.
 
 After one full cycle: "Swipe left to go back. That is how scan works."
 
@@ -405,7 +405,7 @@ Before touching `matches`, check the top-level `is_dark` field:
       "similarity": 0.72,
       "confidence": "high",
       "direction": "to your left",
-      "narration": "Wallet to your left, 2.3 feet away.",
+      "narration": "Wallet look down, to your left, 2.3 feet away.",
       "distance_ft": 2.3,
       "box": [12, 44, 210, 380],
       "ocr_text": "RFID Blocking"
@@ -429,6 +429,8 @@ Read `narration` aloud for each match in array order.
 
 **Direction zones** (narration already reflects this):
 
+Horizontal (based on object x-position):
+
 | Value | Where in the frame |
 |-------|-------------------|
 | `"to your left"` | Far left (< 25%) |
@@ -436,6 +438,14 @@ Read `narration` aloud for each match in array order.
 | `"ahead"` | Center |
 | `"slightly right"` | Right of center |
 | `"to your right"` | Far right (> 75%) |
+
+Vertical gaze cue (prepended to narration when object is not at mid-frame):
+
+| Prefix in narration | Where in the frame |
+|---------------------|-------------------|
+| `"look down,"` | Object center in bottom 40% of frame (ny > 0.60) |
+| `"look up,"` | Object center in top 25% of frame (ny < 0.25) |
+| (none) | Object center in middle 35% - no cue needed |
 
 **Confidence tiers:**
 
@@ -862,6 +872,7 @@ PATCH /settings
 - Apply `voice_speed` from `/user-settings` to your TTS rate.
 - Read matches in array order - they are left-to-right spatially.
 - `"May be a..."` in narration means medium or low confidence. Do not add hedging.
+- `"look down,"` or `"look up,"` in narration is a gaze instruction - read it as-is, do not add or remove it.
 - `ocr_text` is raw extracted text. Read it only if the user specifically asks.
 
 ---

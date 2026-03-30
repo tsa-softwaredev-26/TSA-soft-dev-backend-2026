@@ -34,7 +34,7 @@ The user can confirm or correct detections to improve personalization.
 Recognizes previously taught objects in the current scene.
 
 Example narration:
-> “Wallet 3 feet to your left. House keys 5 feet to your right. Tax returns 3 feet ahead.”
+> “Wallet 3 feet to your left. House keys look down, ahead. Tax returns 3 feet ahead.”
 
 - Objects are ordered spatially (left -> right)
 - Results returned as structured JSON
@@ -412,7 +412,7 @@ Multi-image (POST /remember with `images[]`):
 - `estimate(image: PIL.Image) -> torch.Tensor` -depth map in meters
 - `get_depth_at_bbox(depth_map, bbox) -> float` -mean depth in feet, inner 50% of bbox
 - `get_direction(bbox, img_w) -> str` -5-zone direction string
-- `build_narration(label, direction, distance_ft, similarity) -> str | None` -final output
+- `build_narration(label, direction, distance_ft, similarity, bbox=None, img_h=None) -> str | None` -final narration; prepends "look down," or "look up," when object is in the bottom 40% or top 25% of frame
 
 ---
 
