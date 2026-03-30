@@ -21,12 +21,14 @@ from __future__ import annotations
 
 import io
 import json
+import mimetypes
 import os
 import sys
 import types
 import tempfile
 import time
 import urllib.error
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Optional, Tuple
 
@@ -374,6 +376,44 @@ class _RemoteClient:
             h.update(extra)
         return h
 
+    @staticmethod
+    def _encode_multipart(data: dict) -> tuple[bytes, str]:
+        boundary = f"----copilot-{uuid.uuid4().hex}"
+        parts: list[bytes] = []
+
+        for key, value in (data or {}).items():
+            if isinstance(value, tuple) and len(value) == 2:
+                file_obj, filename = value
+                if hasattr(file_obj, "read"):
+                    file_bytes = file_obj.read()
+                else:
+                    file_bytes = bytes(file_obj)
+                content_type = mimetypes.guess_type(filename or "")[0] or "application/octet-stream"
+                parts.extend(
+                    [
+                        f"--{boundary}\r\n".encode(),
+                        (
+                            f'Content-Disposition: form-data; name="{key}"; '
+                            f'filename="{filename or "upload.bin"}"\r\n'
+                        ).encode(),
+                        f"Content-Type: {content_type}\r\n\r\n".encode(),
+                        file_bytes,
+                        b"\r\n",
+                    ]
+                )
+            else:
+                parts.extend(
+                    [
+                        f"--{boundary}\r\n".encode(),
+                        f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode(),
+                        str(value).encode(),
+                        b"\r\n",
+                    ]
+                )
+
+        parts.append(f"--{boundary}--\r\n".encode())
+        return b"".join(parts), f"multipart/form-data; boundary={boundary}"
+
     def get(self, path: str, **kwargs) -> "_RemoteResponse":
         import urllib.request
         url = self._base_url + path
@@ -390,6 +430,9 @@ class _RemoteClient:
         if json is not None:
             body = __import__("json").dumps(json).encode()
             hdrs = self._headers({"Content-Type": "application/json"})
+        elif isinstance(data, dict) and (content_type or "").startswith("multipart/form-data"):
+            body, encoded_content_type = self._encode_multipart(data)
+            hdrs = self._headers({"Content-Type": encoded_content_type})
         else:
             body = data or b""
             hdrs = self._headers({"Content-Type": content_type or "application/octet-stream"})
