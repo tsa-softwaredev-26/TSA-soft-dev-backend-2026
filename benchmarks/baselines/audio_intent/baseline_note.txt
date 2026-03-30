@@ -1,0 +1,39 @@
+Audio intent baseline (latest run)
+- Source reports: /home/dev/TSA-soft-dev-backend-2026/logs/ollama_prompt_eval_report.json and whisper_context_bias_report.json
+- Local has V063.m4a, server run missed v063 because file was not synced to server input_audio at run time.
+- Current metrics are not directly optimization-ready due to strict exact-match/contains-all scoring.
+- Next tuning phase should first fix evaluation realism, then tune extraction logic.
+
+Suggestions for next tuning phase (with rationale)
+
+1) Make scoring intent-first before text-exact.
+- Suggestion: prioritize intent accuracy as the primary metric and treat literal transcript match as secondary.
+- Why: users care that the app does the right action (find, read, export, rename, describe) even when wording varies.
+
+2) Replace strict exact string matching with normalized and fuzzy matching.
+- Suggestion: lowercase/strip punctuation, allow small wording variation, and support phrase equivalence for search terms.
+- Why: exact-match scoring undercounts real success and hides whether the system is functionally correct.
+
+3) Use a hybrid intent classifier: deterministic rules first, LLM fallback for ambiguity.
+- Suggestion: add high-confidence regex/keyword routes for obvious intents, then call Ollama only when uncertain.
+- Why: deterministic paths reduce variance and improve repeatability; LLM remains useful for complex phrasing.
+
+4) Constrain extraction outputs to a strict schema and valid intent set.
+- Suggestion: hard-validate JSON fields and enforce allowed intents with repair/retry on malformed responses.
+- Why: many avoidable misses come from output formatting drift rather than true semantic misunderstanding.
+
+5) Tune against confusion pairs instead of broad averages only.
+- Suggestion: compute confusion matrix for intent classes and prioritize top error pairs (for example find vs describe).
+- Why: targeted fixes on dominant error buckets improve total accuracy faster than generic prompt edits.
+
+6) Keep safety gate independent from intent extraction.
+- Suggestion: continue unsafe-query filtering before extraction and track block-rate separately from intent metrics.
+- Why: mixing safety and intent signals can inflate or hide regressions in either dimension.
+
+7) Re-benchmark after each small change and compare against this baseline.
+- Suggestion: run the same dataset after each tuning pass and log deltas in CSV.
+- Why: prevents overfitting to anecdotal cases and gives a clear stop rule when gains plateau.
+
+8) Ensure full dataset parity on server before each run.
+- Suggestion: preflight check that all case IDs have matching audio files (case-insensitive stems).
+- Why: missing files (like v063 in this run) skew benchmark totals and can mislead tuning decisions.
