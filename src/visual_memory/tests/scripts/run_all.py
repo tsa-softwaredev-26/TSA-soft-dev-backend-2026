@@ -15,6 +15,8 @@ Suites:
     unit    - no Flask, no models (fast, < 5s)
     api     - Flask test client, stubs (< 30s)
     system  - real models (slow, requires GPU or CPU with patience)
+    stress  - high-volume deterministic route and pipeline stress tests
+    pentest - adversarial payload and abuse-path validation tests
     all     - unit + api (default when no --suite given)
 """
 from __future__ import annotations
@@ -57,6 +59,24 @@ _SYSTEM_TESTS = [
     ("run_tests", "system", ["system"]),
 ]
 
+_STRESS_TESTS = [
+    ("test_stress_scan", "stress", ["stress", "stress-scan", "scan"]),
+    ("test_stress_remember", "stress", ["stress", "stress-api", "remember"]),
+    ("test_stress_ask_find_item", "stress", ["stress", "stress-api", "ask", "find", "item"]),
+    ("test_stress_feedback_retrain", "stress", ["stress", "stress-learning", "feedback", "retrain"]),
+    ("test_stress_transcribe", "stress", ["stress", "stress-voice", "transcribe"]),
+    ("test_stress_settings_items_sightings", "stress", ["stress", "stress-api", "settings", "items", "sightings"]),
+    ("test_stress_endpoints_concurrency", "stress", ["stress", "stress-api", "overload"]),
+]
+
+_PENTEST_TESTS = [
+    ("test_pentest_ask_find", "pentest", ["pentest", "pentest-ask", "ask", "find"]),
+    ("test_pentest_item_ask", "pentest", ["pentest", "pentest-item-ask", "item"]),
+    ("test_pentest_transcribe", "pentest", ["pentest", "pentest-transcribe", "transcribe"]),
+    ("test_pentest_settings_items", "pentest", ["pentest", "pentest-settings", "settings", "items"]),
+    ("test_pentest_payload_abuse", "pentest", ["pentest", "payload-abuse", "api"]),
+]
+
 _ALL_TESTS = _UNIT_TESTS + _API_TESTS
 
 
@@ -77,7 +97,7 @@ def _run_module(module_name: str) -> int:
 
 def main():
     parser = argparse.ArgumentParser(description="visual_memory test runner")
-    parser.add_argument("--suite", choices=["unit", "api", "system", "all"], default="all")
+    parser.add_argument("--suite", choices=["unit", "api", "system", "stress", "pentest", "all"], default="all")
     parser.add_argument("--tag", default="", help="Comma-separated feature tags to filter")
     parser.add_argument("--fail-fast", action="store_true", help="Stop on first failure")
     args = parser.parse_args()
@@ -90,6 +110,10 @@ def main():
         candidates = _API_TESTS
     elif args.suite == "system":
         candidates = _SYSTEM_TESTS
+    elif args.suite == "stress":
+        candidates = _STRESS_TESTS
+    elif args.suite == "pentest":
+        candidates = _PENTEST_TESTS
     else:
         candidates = _ALL_TESTS
 
