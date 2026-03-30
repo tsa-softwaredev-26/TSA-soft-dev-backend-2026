@@ -263,6 +263,24 @@ prompt-injection or harmful markers return HTTP 400 with `blocked: true` and
 
 ---
 
+## 7. VLM item description (moondream2)
+
+`POST /item/ask` now supports live `describe` responses with a 3-tier fallback:
+
+1. moondream2 VLM (`method: "vlm"`)
+2. stored visual attributes from teach-time analysis (`method: "attributes"`)
+3. minimal label and OCR summary (`method: "minimal"`)
+
+moondream2 is loaded from HuggingFace via `transformers` and `moondream==0.2.0`.
+This path is local and does not use Ollama.
+
+Performance-mode behavior for describe:
+- fast: VLM disabled, fallback uses attributes or minimal
+- balanced: VLM enabled with shorter timeout
+- accurate: VLM enabled with longer timeout
+
+---
+
 ## 8. Environment files
 
 ### Core backend; `/opt/spaitra/.env`
