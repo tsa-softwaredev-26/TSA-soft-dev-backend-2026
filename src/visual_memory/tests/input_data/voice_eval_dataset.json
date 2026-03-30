@@ -1,0 +1,2503 @@
+{
+  "dataset_version": "2.0",
+  "purpose": "Single source dataset for both Whisper transcription/context-bias eval and Ollama extraction reliability eval.",
+  "run_plan": {
+    "whisper_eval_uses": "all cases where include_for contains whisper",
+    "ollama_eval_uses": "all cases where include_for contains ollama",
+    "core_case_count": 80,
+    "extended_case_count": 40,
+    "total_case_count": 120
+  },
+  "cases": [
+    {
+      "id": "v001",
+      "utterance": "where is my wallet",
+      "audio_path": "src/visual_memory/tests/input_audio/v001.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "wallet",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "wallet"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v002",
+      "utterance": "where did i leave my keys",
+      "audio_path": "src/visual_memory/tests/input_audio/v002.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "keys",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "keys"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v003",
+      "utterance": "find my phone charger",
+      "audio_path": "src/visual_memory/tests/input_audio/v003.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "phone charger",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "phone",
+        "charger"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v004",
+      "utterance": "where is the receipt with my office chair on it",
+      "audio_path": "src/visual_memory/tests/input_audio/v004.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "receipt office chair",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "receipt",
+        "office",
+        "chair"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v005",
+      "utterance": "where is my black backpack",
+      "audio_path": "src/visual_memory/tests/input_audio/v005.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "black backpack",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "black",
+        "backpack"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v006",
+      "utterance": "where is the blue water bottle",
+      "audio_path": "src/visual_memory/tests/input_audio/v006.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "blue water bottle",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "blue",
+        "water",
+        "bottle"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v007",
+      "utterance": "did i leave my airpods in the kitchen",
+      "audio_path": "src/visual_memory/tests/input_audio/v007.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "airpods kitchen",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "airpods",
+        "kitchen"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v008",
+      "utterance": "what did i leave in the bedroom",
+      "audio_path": "src/visual_memory/tests/input_audio/v008.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "bedroom",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "bedroom"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v009",
+      "utterance": "where is my medicine bottle",
+      "audio_path": "src/visual_memory/tests/input_audio/v009.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "medicine bottle",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "medicine",
+        "bottle"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v010",
+      "utterance": "where did i put my debit card",
+      "audio_path": "src/visual_memory/tests/input_audio/v010.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "debit card",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "debit",
+        "card"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v011",
+      "utterance": "where is the red notebook",
+      "audio_path": "src/visual_memory/tests/input_audio/v011.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "red notebook",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "red",
+        "notebook"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v012",
+      "utterance": "where is my laptop sleeve",
+      "audio_path": "src/visual_memory/tests/input_audio/v012.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "laptop sleeve",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "laptop",
+        "sleeve"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v013",
+      "utterance": "where is the tv remote",
+      "audio_path": "src/visual_memory/tests/input_audio/v013.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "tv remote",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "tv",
+        "remote"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v014",
+      "utterance": "find my sunglasses",
+      "audio_path": "src/visual_memory/tests/input_audio/v014.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "sunglasses",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "sunglasses"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v015",
+      "utterance": "where are my house keys",
+      "audio_path": "src/visual_memory/tests/input_audio/v015.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "house keys",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "house",
+        "keys"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v016",
+      "utterance": "where did i set my passport",
+      "audio_path": "src/visual_memory/tests/input_audio/v016.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "passport",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "passport"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v017",
+      "utterance": "where is my white charger cable",
+      "audio_path": "src/visual_memory/tests/input_audio/v017.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "white charger cable",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "white",
+        "charger",
+        "cable"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v018",
+      "utterance": "find the sticky note about rent",
+      "audio_path": "src/visual_memory/tests/input_audio/v018.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "sticky note rent",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "sticky",
+        "note",
+        "rent"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v019",
+      "utterance": "where is my green notebook from yesterday",
+      "audio_path": "src/visual_memory/tests/input_audio/v019.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "green notebook",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "green",
+        "notebook"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v020",
+      "utterance": "where is the envelope with insurance papers",
+      "audio_path": "src/visual_memory/tests/input_audio/v020.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "envelope insurance papers",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "envelope",
+        "insurance"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v021",
+      "utterance": "where did i leave my id badge",
+      "audio_path": "src/visual_memory/tests/input_audio/v021.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "id badge",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "id",
+        "badge"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v022",
+      "utterance": "what room has my wallet",
+      "audio_path": "src/visual_memory/tests/input_audio/v022.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "wallet",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "room",
+        "wallet"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v023",
+      "utterance": "what room has my keys",
+      "audio_path": "src/visual_memory/tests/input_audio/v023.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "keys",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "room",
+        "keys"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v024",
+      "utterance": "find everything in the office",
+      "audio_path": "src/visual_memory/tests/input_audio/v024.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "office",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "everything",
+        "office"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v025",
+      "utterance": "show all items in the kitchen",
+      "audio_path": "src/visual_memory/tests/input_audio/v025.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "kitchen",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "items",
+        "kitchen"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v026",
+      "utterance": "where is my gym card",
+      "audio_path": "src/visual_memory/tests/input_audio/v026.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "gym card",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "gym",
+        "card"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v027",
+      "utterance": "where did i put my blood pressure cuff",
+      "audio_path": "src/visual_memory/tests/input_audio/v027.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "blood pressure cuff",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "blood",
+        "pressure",
+        "cuff"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v028",
+      "utterance": "where is my hearing aid case",
+      "audio_path": "src/visual_memory/tests/input_audio/v028.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "hearing aid case",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "hearing",
+        "aid",
+        "case"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v029",
+      "utterance": "where is that coffee gift card",
+      "audio_path": "src/visual_memory/tests/input_audio/v029.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "coffee gift card",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "coffee",
+        "gift",
+        "card"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v030",
+      "utterance": "where is my external hard drive",
+      "audio_path": "src/visual_memory/tests/input_audio/v030.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "external hard drive",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "external",
+        "hard",
+        "drive"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v031",
+      "utterance": "read this to me",
+      "audio_path": "src/visual_memory/tests/input_audio/v031.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "this",
+      "expected_intent": "read_ocr",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "read",
+        "this"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v032",
+      "utterance": "what does this say",
+      "audio_path": "src/visual_memory/tests/input_audio/v032.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "this",
+      "expected_intent": "read_ocr",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "what",
+        "say"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v033",
+      "utterance": "read the label on this",
+      "audio_path": "src/visual_memory/tests/input_audio/v033.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "label",
+      "expected_intent": "read_ocr",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "read",
+        "label"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v034",
+      "utterance": "can you read this out loud",
+      "audio_path": "src/visual_memory/tests/input_audio/v034.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "this",
+      "expected_intent": "read_ocr",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "read",
+        "loud"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v035",
+      "utterance": "tell me what is written here",
+      "audio_path": "src/visual_memory/tests/input_audio/v035.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "written",
+      "expected_intent": "read_ocr",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "written"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v036",
+      "utterance": "export this text",
+      "audio_path": "src/visual_memory/tests/input_audio/v036.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "text",
+      "expected_intent": "export_ocr",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "export",
+        "text"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v037",
+      "utterance": "copy the text from this",
+      "audio_path": "src/visual_memory/tests/input_audio/v037.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "text",
+      "expected_intent": "export_ocr",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "copy",
+        "text"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v038",
+      "utterance": "share what is written on this",
+      "audio_path": "src/visual_memory/tests/input_audio/v038.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "written",
+      "expected_intent": "export_ocr",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "share",
+        "written"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v039",
+      "utterance": "send me this text",
+      "audio_path": "src/visual_memory/tests/input_audio/v039.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "text",
+      "expected_intent": "export_ocr",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "send",
+        "text"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v040",
+      "utterance": "export all text on this item",
+      "audio_path": "src/visual_memory/tests/input_audio/v040.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "text",
+      "expected_intent": "export_ocr",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "export",
+        "item"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v041",
+      "utterance": "rename this to wallet",
+      "audio_path": "src/visual_memory/tests/input_audio/v041.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "wallet",
+      "expected_intent": "rename",
+      "expected_rename_target": "wallet",
+      "expected_text_contains": [
+        "rename",
+        "wallet"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v042",
+      "utterance": "call this house keys",
+      "audio_path": "src/visual_memory/tests/input_audio/v042.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "house keys",
+      "expected_intent": "rename",
+      "expected_rename_target": "house keys",
+      "expected_text_contains": [
+        "house",
+        "keys"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v043",
+      "utterance": "name this backup charger",
+      "audio_path": "src/visual_memory/tests/input_audio/v043.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "backup charger",
+      "expected_intent": "rename",
+      "expected_rename_target": "backup charger",
+      "expected_text_contains": [
+        "backup",
+        "charger"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v044",
+      "utterance": "rename this object to travel adapter",
+      "audio_path": "src/visual_memory/tests/input_audio/v044.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "travel adapter",
+      "expected_intent": "rename",
+      "expected_rename_target": "travel adapter",
+      "expected_text_contains": [
+        "travel",
+        "adapter"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v045",
+      "utterance": "change the name to office badge",
+      "audio_path": "src/visual_memory/tests/input_audio/v045.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "office badge",
+      "expected_intent": "rename",
+      "expected_rename_target": "office badge",
+      "expected_text_contains": [
+        "office",
+        "badge"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v046",
+      "utterance": "where is this normally kept",
+      "audio_path": "src/visual_memory/tests/input_audio/v046.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "this",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "normally",
+        "kept"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v047",
+      "utterance": "where do i usually put this",
+      "audio_path": "src/visual_memory/tests/input_audio/v047.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "this",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "usually",
+        "put"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v048",
+      "utterance": "what room is this item in",
+      "audio_path": "src/visual_memory/tests/input_audio/v048.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "item",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "room",
+        "item"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v049",
+      "utterance": "find where this was seen last",
+      "audio_path": "src/visual_memory/tests/input_audio/v049.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "this",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "seen",
+        "last"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v050",
+      "utterance": "where should i look for this",
+      "audio_path": "src/visual_memory/tests/input_audio/v050.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "this",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "look",
+        "this"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v051",
+      "utterance": "describe this for me",
+      "audio_path": "src/visual_memory/tests/input_audio/v051.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "this",
+      "expected_intent": "describe",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "describe",
+        "me"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v052",
+      "utterance": "what is this object",
+      "audio_path": "src/visual_memory/tests/input_audio/v052.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "object",
+      "expected_intent": "describe",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "what",
+        "object"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v053",
+      "utterance": "tell me what this looks like",
+      "audio_path": "src/visual_memory/tests/input_audio/v053.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "this",
+      "expected_intent": "describe",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "looks",
+        "like"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v054",
+      "utterance": "give me a quick description of this item",
+      "audio_path": "src/visual_memory/tests/input_audio/v054.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "item",
+      "expected_intent": "describe",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "quick",
+        "description"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v055",
+      "utterance": "describe this thing",
+      "audio_path": "src/visual_memory/tests/input_audio/v055.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "thing",
+      "expected_intent": "describe",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "describe",
+        "thing"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v056",
+      "utterance": "read this again",
+      "audio_path": "src/visual_memory/tests/input_audio/v056.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "this",
+      "expected_intent": "read_ocr",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "read",
+        "again"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v057",
+      "utterance": "copy this for me",
+      "audio_path": "src/visual_memory/tests/input_audio/v057.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "this",
+      "expected_intent": "export_ocr",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "copy",
+        "me"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v058",
+      "utterance": "rename this to spare key",
+      "audio_path": "src/visual_memory/tests/input_audio/v058.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "spare key",
+      "expected_intent": "rename",
+      "expected_rename_target": "spare key",
+      "expected_text_contains": [
+        "spare",
+        "key"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v059",
+      "utterance": "where did i last see this",
+      "audio_path": "src/visual_memory/tests/input_audio/v059.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "this",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "last",
+        "see"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v060",
+      "utterance": "what is this called",
+      "audio_path": "src/visual_memory/tests/input_audio/v060.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "this",
+      "expected_intent": "describe",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "called"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v061",
+      "utterance": "remember this as wallet",
+      "audio_path": "src/visual_memory/tests/input_audio/v061.ogg",
+      "feature": "teach",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "wallet",
+      "expected_intent": "rename",
+      "expected_rename_target": "wallet",
+      "expected_text_contains": [
+        "remember",
+        "this"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v062",
+      "utterance": "save this as my black wallet",
+      "audio_path": "src/visual_memory/tests/input_audio/v062.ogg",
+      "feature": "teach",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "black wallet",
+      "expected_intent": "rename",
+      "expected_rename_target": "black wallet",
+      "expected_text_contains": [
+        "save",
+        "this"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v063",
+      "utterance": "teach this as office keys",
+      "audio_path": "src/visual_memory/tests/input_audio/v063.ogg",
+      "feature": "teach",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "office keys",
+      "expected_intent": "rename",
+      "expected_rename_target": "office keys",
+      "expected_text_contains": [
+        "teach",
+        "this"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v064",
+      "utterance": "this is my medicine bottle",
+      "audio_path": "src/visual_memory/tests/input_audio/v064.ogg",
+      "feature": "teach",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "medicine bottle",
+      "expected_intent": "rename",
+      "expected_rename_target": "medicine bottle",
+      "expected_text_contains": [
+        "this",
+        "is"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v065",
+      "utterance": "call this reading glasses",
+      "audio_path": "src/visual_memory/tests/input_audio/v065.ogg",
+      "feature": "teach",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "reading glasses",
+      "expected_intent": "rename",
+      "expected_rename_target": "reading glasses",
+      "expected_text_contains": [
+        "call",
+        "this"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v066",
+      "utterance": "remember this item as tv remote",
+      "audio_path": "src/visual_memory/tests/input_audio/v066.ogg",
+      "feature": "teach",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "core",
+      "expected_search_term": "tv remote",
+      "expected_intent": "rename",
+      "expected_rename_target": "tv remote",
+      "expected_text_contains": [
+        "remember",
+        "this"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v067",
+      "utterance": "the room is kitchen",
+      "audio_path": "src/visual_memory/tests/input_audio/v067.ogg",
+      "feature": "room_name",
+      "include_for": [
+        "whisper"
+      ],
+      "priority": "core",
+      "expected_search_term": null,
+      "expected_intent": null,
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "room",
+        "kitchen"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v068",
+      "utterance": "kitchen",
+      "audio_path": "src/visual_memory/tests/input_audio/v068.ogg",
+      "feature": "room_name",
+      "include_for": [
+        "whisper"
+      ],
+      "priority": "core",
+      "expected_search_term": null,
+      "expected_intent": null,
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "kitchen"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v069",
+      "utterance": "living room",
+      "audio_path": "src/visual_memory/tests/input_audio/v069.ogg",
+      "feature": "room_name",
+      "include_for": [
+        "whisper"
+      ],
+      "priority": "core",
+      "expected_search_term": null,
+      "expected_intent": null,
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "living",
+        "room"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v070",
+      "utterance": "bedroom",
+      "audio_path": "src/visual_memory/tests/input_audio/v070.ogg",
+      "feature": "room_name",
+      "include_for": [
+        "whisper"
+      ],
+      "priority": "core",
+      "expected_search_term": null,
+      "expected_intent": null,
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "bedroom"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v071",
+      "utterance": "bathroom",
+      "audio_path": "src/visual_memory/tests/input_audio/v071.ogg",
+      "feature": "room_name",
+      "include_for": [
+        "whisper"
+      ],
+      "priority": "core",
+      "expected_search_term": null,
+      "expected_intent": null,
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "bathroom"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v072",
+      "utterance": "home office",
+      "audio_path": "src/visual_memory/tests/input_audio/v072.ogg",
+      "feature": "room_name",
+      "include_for": [
+        "whisper"
+      ],
+      "priority": "core",
+      "expected_search_term": null,
+      "expected_intent": null,
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "home",
+        "office"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v073",
+      "utterance": "dining room",
+      "audio_path": "src/visual_memory/tests/input_audio/v073.ogg",
+      "feature": "room_name",
+      "include_for": [
+        "whisper"
+      ],
+      "priority": "core",
+      "expected_search_term": null,
+      "expected_intent": null,
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "dining",
+        "room"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v074",
+      "utterance": "garage",
+      "audio_path": "src/visual_memory/tests/input_audio/v074.ogg",
+      "feature": "room_name",
+      "include_for": [
+        "whisper"
+      ],
+      "priority": "core",
+      "expected_search_term": null,
+      "expected_intent": null,
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "garage"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v075",
+      "utterance": "laundry room",
+      "audio_path": "src/visual_memory/tests/input_audio/v075.ogg",
+      "feature": "room_name",
+      "include_for": [
+        "whisper"
+      ],
+      "priority": "core",
+      "expected_search_term": null,
+      "expected_intent": null,
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "laundry",
+        "room"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v076",
+      "utterance": "front hallway",
+      "audio_path": "src/visual_memory/tests/input_audio/v076.ogg",
+      "feature": "room_name",
+      "include_for": [
+        "whisper"
+      ],
+      "priority": "core",
+      "expected_search_term": null,
+      "expected_intent": null,
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "front",
+        "hallway"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v077",
+      "utterance": "back porch",
+      "audio_path": "src/visual_memory/tests/input_audio/v077.ogg",
+      "feature": "room_name",
+      "include_for": [
+        "whisper"
+      ],
+      "priority": "core",
+      "expected_search_term": null,
+      "expected_intent": null,
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "back",
+        "porch"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v078",
+      "utterance": "scan",
+      "audio_path": "src/visual_memory/tests/input_audio/v078.ogg",
+      "feature": "command",
+      "include_for": [
+        "whisper"
+      ],
+      "priority": "core",
+      "expected_search_term": null,
+      "expected_intent": null,
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "scan"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v079",
+      "utterance": "find",
+      "audio_path": "src/visual_memory/tests/input_audio/v079.ogg",
+      "feature": "command",
+      "include_for": [
+        "whisper"
+      ],
+      "priority": "core",
+      "expected_search_term": null,
+      "expected_intent": null,
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "find"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v080",
+      "utterance": "ask",
+      "audio_path": "src/visual_memory/tests/input_audio/v080.ogg",
+      "feature": "command",
+      "include_for": [
+        "whisper"
+      ],
+      "priority": "core",
+      "expected_search_term": null,
+      "expected_intent": null,
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "ask"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v081",
+      "utterance": "uh where did i um leave my wallet",
+      "audio_path": "src/visual_memory/tests/input_audio/v081.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "wallet",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "wallet"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v082",
+      "utterance": "hey where are my keys again",
+      "audio_path": "src/visual_memory/tests/input_audio/v082.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "keys",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "keys"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v083",
+      "utterance": "i cannot find the receipt from office chair shopping",
+      "audio_path": "src/visual_memory/tests/input_audio/v083.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "receipt office chair",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "receipt",
+        "office",
+        "chair"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v084",
+      "utterance": "the paper with my dentist number where is it",
+      "audio_path": "src/visual_memory/tests/input_audio/v084.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "paper dentist number",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "paper",
+        "dentist"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v085",
+      "utterance": "where is that note from yesterday",
+      "audio_path": "src/visual_memory/tests/input_audio/v085.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "note",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "note",
+        "yesterday"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v086",
+      "utterance": "where did i leave my usb c adapter",
+      "audio_path": "src/visual_memory/tests/input_audio/v086.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "usb c adapter",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "usb",
+        "adapter"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v087",
+      "utterance": "where is my bus pass",
+      "audio_path": "src/visual_memory/tests/input_audio/v087.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "bus pass",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "bus",
+        "pass"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v088",
+      "utterance": "where is my inhaler",
+      "audio_path": "src/visual_memory/tests/input_audio/v088.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "inhaler",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "inhaler"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v089",
+      "utterance": "where are my reading glasses",
+      "audio_path": "src/visual_memory/tests/input_audio/v089.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "reading glasses",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "reading",
+        "glasses"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v090",
+      "utterance": "where is my braille display cable",
+      "audio_path": "src/visual_memory/tests/input_audio/v090.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "braille display cable",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "braille",
+        "display",
+        "cable"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v091",
+      "utterance": "copy what this says",
+      "audio_path": "src/visual_memory/tests/input_audio/v091.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "this",
+      "expected_intent": "export_ocr",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "copy",
+        "says"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v092",
+      "utterance": "read what is on this card",
+      "audio_path": "src/visual_memory/tests/input_audio/v092.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "card",
+      "expected_intent": "read_ocr",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "read",
+        "card"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v093",
+      "utterance": "rename this to emergency meds",
+      "audio_path": "src/visual_memory/tests/input_audio/v093.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "emergency meds",
+      "expected_intent": "rename",
+      "expected_rename_target": "emergency meds",
+      "expected_text_contains": [
+        "rename",
+        "this"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v094",
+      "utterance": "rename this to checkbook",
+      "audio_path": "src/visual_memory/tests/input_audio/v094.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "checkbook",
+      "expected_intent": "rename",
+      "expected_rename_target": "checkbook",
+      "expected_text_contains": [
+        "rename",
+        "this"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v095",
+      "utterance": "what is this exactly",
+      "audio_path": "src/visual_memory/tests/input_audio/v095.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "this",
+      "expected_intent": "describe",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "exactly"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v096",
+      "utterance": "where do i keep this most often",
+      "audio_path": "src/visual_memory/tests/input_audio/v096.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "this",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "keep",
+        "often"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v097",
+      "utterance": "this room is the kitchen",
+      "audio_path": "src/visual_memory/tests/input_audio/v097.ogg",
+      "feature": "room_name",
+      "include_for": [
+        "whisper"
+      ],
+      "priority": "extended",
+      "expected_search_term": null,
+      "expected_intent": null,
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "room",
+        "kitchen"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v098",
+      "utterance": "this is the guest bedroom",
+      "audio_path": "src/visual_memory/tests/input_audio/v098.ogg",
+      "feature": "room_name",
+      "include_for": [
+        "whisper"
+      ],
+      "priority": "extended",
+      "expected_search_term": null,
+      "expected_intent": null,
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "guest",
+        "bedroom"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v099",
+      "utterance": "this is the downstairs bathroom",
+      "audio_path": "src/visual_memory/tests/input_audio/v099.ogg",
+      "feature": "room_name",
+      "include_for": [
+        "whisper"
+      ],
+      "priority": "extended",
+      "expected_search_term": null,
+      "expected_intent": null,
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "downstairs",
+        "bathroom"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v100",
+      "utterance": "this is moms office",
+      "audio_path": "src/visual_memory/tests/input_audio/v100.ogg",
+      "feature": "room_name",
+      "include_for": [
+        "whisper"
+      ],
+      "priority": "extended",
+      "expected_search_term": null,
+      "expected_intent": null,
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "moms",
+        "office"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v101",
+      "utterance": "settings",
+      "audio_path": "src/visual_memory/tests/input_audio/v101.ogg",
+      "feature": "command",
+      "include_for": [
+        "whisper"
+      ],
+      "priority": "extended",
+      "expected_search_term": null,
+      "expected_intent": null,
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "settings"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v102",
+      "utterance": "open settings",
+      "audio_path": "src/visual_memory/tests/input_audio/v102.ogg",
+      "feature": "command",
+      "include_for": [
+        "whisper"
+      ],
+      "priority": "extended",
+      "expected_search_term": null,
+      "expected_intent": null,
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "open",
+        "settings"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v103",
+      "utterance": "start scan",
+      "audio_path": "src/visual_memory/tests/input_audio/v103.ogg",
+      "feature": "command",
+      "include_for": [
+        "whisper"
+      ],
+      "priority": "extended",
+      "expected_search_term": null,
+      "expected_intent": null,
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "start",
+        "scan"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v104",
+      "utterance": "scan now",
+      "audio_path": "src/visual_memory/tests/input_audio/v104.ogg",
+      "feature": "command",
+      "include_for": [
+        "whisper"
+      ],
+      "priority": "extended",
+      "expected_search_term": null,
+      "expected_intent": null,
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "scan",
+        "now"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v105",
+      "utterance": "find my wallet please",
+      "audio_path": "src/visual_memory/tests/input_audio/v105.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "wallet",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "wallet"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v106",
+      "utterance": "ask where my keys are",
+      "audio_path": "src/visual_memory/tests/input_audio/v106.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "keys",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "ask",
+        "keys"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v107",
+      "utterance": "where did i put my money last week",
+      "audio_path": "src/visual_memory/tests/input_audio/v107.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "money",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "money",
+        "last",
+        "week"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v108",
+      "utterance": "where did i leave that office receipt",
+      "audio_path": "src/visual_memory/tests/input_audio/v108.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "office receipt",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "office",
+        "receipt"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v109",
+      "utterance": "the receipt with office chair where is it",
+      "audio_path": "src/visual_memory/tests/input_audio/v109.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "receipt office chair",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "receipt",
+        "office",
+        "chair"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v110",
+      "utterance": "where is the receipt from ikea chair",
+      "audio_path": "src/visual_memory/tests/input_audio/v110.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "receipt ikea chair",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "receipt",
+        "ikea",
+        "chair"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v111",
+      "utterance": "where is my wallet",
+      "audio_path": "src/visual_memory/tests/input_audio/v111.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "wallet",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "wallet"
+      ],
+      "noise": "street",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v112",
+      "utterance": "where did i leave my keys",
+      "audio_path": "src/visual_memory/tests/input_audio/v112.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "keys",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "keys"
+      ],
+      "noise": "street",
+      "accent": "your-accent",
+      "speed": "fast"
+    },
+    {
+      "id": "v113",
+      "utterance": "read this to me",
+      "audio_path": "src/visual_memory/tests/input_audio/v113.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "this",
+      "expected_intent": "read_ocr",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "read",
+        "this"
+      ],
+      "noise": "cafe",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v114",
+      "utterance": "copy the text from this",
+      "audio_path": "src/visual_memory/tests/input_audio/v114.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "text",
+      "expected_intent": "export_ocr",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "copy",
+        "text"
+      ],
+      "noise": "cafe",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v115",
+      "utterance": "rename this to my wallet",
+      "audio_path": "src/visual_memory/tests/input_audio/v115.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "my wallet",
+      "expected_intent": "rename",
+      "expected_rename_target": "my wallet",
+      "expected_text_contains": [
+        "rename",
+        "wallet"
+      ],
+      "noise": "cafe",
+      "accent": "your-accent",
+      "speed": "slow"
+    },
+    {
+      "id": "v116",
+      "utterance": "where do i usually put this",
+      "audio_path": "src/visual_memory/tests/input_audio/v116.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "this",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "usually",
+        "put"
+      ],
+      "noise": "street",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v117",
+      "utterance": "describe this for me",
+      "audio_path": "src/visual_memory/tests/input_audio/v117.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "this",
+      "expected_intent": "describe",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "describe",
+        "me"
+      ],
+      "noise": "street",
+      "accent": "your-accent",
+      "speed": "normal"
+    },
+    {
+      "id": "v118",
+      "utterance": "where is my medicine bottle",
+      "audio_path": "src/visual_memory/tests/input_audio/v118.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "medicine bottle",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "medicine",
+        "bottle"
+      ],
+      "noise": "cafe",
+      "accent": "your-accent",
+      "speed": "fast"
+    },
+    {
+      "id": "v119",
+      "utterance": "what does this say",
+      "audio_path": "src/visual_memory/tests/input_audio/v119.ogg",
+      "feature": "item_ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "this",
+      "expected_intent": "read_ocr",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "what",
+        "say"
+      ],
+      "noise": "street",
+      "accent": "your-accent",
+      "speed": "slow"
+    },
+    {
+      "id": "v120",
+      "utterance": "where did i put my wallet last week",
+      "audio_path": "src/visual_memory/tests/input_audio/v120.ogg",
+      "feature": "ask",
+      "include_for": [
+        "whisper",
+        "ollama"
+      ],
+      "priority": "extended",
+      "expected_search_term": "wallet",
+      "expected_intent": "find",
+      "expected_rename_target": null,
+      "expected_text_contains": [
+        "wallet",
+        "last",
+        "week"
+      ],
+      "noise": "quiet",
+      "accent": "your-accent",
+      "speed": "normal"
+    }
+  ]
+}
