@@ -135,3 +135,16 @@ Use [DEPLOY.md](docs/DEPLOY.md) for the Debian production setup with:
 ## Architecture
 
 See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for pipeline internals and package structure.
+
+## Model attribution and licenses
+
+This project depends on multiple third-party models and model-adjacent assets
+with mixed license terms.
+
+- Full attribution inventory, source links, model pages, and license notes:
+  [LICENSES.md](LICENSES.md)
+- BibTeX citations:
+  [CITATIONS.bib](CITATIONS.bib)
+
+Before deployment or redistribution, review `LICENSES.md` to confirm terms for
+the exact model set you enable.
