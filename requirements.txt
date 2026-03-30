@@ -1,2 +1,3 @@
 # Legacy convenience file for the core backend environment.
 -e .[core]
+moondream==0.2.0
