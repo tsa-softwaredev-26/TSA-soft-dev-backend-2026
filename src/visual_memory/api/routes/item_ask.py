@@ -123,8 +123,10 @@ def item_ask():
     # Ollama supplements only when no keyword pattern fires.
     intent = _keyword_intent(query)
     ollama_used = False
+    db = get_database()
+    known_labels = db.get_known_labels()
     if intent is None and get_settings().llm_query_fallback_enabled:
-        intent = extract_item_intent(query)
+        intent = extract_item_intent(query, known_labels=known_labels[:20])
         if intent is not None:
             ollama_used = True
     if intent is None:
@@ -137,8 +139,6 @@ def item_ask():
         "ollama_used": ollama_used,
         "query": query,
     })
-
-    db = get_database()
 
     # read_ocr / export_ocr
     if intent in ("read_ocr", "export_ocr"):
@@ -167,7 +167,7 @@ def item_ask():
         # Keyword extraction first (deterministic), Ollama as fallback
         new_label = _extract_rename_target_keyword(query)
         if new_label is None and get_settings().llm_query_fallback_enabled:
-            new_label = extract_rename_target(query)
+            new_label = extract_rename_target(query, known_labels=known_labels[:20])
         if not new_label:
             return jsonify({
                 "action": "rename",
