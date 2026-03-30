@@ -23,18 +23,18 @@ CONFIDENCE_HIGH = 0.6
 
 
 def _vertical_zone(bbox: list, img_h: int) -> str:
-    """Classify where in the frame (vertically) the object sits.
+    """Classify vertical gaze zone from bbox position in frame.
 
-    Returns 'below', 'above', or 'level'.
-    Used to add look-down / look-up context to narration so the user
-    doesn't interpret a slant-distance reading as a walk-forward distance.
+    Returns 'down', 'up', or 'level'.
+    Used to prepend a gaze instruction to narration so the user doesn't
+    interpret slant-distance as a walk-forward distance.
     """
     cy = (bbox[1] + bbox[3]) / 2
     ny = cy / img_h  # 0 = top of frame, 1 = bottom
-    if ny > 0.6:
-        return "below"
-    if ny < 0.3:
-        return "above"
+    if ny > 0.60:
+        return "down"
+    if ny < 0.25:
+        return "up"
     return "level"
 
 
@@ -114,8 +114,8 @@ class DepthEstimator:
 
         vertical = _vertical_zone(bbox, img_h) if (bbox is not None and img_h is not None) else "level"
 
-        if vertical == "below":
-            return f"{label.capitalize()} below you, {direction}, {distance_ft:.1f} feet away."
-        if vertical == "above":
-            return f"{label.capitalize()} above you, {direction}, {distance_ft:.1f} feet away."
+        if vertical == "down":
+            return f"{label.capitalize()} look down, {direction}, {distance_ft:.1f} feet away."
+        if vertical == "up":
+            return f"{label.capitalize()} look up, {direction}, {distance_ft:.1f} feet away."
         return f"{label.capitalize()} {direction}, {distance_ft:.1f} feet away."
