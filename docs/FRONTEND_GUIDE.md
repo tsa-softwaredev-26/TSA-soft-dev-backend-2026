@@ -874,7 +874,7 @@ Use `source=important` for warning and error only logs, or `source=crash` to rea
 GET /debug/perf
 ```
 
-Use this when tuning scan latency. Key fields include stage timing aggregates (`prepare_ms`, `detect_ms`, `embed_ms`, `ocr_ms`, `match_ms`) and resource peaks (RAM, swap, VRAM, CPU temp). For OCR batching checks, monitor `ocr_batch_requests`, `ocr_batch_items`, and `ocr_batch_non_empty` in recent perf records.
+Use this when tuning scan latency. Key fields include stage timing aggregates (`prepare_ms`, `detect_ms`, `embed_ms`, `ocr_ms`, `match_ms`) and resource peaks (RAM, swap, VRAM, CPU temp).
 
 ### Live threshold patch
 
