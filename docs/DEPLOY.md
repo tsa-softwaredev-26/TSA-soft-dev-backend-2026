@@ -234,6 +234,7 @@ To pull manually:
 
 ```bash
 ollama pull llama3.2:1b
+ollama pull phi3:mini
 ollama list   # verify model appears
 ```
 
@@ -252,6 +253,15 @@ ollama run llama3.2:1b "respond with JSON: {\"intent\": \"find\"}"
 | `pull failed: connection refused` | `systemctl start ollama` |
 | Slow /ask responses | Lower `OLLAMA_TIMEOUT_SECONDS` in `.env` (default: 5.0 s) |
 | Remote Ollama host | Set `OLLAMA_HOST=http://<host>:11434` in `.env` |
+
+Model selection by performance mode:
+- Fast mode: Ollama query parsing is disabled.
+- Balanced mode: `OLLAMA_MODEL_BALANCED` (default `llama3.2:1b`)
+- Accurate mode: `OLLAMA_MODEL_ACCURATE` (default `phi3:mini`)
+
+Optional env overrides in `.env`:
+- `OLLAMA_MODEL_BALANCED=llama3.2:1b`
+- `OLLAMA_MODEL_ACCURATE=phi3:mini`
 
 The backend circuit breaker opens after 3 consecutive Ollama failures and pauses
 all LLM calls for 60 seconds. This prevents a stalled daemon from adding latency
