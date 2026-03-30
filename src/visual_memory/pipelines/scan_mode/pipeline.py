@@ -234,14 +234,11 @@ class ScanPipeline:
                 ocr_t0 = time.monotonic()
                 ocr_results = self.ocr_client.recognize_batch([crops[i] for i in ocr_indices])
                 ocr_ms += (time.monotonic() - ocr_t0) * 1000
-                timing["ocr_batch_requests"] = 1
-                timing["ocr_batch_items"] = len(ocr_indices)
 
                 for idx, ocr_result in zip(ocr_indices, ocr_results):
                     text = str((ocr_result or {}).get("text", "") or "")
                     if text:
                         ocr_text_by_index[idx] = text
-                timing["ocr_batch_non_empty"] = len(ocr_text_by_index)
 
                 if self.text_embedder is not None and ocr_text_by_index:
                     ordered = sorted(ocr_text_by_index.items(), key=lambda kv: kv[0])
