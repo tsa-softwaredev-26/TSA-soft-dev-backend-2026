@@ -1,4 +1,4 @@
-"""Stress tests for /transcribe throughput and validation."""
+"""Stress tests for /voice transcription throughput and validation."""
 from __future__ import annotations
 
 import os
@@ -7,8 +7,8 @@ import time
 
 os.environ["ENABLE_DEPTH"] = "0"
 
-from visual_memory.api.routes.transcribe import transcribe_bp
 from visual_memory.api.routes.sightings import sightings_bp
+from visual_memory.api.routes.voice import voice_bp
 from visual_memory.engine.model_registry import registry
 from visual_memory.tests.scripts.stress_artifacts import (
     append_recommendations,
@@ -18,14 +18,14 @@ from visual_memory.tests.scripts.stress_artifacts import (
 )
 from visual_memory.tests.scripts.test_harness import StubSpeechRecognizer, TestRunner, make_test_app, seed_item
 
-_runner = TestRunner("stress_transcribe")
+_runner = TestRunner("stress_voice")
 
 
 def _seed(db):
     seed_item(db, "wallet", room_name="kitchen", emb_seed=1)
 
 
-client, db, cleanup = make_test_app([transcribe_bp, sightings_bp], seed_fn=_seed)
+client, db, cleanup = make_test_app([voice_bp, sightings_bp], seed_fn=_seed)
 
 
 def _install_stub():
@@ -47,13 +47,13 @@ def _invalid_audio() -> bytes:
     return b"RIFF" + b"x" * 40
 
 
-def _post_transcribe(data: bytes, context: int = 1):
+def _post_voice(data: bytes, context: int = 1):
     t0 = time.monotonic()
-    resp = client.post(f"/transcribe?context={context}", data=data, content_type="audio/ogg")
+    resp = client.post(f"/voice?context={context}", data=data, content_type="audio/ogg")
     return resp.status_code, (time.monotonic() - t0) * 1000.0
 
 
-def test_transcribe_load_mix():
+def test_voice_load_mix():
     import visual_memory.api.routes.transcribe as _tr
 
     original_stub = _install_stub()
@@ -63,25 +63,25 @@ def test_transcribe_load_mix():
     try:
         _tr.load_audio_bytes = lambda b, target_sr=16000: (__import__("numpy").zeros(4000, dtype="float32"), 16000)
         jobs = [(_valid_audio(), 1)] * 100 + [(_valid_audio(), 0)] * 50
-        results = [_post_transcribe(*x) for x in jobs]
+        results = [_post_voice(*x) for x in jobs]
         for i, (status, ms) in enumerate(results):
             latencies.append(ms)
             if status != 200:
-                failures.append({"case": "transcribe_valid_lane", "index": i, "status": status})
+                failures.append({"case": "voice_valid_lane", "index": i, "status": status})
 
         _tr.load_audio_bytes = old_loader
         bad_statuses = []
         for _ in range(40):
-            resp = client.post("/transcribe", data=_invalid_audio(), content_type="audio/wav")
+            resp = client.post("/voice", data=_invalid_audio(), content_type="audio/wav")
             bad_statuses.append(resp.status_code)
         if any(s != 400 for s in bad_statuses):
-            failures.append({"case": "transcribe_invalid_lane", "statuses": bad_statuses})
+            failures.append({"case": "voice_invalid_lane", "statuses": bad_statuses})
     finally:
         _tr.load_audio_bytes = old_loader
         _restore_stub(original_stub)
 
     report = {
-        "suite": "stress_transcribe",
+        "suite": "stress_voice",
         "valid_requests": 150,
         "invalid_requests": 40,
         "p50_ms": percentile_ms(latencies, 50),
@@ -93,16 +93,16 @@ def test_transcribe_load_mix():
         record_failure_modes(failures)
     append_recommendations(
         [
-            "[stress_transcribe]",
+            "[stress_voice]",
             f"- p95 latency: {report['p95_ms']}ms",
-            "- If invalid format checks regress, tighten validate_audio_format boundary tests.",
+            "- Keep voice format validation strict for non-ogg payloads.",
         ]
     )
-    assert not failures, f"stress transcribe failures: {failures[:3]}"
+    assert not failures, f"stress voice failures: {failures[:3]}"
 
 
 for name, fn in [
-    ("stress_transcribe:load_mix", test_transcribe_load_mix),
+    ("stress_voice:load_mix", test_voice_load_mix),
 ]:
     _runner.run(name, fn)
 

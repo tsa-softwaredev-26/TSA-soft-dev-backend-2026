@@ -1,4 +1,4 @@
-"""Stress tests for /ask, /find, and /item/ask."""
+"""Stress tests for /voice ask/item flows and /find."""
 from __future__ import annotations
 
 import os
@@ -7,9 +7,8 @@ import time
 
 os.environ["ENABLE_DEPTH"] = "0"
 
-from visual_memory.api.routes.ask import ask_bp
 from visual_memory.api.routes.find import find_bp
-from visual_memory.api.routes.item_ask import item_ask_bp
+from visual_memory.api.routes.voice import voice_bp
 from visual_memory.tests.scripts.stress_artifacts import (
     append_recommendations,
     percentile_ms,
@@ -27,12 +26,12 @@ def _seed(db):
     seed_item(db, "receipt", ocr_text="Office Chair", room_name="kitchen", emb_seed=3)
 
 
-client, db, cleanup = make_test_app([ask_bp, find_bp, item_ask_bp], seed_fn=_seed)
+client, db, cleanup = make_test_app([voice_bp, find_bp], seed_fn=_seed)
 
 
 def _post_ask(query: str):
     t0 = time.monotonic()
-    resp = client.post("/ask", json={"query": query})
+    resp = client.post("/voice", json={"request_type": "ask", "text": query})
     return resp.status_code, (time.monotonic() - t0) * 1000.0
 
 
@@ -59,10 +58,11 @@ def test_ask_find_item_load_mix():
             failures.append({"case": "find_room_load", "status": resp.status_code})
 
     for _ in range(60):
-        resp = client.post("/item/ask", json={
+        resp = client.post("/voice", json={
+            "request_type": "item_ask",
             "scan_id": "test-scan",
             "label": "wallet",
-            "query": "read this",
+            "text": "read this",
         })
         if resp.status_code != 200:
             failures.append({"case": "item_ask_load", "status": resp.status_code})
