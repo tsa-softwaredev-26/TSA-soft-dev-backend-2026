@@ -44,6 +44,11 @@ X-API-Key: <key>
 
 Missing or wrong key -> `401`. Upload cap: 50MB per request.
 
+OCR overload behavior is explicit:
+- `429` with `error: "server_busy"` when OCR worker capacity is full
+- `429` with `error: "rate_limited"` when request budget is exceeded
+- both include `Retry-After` and `retry_after_seconds`; clients should back off and retry
+
 ---
 
 ## Smoke Tests
