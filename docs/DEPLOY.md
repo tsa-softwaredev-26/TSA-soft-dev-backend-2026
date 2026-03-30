@@ -341,6 +341,7 @@ OCR_MAX_SIDE=1280       # pre-resize large images to keep OCR memory bounded
 OCR_REQUEST_TIMEOUT_SECONDS=40
 OCR_MAX_CONCURRENCY=1
 OCR_TIMEOUT_KEEP_ALIVE_SECONDS=5
+OCR_THROTTLE_RETRY_AFTER_SECONDS=2
 OMP_NUM_THREADS=1
 OPENBLAS_NUM_THREADS=1
 MKL_NUM_THREADS=1
@@ -603,6 +604,7 @@ journalctl -u spaitra-ocr --since "5 min ago" --no-pager \
 Success criteria:
 - all soak requests return `200`
 - no new timeout/504/oom lines after the soak start time
+- if capacity is exceeded, OCR returns `429` with `Retry-After` and `server_busy` payload
 
 ---
 
@@ -704,6 +706,7 @@ Common causes:
 | `ModuleNotFoundError` | Wrong `WorkingDirectory` or venv path in service file |
 | `No such file: .env` | `/opt/spaitra/.env` missing or wrong path |
 | `401 Unauthorized` from OCR | Missing or wrong `X-API-Key` from core, or key mismatch between `/opt/spaitra/.env` and `/opt/spaitra/.ocr.env` |
+| OCR returns `429` with `server_busy` | Service is throttling by design. Reduce concurrent callers or raise `OCR_MAX_CONCURRENCY` carefully. Respect `Retry-After` on clients. |
 | OCR `500` with `ConvertPirAttribute2RuntimeAttribute` | Set `OCR_ENABLE_MKLDNN=0` in `/opt/spaitra/.ocr.env`, restart `spaitra-ocr` |
 | OCR service restarts or times out on large photos | Lower `OCR_MAX_SIDE` (for example `1600`) and restart `spaitra-ocr` |
 | `500` at startup with `DB_ENCRYPTION_KEY is set but SQLCipher is unavailable` | On Python 3.13, clear `DB_ENCRYPTION_KEY` until SQLCipher bindings catch up (current `pysqlcipher3` build fails on 3.13); on <=3.12 reinstall core deps with `libsqlcipher-dev` |
