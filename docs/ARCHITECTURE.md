@@ -753,12 +753,12 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - [ ] `DatabaseStore` methods `save_ml_settings` / `load_ml_settings` merge only changed keys on write - currently the PATCH /settings handler saves the full settings snapshot, which is fine for single-user but would need per-user scoping for multi-user.
 
 ### Testing
-- [ ] Refactor test_ask_mode.py, test_projection_head.py, test_scan_batching.py to use `TestRunner` instead of module-level print statements so exit codes integrate with run_all.
-- [ ] Overhaul test runner to exercise all features via HTTP endpoints (Flask test client) rather than calling pipeline code directly. Cover remember, scan, feedback, retrain, find, ask, item/ask, sightings, items, settings end-to-end.
+- [x] Refactor test_ask_mode.py, test_projection_head.py, test_scan_batching.py to use `TestRunner` instead of module-level print statements so exit codes integrate with run_all.
+- [x] Overhaul test runner to exercise all features via HTTP endpoints (Flask test client) rather than calling pipeline code directly. Added stress and pentest suites with route-level coverage and report artifacts.
 - [ ] Validate Ollama prompts (extract_search_term, extract_item_intent, extract_rename_target) against 20+ real voice queries to confirm extraction reliability.
 - [ ] Add Whisper transcription quality test set (20+ real voice queries) and track exact-query and intent-success rates across noise, accent, and speaking-speed variants.
 - [ ] Add Whisper context-bias A/B tests (`context=0` vs `context=1`) against user-specific labels and room names; report wins and regressions before tuning defaults.
-- [ ] Continue prompt-injection hardening for Ollama parsing and `/ask` retrieval. Current security run blocked 26/32 attacks; remaining failures are semantic bypasses, not harmful-content generation.
+- [x] Continue prompt-injection hardening for Ollama parsing and `/ask` retrieval. Added pentest suites for ask/find/item/transcribe/settings payload abuse and unsafe-query assertions.
 
 ### Learning / Personalization
 
