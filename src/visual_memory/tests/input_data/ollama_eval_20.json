@@ -1,0 +1,22 @@
+[
+  {"kind": "search_term", "query": "where did I leave my wallet last night", "expected": "wallet", "known_labels": ["wallet", "keys", "notebook", "receipt"]},
+  {"kind": "search_term", "query": "find my blue notebook", "expected": "blue notebook", "known_labels": ["blue notebook", "wallet", "charger"]},
+  {"kind": "search_term", "query": "the receipt with the office chair", "expected": "receipt", "known_labels": ["receipt", "office chair", "manual"]},
+  {"kind": "search_term", "query": "have you seen my house keys", "expected": "house keys", "known_labels": ["house keys", "wallet", "laptop"]},
+  {"kind": "search_term", "query": "I need my phone", "expected": "phone", "known_labels": ["phone", "airpods", "charger"]},
+  {"kind": "search_term", "query": "where is the green water bottle", "expected": "green water bottle", "known_labels": ["green water bottle", "mug", "thermos"]},
+  {"kind": "search_term", "query": "look for my passport", "expected": "passport", "known_labels": ["passport", "wallet", "ticket"]},
+  {"kind": "search_term", "query": "can you find the tax document", "expected": "tax document", "known_labels": ["tax document", "receipt", "binder"]},
+  {"kind": "search_term", "query": "the card holder", "expected": "card holder", "known_labels": ["card holder", "wallet", "badge"]},
+  {"kind": "search_term", "query": "where did I put the black umbrella", "expected": "black umbrella", "known_labels": ["black umbrella", "coat", "bag"]},
+  {"kind": "intent", "query": "read this to me", "expected": "read_ocr", "known_labels": ["receipt", "label"]},
+  {"kind": "intent", "query": "copy the text from this", "expected": "export_ocr", "known_labels": ["manual", "receipt"]},
+  {"kind": "intent", "query": "rename this to travel wallet", "expected": "rename", "known_labels": ["wallet", "passport"]},
+  {"kind": "intent", "query": "where is this normally kept", "expected": "find", "known_labels": ["wallet", "keys"]},
+  {"kind": "intent", "query": "what is this object", "expected": "describe", "known_labels": ["unknown item"]},
+  {"kind": "intent", "query": "send this text to my notes", "expected": "export_ocr", "known_labels": ["receipt", "notes"]},
+  {"kind": "rename", "query": "rename this to my work badge", "expected": "my work badge", "known_labels": ["badge", "id card"]},
+  {"kind": "rename", "query": "call it kitchen keys", "expected": "kitchen keys", "known_labels": ["house keys", "kitchen keys"]},
+  {"kind": "rename", "query": "name this travel charger", "expected": "travel charger", "known_labels": ["charger", "travel charger"]},
+  {"kind": "rename", "query": "rename this to office notebook", "expected": "office notebook", "known_labels": ["notebook", "office notebook"]}
+]
