@@ -4,7 +4,6 @@ from __future__ import annotations
 import os
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
 
 os.environ["ENABLE_DEPTH"] = "0"
 
@@ -48,8 +47,7 @@ def test_ask_find_item_load_mix():
     failures: list[dict] = []
     ask_lat: list[float] = []
 
-    with ThreadPoolExecutor(max_workers=12) as ex:
-        ask_results = list(ex.map(_post_ask, ask_queries))
+    ask_results = [_post_ask(q) for q in ask_queries]
     for i, (status, ms) in enumerate(ask_results):
         ask_lat.append(ms)
         if status not in (200, 400):
