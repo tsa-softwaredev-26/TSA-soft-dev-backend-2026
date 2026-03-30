@@ -82,6 +82,7 @@ the OCR service unreachable, the OCR microservice is down (core API still works 
 | POST | /scan | User scans the room |
 | GET | /crop | User focuses on a specific scan match |
 | POST | /feedback | User confirms or denies a scan match |
+| POST | /transcribe | Convert short voice clip to query text |
 | POST | /ask | User asks anything in natural language |
 | POST | /item/ask | User asks about a specific focused scan item |
 | GET | /find | Direct label lookup - "where is my [object]?" |
@@ -503,6 +504,78 @@ Content-Type: application/json
 ---
 
 ## Ask Mode
+
+### Voice transcription: POST /transcribe
+
+Use this before `/ask` or `/item/ask` when your client captures raw microphone audio.
+
+```
+POST /transcribe?context=1
+Content-Type: audio/webm
+X-API-Key: <key>
+```
+
+Request body is raw audio bytes (no JSON wrapper).
+
+Supported formats:
+- `audio/webm` with Opus codec (recommended)
+- `audio/ogg` with Opus codec
+
+`context` query flag:
+- `context=1` (default): backend applies user-aware vocabulary bias from known item labels and room names
+- `context=0`: disable context bias
+
+Success response:
+
+```json
+{
+  "text": "where did i leave my wallet",
+  "language": "en",
+  "confidence": 1.0,
+  "duration_ms": 143,
+  "audio_duration_s": 2.5,
+  "context_used": true,
+  "model": "openai/whisper-large-v3-turbo"
+}
+```
+
+Bad format response (`400`):
+
+```json
+{
+  "error": "invalid audio format",
+  "detail": "unsupported audio format: wav. use webm or ogg with opus codec",
+  "format_detected": "wav"
+}
+```
+
+Pipeline recommendation:
+- Capture short utterance (about 1 to 6 seconds)
+- `POST /transcribe`
+- Send returned `text` to `/ask` for open query or `/item/ask` for focused item query
+
+Minimal browser example:
+
+```javascript
+const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+const recorder = new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus" });
+const chunks = [];
+recorder.ondataavailable = (e) => chunks.push(e.data);
+recorder.onstop = async () => {
+  const blob = new Blob(chunks, { type: "audio/webm" });
+  const bytes = await blob.arrayBuffer();
+  const r = await fetch(`${BASE}/transcribe?context=1`, {
+    method: "POST",
+    headers: { "X-API-Key": KEY, "Content-Type": "audio/webm" },
+    body: bytes,
+  });
+  const t = await r.json();
+  if (!r.ok) throw new Error(t.error || "transcribe failed");
+  // Route text to /ask or /item/ask
+};
+```
+
+---
 
 ### Open-ended natural language: POST /ask
 

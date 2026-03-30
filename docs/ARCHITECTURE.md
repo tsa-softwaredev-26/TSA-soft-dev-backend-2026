@@ -730,9 +730,10 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - Image embedder: DINOv3 ViT-S/16 (`facebook/dinov3-vits16-pretrain-lvd1689m`, gated on HuggingFace)
 - Text embedder: CLIP text encoder only (`openai/clip-vit-base-patch32`, 512-dim, ~180MB)
 - Deployment: `deploy/setup_server.sh` automates full Debian server setup; `deploy/spaitra.service` for systemd
-- Debug endpoints: /debug/state, /debug/echo, /debug/image, /debug/db, /debug/logs, /debug/perf, /debug/test-remember, /debug/test-scan, /debug/wipe (selective), /debug/config (live settings patch)
-- Ask Mode: POST /ask (NL query -> embedding search -> narration), POST /item/ask (item-context dispatcher: read_ocr, export_ocr, rename, find, describe)
-- Ollama integration: llama3.2:1b via `ollama_utils.py`; structured JSON output (format="json"); circuit breaker (3-strike, 60 s cooldown); configurable timeout via OLLAMA_TIMEOUT_SECONDS; OLLAMA_HOST env for non-localhost daemon
+ - Debug endpoints: /debug/state, /debug/echo, /debug/image, /debug/db, /debug/logs, /debug/perf, /debug/test-remember, /debug/test-scan, /debug/wipe (selective), /debug/config (live settings patch)
+ - Ask Mode: POST /ask (NL query -> embedding search -> narration), POST /item/ask (item-context dispatcher: read_ocr, export_ocr, rename, find, describe)
+ - Voice transcription: POST /transcribe (Whisper Turbo) with optional context bias from known item labels and room names
+ - Ollama integration: llama3.2:1b via `ollama_utils.py`; structured JSON output (format="json"); circuit breaker (3-strike, 60 s cooldown); configurable timeout via OLLAMA_TIMEOUT_SECONDS; OLLAMA_HOST env for non-localhost daemon
 - OCR pre-embedding: `add_to_database()` embeds OCR text at teach time and stores in `items.ocr_embedding`; `/ask` OCR content match uses stored embedding, re-embeds only for legacy items
 
 ---
@@ -753,6 +754,8 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - [ ] Refactor test_ask_mode.py, test_projection_head.py, test_scan_batching.py to use `TestRunner` instead of module-level print statements so exit codes integrate with run_all.
 - [ ] Overhaul test runner to exercise all features via HTTP endpoints (Flask test client) rather than calling pipeline code directly. Cover remember, scan, feedback, retrain, find, ask, item/ask, sightings, items, settings end-to-end.
 - [ ] Validate Ollama prompts (extract_search_term, extract_item_intent, extract_rename_target) against 20+ real voice queries to confirm extraction reliability.
+- [ ] Add Whisper transcription quality test set (20+ real voice queries) and track exact-query and intent-success rates across noise, accent, and speaking-speed variants.
+- [ ] Add Whisper context-bias A/B tests (`context=0` vs `context=1`) against user-specific labels and room names; report wins and regressions before tuning defaults.
 
 ### Learning / Personalization
 
