@@ -23,8 +23,11 @@ Two services run on the same host and communicate over localhost:
 - [ ] Ollama daemon installed and running (optional; API degrades gracefully without it)
 - [ ] `/opt/spaitra/.env` created and edited
 - [ ] `/opt/spaitra/.ocr.env` created and edited
+- [ ] `API_KEY` generated and saved securely
+- [ ] `DB_ENCRYPTION_KEY` generated and saved securely (enable on Python <= 3.12)
 - [ ] Smoke tests pass (manual service run + curl)
 - [ ] systemd units installed and enabled
+- [ ] `deploy/secure_permissions.sh` applied
 - [ ] Auto-retrain cron installed
 - [ ] Public tunnel running (`spaitra-tunnel.service`)
 - [ ] End-to-end health check passes
@@ -38,6 +41,7 @@ apt-get update
 apt-get install -y \
     python3 python3-venv python3-dev \
     git gh build-essential curl \
+    libsqlcipher-dev \
     libglib2.0-0 libsm6 libxrender1 libxext6 libgomp1 \
     libjpeg-dev libpng-dev libtiff-dev libwebp-dev \
     ffmpeg
@@ -270,6 +274,8 @@ nano /opt/spaitra/.env
 
 Required changes:
 - Set `API_KEY` to a long random string (e.g. `openssl rand -hex 32`)
+- Set `DB_ENCRYPTION_KEY` to a long random string (e.g. `openssl rand -hex 32`) when running Python <= 3.12
+- Keep both keys in a secure backup location before restarting services
 
 GPU VRAM guide:
 
@@ -285,6 +291,9 @@ Full reference; all supported variables:
 ```dotenv
 # Auth
 API_KEY=replace-with-a-long-random-api-key
+# Enable SQLCipher at rest encryption on Python <= 3.12.
+# Leave empty on Python 3.13+ until pysqlcipher3 adds support.
+DB_ENCRYPTION_KEY=
 
 # Bind address (keep 127.0.0.1; expose via tunnel or reverse proxy)
 API_HOST=127.0.0.1
@@ -326,6 +335,9 @@ OCR_PORT=8001
 OCR_LANG=en             # language pack; en covers most Latin-script text
 OCR_MIN_CONFIDENCE=0.3  # drop OCR segments below this score
 OCR_USE_ANGLE_CLS=0     # angle correction; keep 0 unless text is frequently rotated
+OCR_ENABLE_MKLDNN=0     # keep 0 on CPU hosts to avoid Paddle runtime crash
+OCR_MAX_SIDE=2000       # pre-resize large images to keep OCR memory bounded
+API_KEY=replace-with-the-same-core-api-key
 ```
 
 ---
@@ -344,7 +356,12 @@ python -m services.ocr.run &
 sleep 3
 
 curl http://127.0.0.1:8001/health
+curl -s -o /dev/null -w "No key -> %{http_code}\n" \
+  -X POST -F image=@$REPO/src/visual_memory/tests/text_demo/typed.jpeg \
+  http://127.0.0.1:8001/ocr
+KEY=$(grep ^API_KEY= /opt/spaitra/.env | cut -d= -f2-)
 curl -s -X POST -F image=@$REPO/src/visual_memory/tests/text_demo/typed.jpeg \
+  -H "X-API-Key: $KEY" \
   http://127.0.0.1:8001/ocr | python3 -m json.tool
 
 kill %1
@@ -394,6 +411,9 @@ systemctl enable --now spaitra-core
 
 systemctl status spaitra-ocr spaitra-core --no-pager
 journalctl -u spaitra-core -n 50 --no-pager
+
+# Harden file permissions once env files and services are in place
+sudo -u spaitra bash $REPO/deploy/secure_permissions.sh "$REPO"
 ```
 
 > **File ownership after git pull:** if you ran `git pull` as root, source files may
@@ -535,6 +555,13 @@ curl -s -o /dev/null -w "No key → %{http_code} (expect 401)\n" \
   http://127.0.0.1:5000/debug/state
 curl -s -o /dev/null -w "With key → %{http_code} (expect 200)\n" \
   http://127.0.0.1:5000/debug/state -H "X-API-Key: $KEY"
+curl -s -o /dev/null -w "OCR no key → %{http_code} (expect 401)\n" \
+  -X POST -F image=@$REPO/src/visual_memory/tests/text_demo/typed.jpeg \
+  http://127.0.0.1:8001/ocr
+curl -s -o /dev/null -w "OCR with key → %{http_code} (expect 200)\n" \
+  -X POST -F image=@$REPO/src/visual_memory/tests/text_demo/typed.jpeg \
+  -H "X-API-Key: $KEY" \
+  http://127.0.0.1:8001/ocr
 
 # System state (GPU, pipelines, OCR reachability)
 curl -sf http://127.0.0.1:5000/debug/state -H "X-API-Key: $KEY" | python3 -m json.tool
@@ -599,7 +626,11 @@ Common causes:
 |---|---|
 | `ModuleNotFoundError` | Wrong `WorkingDirectory` or venv path in service file |
 | `No such file: .env` | `/opt/spaitra/.env` missing or wrong path |
-| `401 Unauthorized` from OCR | `OCR_SERVICE_URL` mismatch or spaitra-ocr not running |
+| `401 Unauthorized` from OCR | Missing or wrong `X-API-Key` from core, or key mismatch between `/opt/spaitra/.env` and `/opt/spaitra/.ocr.env` |
+| OCR `500` with `ConvertPirAttribute2RuntimeAttribute` | Set `OCR_ENABLE_MKLDNN=0` in `/opt/spaitra/.ocr.env`, restart `spaitra-ocr` |
+| OCR service restarts or times out on large photos | Lower `OCR_MAX_SIDE` (for example `1600`) and restart `spaitra-ocr` |
+| `500` at startup with `DB_ENCRYPTION_KEY is set but SQLCipher is unavailable` | On Python 3.13, clear `DB_ENCRYPTION_KEY` until SQLCipher bindings catch up; on <=3.12 reinstall core deps with `libsqlcipher-dev` |
+| `Failed to unlock encrypted database` | `DB_ENCRYPTION_KEY` mismatch; restore the correct key or start with a fresh DB |
 | `Permission denied` on model files | `chown -R spaitra:spaitra $REPO/checkpoints` |
 | `CUDA out of memory` | Enable `SAVE_VRAM=1` in `.env` and restart |
 | Source files owned by root | `chown -R spaitra:spaitra $REPO/src $REPO/services` |
@@ -658,7 +689,7 @@ curl -sf http://127.0.0.1:5000/retrain/status -H "X-API-Key: $KEY"
     ├── checkpoints/
     │   └── depth_pro.pt          ← Depth Pro weights (~2 GB)
     ├── data/
-    │   └── memory.db             ← SQLite database (created on first run)
+    │   └── memory.db             ← SQLCipher-encrypted DB when DB_ENCRYPTION_KEY is set
     ├── logs/
     │   └── retrain.log           ← auto-retrain cron output
     ├── models/
