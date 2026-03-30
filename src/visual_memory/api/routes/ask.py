@@ -51,8 +51,12 @@ def ask():
         }
     """
     data = request.get_json(silent=True) or {}
-    query = (data.get("query") or "").strip()
-
+    raw_query = data.get("query")
+    if raw_query is None:
+        return jsonify({"error": "missing field: query"}), 400
+    if not isinstance(raw_query, str):
+        return jsonify({"error": "query must be a string"}), 400
+    query = raw_query.strip()
     if not query:
         return jsonify({"error": "missing field: query"}), 400
 
