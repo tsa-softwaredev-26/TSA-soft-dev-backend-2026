@@ -22,6 +22,8 @@ import io
 import os
 import sys
 import time
+import urllib.request
+import urllib.error
 
 os.environ["ENABLE_DEPTH"] = "0"
 
@@ -97,7 +99,7 @@ def run_probe(client, db, label: str, image_bytes: bytes, is_remote: bool = Fals
         assert "items" in data
 
     def step_wipe():
-        resp = client.post("/debug/wipe", json={"target": "items"})
+        resp = client.post("/debug/wipe", json={"confirm": True, "target": "items"})
         if resp.status_code not in (200, 404, 405):
             assert_status(resp, 200)
 
@@ -121,6 +123,14 @@ def main():
     label = args.label
     image_bytes = _make_jpeg_bytes(args.image)
     is_remote = bool(TEST_BASE_URL)
+
+    if is_remote:
+        def step_remote_ocr_health():
+            req = urllib.request.Request(f"{TEST_BASE_URL}/health")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                assert resp.status == 200, f"unexpected health status: {resp.status}"
+
+        _runner.run("probe:remote:health", step_remote_ocr_health)
 
     all_bps = [remember_bp, scan_bp, feedback_bp, items_bp, sightings_bp, find_bp, debug_bp]
     client, db, cleanup = make_test_app(all_bps)
