@@ -19,6 +19,14 @@ _SCAN_CACHE_MAX = 50
 _CONFIDENCE_HIGH = 0.6   # mirrors estimator.CONFIDENCE_HIGH
 
 
+def _vertical_zone(bbox: list, img_h: int) -> str:
+    cy = (bbox[1] + bbox[3]) / 2
+    ny = cy / img_h
+    if ny > 0.6: return "below"
+    if ny < 0.3: return "above"
+    return "level"
+
+
 def _direction_from_box(bbox: list, img_w: int) -> str:
     cx = (bbox[0] + bbox[2]) / 2
     nx = (cx / img_w) * 2 - 1  # -1=far left, 1=far right
@@ -320,9 +328,15 @@ class ScanPipeline:
             output_crops = []
             for m in matches:
                 direction = _direction_from_box(m["box"], query_image.width)
+                vertical  = _vertical_zone(m["box"], query_image.height)
                 sim = float(m["similarity"])
                 if sim >= _CONFIDENCE_HIGH:
-                    narration = f"{m['label'].capitalize()} {direction}."
+                    if vertical == "below":
+                        narration = f"{m['label'].capitalize()} below you, {direction}."
+                    elif vertical == "above":
+                        narration = f"{m['label'].capitalize()} above you, {direction}."
+                    else:
+                        narration = f"{m['label'].capitalize()} {direction}."
                 else:
                     narration = f"May be a {m['label']} {direction}, focus to verify."
                 out = {
@@ -366,7 +380,9 @@ class ScanPipeline:
                 m["label"],
                 direction,
                 distance_ft,
-                m["similarity"]
+                m["similarity"],
+                bbox=m["box"],
+                img_h=query_image.height,
             )
 
             if narration:
