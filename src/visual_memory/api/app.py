@@ -17,6 +17,7 @@ from visual_memory.api.routes.item_ask import item_ask_bp
 from visual_memory.api.routes.items import items_bp
 from visual_memory.api.routes.sightings import sightings_bp
 from visual_memory.api.routes.debug import debug_bp
+from visual_memory.api.routes.transcribe import transcribe_bp
 
 _API_KEY = os.environ.get("API_KEY", "")
 
@@ -49,6 +50,7 @@ def create_app():
     app.register_blueprint(items_bp)
     app.register_blueprint(sightings_bp)
     app.register_blueprint(debug_bp)
+    app.register_blueprint(transcribe_bp)
 
     from visual_memory.api.pipelines import warm_all
     warm_all()

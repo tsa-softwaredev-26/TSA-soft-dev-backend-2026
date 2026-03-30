@@ -180,6 +180,27 @@ def test_get_items_metadata_filter():
     assert all(i["label"] == "wallet" for i in wallet_items)
 
 
+def test_get_known_item_labels_includes_items_and_sightings():
+    db, _ = _make_db()
+    now = time.time()
+    db.add_item(label="wallet", combined_embedding=make_embedding(0), confidence=0.8, timestamp=now - 5)
+    db.add_sighting(label="keys", direction="left", distance_ft=1.0, similarity=0.6, timestamp=now)
+    labels = db.get_known_item_labels(limit=10)
+    assert "wallet" in labels
+    assert "keys" in labels
+
+
+def test_get_recent_room_names_unique_sorted():
+    db, _ = _make_db()
+    now = time.time()
+    db.add_sighting(label="wallet", room_name="kitchen", timestamp=now - 5)
+    db.add_sighting(label="wallet", room_name="kitchen", timestamp=now - 1)
+    db.add_sighting(label="keys", room_name="bedroom", timestamp=now)
+    rooms = db.get_recent_room_names(limit=10)
+    assert rooms[0] == "bedroom"
+    assert "kitchen" in rooms
+
+
 for name, fn in [
     ("db:add_get_all_items", test_add_get_all_items),
     ("db:roundtrip_embedding_shape", test_add_item_roundtrip_embedding_shape),
@@ -196,6 +217,8 @@ for name, fn in [
     ("db:load_feedback_triplets", test_load_feedback_triplets),
     ("db:delete_items_by_label", test_delete_items_by_label),
     ("db:get_items_metadata_filter", test_get_items_metadata_filter),
+    ("db:get_known_item_labels", test_get_known_item_labels_includes_items_and_sightings),
+    ("db:get_recent_room_names", test_get_recent_room_names_unique_sorted),
 ]:
     _runner.run(name, fn)
 
