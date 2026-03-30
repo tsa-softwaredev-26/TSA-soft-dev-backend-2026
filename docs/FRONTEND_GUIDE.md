@@ -611,8 +611,10 @@ Content-Type: application/json
   "search_term": "money",
   "ollama_used": true,
   "found": true,
+  "document_query": false,
   "matched_label": "wallet",
   "matched_by": "fuzzy_label",
+  "strategies_tried": ["llm_extraction", "exact", "fuzzy_label"],
   "narration": "Your wallet is in the kitchen, to your left. Last seen 3 days ago.",
   "last_sighting": {
     "id": 41,
@@ -634,6 +636,7 @@ Content-Type: application/json
   "search_term": "...",
   "ollama_used": true,
   "found": false,
+  "strategies_tried": ["exact", "fuzzy_label", "ocr_semantic"],
   "narration": "I couldn't find anything matching that in your memory."
 }
 ```
@@ -654,7 +657,11 @@ Content-Type: application/json
 `matched_by` values:
 - `"exact"` - label matched directly
 - `"fuzzy_label"` - matched via text embedding similarity on label names
-- `"ocr"` - matched via OCR text content of a taught item
+- `"ocr_semantic"` - matched via OCR text content of a taught item
+- fallback variants may appear when the first strategy misses (`fuzzy_label_fallback`, `ocr_semantic_fallback`)
+
+`document_query` indicates whether the backend classified the query as document-like and changed strategy order.
+`strategies_tried` shows the exact retrieval path used for this request.
 
 `ollama_used: false` means Ollama was unavailable; search ran on raw query text.
 `blocked: true` means the backend rejected the query as unsafe before retrieval.
