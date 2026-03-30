@@ -22,8 +22,8 @@ _CONFIDENCE_HIGH = 0.6   # mirrors estimator.CONFIDENCE_HIGH
 def _vertical_zone(bbox: list, img_h: int) -> str:
     cy = (bbox[1] + bbox[3]) / 2
     ny = cy / img_h
-    if ny > 0.6: return "below"
-    if ny < 0.3: return "above"
+    if ny > 0.60: return "down"
+    if ny < 0.25: return "up"
     return "level"
 
 
@@ -331,10 +331,10 @@ class ScanPipeline:
                 vertical  = _vertical_zone(m["box"], query_image.height)
                 sim = float(m["similarity"])
                 if sim >= _CONFIDENCE_HIGH:
-                    if vertical == "below":
-                        narration = f"{m['label'].capitalize()} below you, {direction}."
-                    elif vertical == "above":
-                        narration = f"{m['label'].capitalize()} above you, {direction}."
+                    if vertical == "down":
+                        narration = f"{m['label'].capitalize()} look down, {direction}."
+                    elif vertical == "up":
+                        narration = f"{m['label'].capitalize()} look up, {direction}."
                     else:
                         narration = f"{m['label'].capitalize()} {direction}."
                 else:
