@@ -71,8 +71,8 @@ def test_voice_success_without_context():
         _restore_stub_recognizer(original)
     assert_status(resp, 200)
     data = resp.get_json()
-    assert data.get("transcription", {}).get("text")
-    assert data.get("transcription", {}).get("context_used") is False
+    assert isinstance(data.get("transcription"), str)
+    assert data.get("transcription_meta", {}).get("context_used") is False
 
 
 def test_voice_success_with_context():
@@ -88,7 +88,7 @@ def test_voice_success_with_context():
         _restore_stub_recognizer(original)
     assert_status(resp, 200)
     data = resp.get_json()
-    assert data.get("transcription", {}).get("context_used") is True
+    assert data.get("transcription_meta", {}).get("context_used") is True
 
 
 def test_voice_model_failure():
