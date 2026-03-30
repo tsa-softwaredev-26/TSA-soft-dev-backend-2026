@@ -737,7 +737,7 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
  - Debug endpoints: /debug/state, /debug/echo, /debug/image, /debug/db, /debug/logs, /debug/perf, /debug/test-remember, /debug/test-scan, /debug/wipe (selective), /debug/config (live settings patch)
  - Ask Mode: POST /ask (NL query -> embedding search -> narration), POST /item/ask (item-context dispatcher: read_ocr, export_ocr, rename, find, describe)
  - Voice transcription: POST /transcribe (Whisper Turbo) with optional context bias from known item labels and room names
- - Ollama integration: llama3.2:1b via `ollama_utils.py`; structured JSON output (format="json"); circuit breaker (3-strike, 60 s cooldown); configurable timeout via OLLAMA_TIMEOUT_SECONDS; OLLAMA_HOST env for non-localhost daemon
+ - Ollama integration: per-mode model routing via `ollama_utils.py` (`llama3.2:1b` balanced, `phi3:mini` accurate, disabled in fast mode); structured JSON output (format="json"); circuit breaker (3-strike, 60 s cooldown); configurable timeout via OLLAMA_TIMEOUT_SECONDS; OLLAMA_HOST env for non-localhost daemon
  - Jailbreak resistance: `/ask` now applies an unsafe-query gate before retrieval. Queries with prompt-injection or harmful markers are blocked with `400` (`blocked: true`, `reason: "unsafe_query"`) instead of running fuzzy search.
 - OCR pre-embedding: `add_to_database()` embeds OCR text at teach time and stores in `items.ocr_embedding`; `/ask` OCR content match uses stored embedding, re-embeds only for legacy items
 
@@ -758,7 +758,7 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 ### Testing
 - [x] Refactor test_ask_mode.py, test_projection_head.py, test_scan_batching.py to use `TestRunner` instead of module-level print statements so exit codes integrate with run_all.
 - [x] Overhaul test runner to exercise all features via HTTP endpoints (Flask test client) rather than calling pipeline code directly. Added stress and pentest suites with route-level coverage and report artifacts.
-- [ ] Validate Ollama prompts (extract_search_term, extract_item_intent, extract_rename_target) against 20+ real voice queries to confirm extraction reliability.
+- [x] Validate Ollama prompts against a 20-case eval dataset with per-case known-label context and model comparison harness. Audio files are still pending for voice comparison coverage.
 - [ ] Add Whisper transcription quality test set (20+ real voice queries) and track exact-query and intent-success rates across noise, accent, and speaking-speed variants.
 - [ ] Add Whisper context-bias A/B tests (`context=0` vs `context=1`) against user-specific labels and room names; report wins and regressions before tuning defaults.
 - [x] Continue prompt-injection hardening for Ollama parsing and `/ask` retrieval. Added pentest suites for ask/find/item/transcribe/settings payload abuse and unsafe-query assertions.
