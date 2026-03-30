@@ -9,10 +9,25 @@ from visual_memory.api.pipelines import get_database
 find_bp = Blueprint("find", __name__)
 
 _ROOM_PREFIX = re.compile(r"^(in (the|my) |the |my )", re.IGNORECASE)
+_DOCUMENT_QUERY_KEYWORDS = (
+    "receipt",
+    "paper",
+    "document",
+    "text",
+    "says",
+    "written",
+    "note",
+    "label",
+)
 
 
 def _normalize_room(name: str) -> str:
     return _ROOM_PREFIX.sub("", name.strip()).strip().lower() or ""
+
+
+def is_document_query(query: str) -> bool:
+    normalized = query.lower()
+    return any(keyword in normalized for keyword in _DOCUMENT_QUERY_KEYWORDS)
 
 
 def _format_sighting(row: dict) -> dict:
@@ -236,5 +251,5 @@ def find():
         out["matched_by"] = "fuzzy_label"
     if ocr_matched is not None:
         out["matched_label"] = ocr_matched
-        out["matched_by"] = "ocr"
+        out["matched_by"] = "ocr_semantic"
     return jsonify(out)
