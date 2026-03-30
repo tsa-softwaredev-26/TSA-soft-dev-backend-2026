@@ -171,7 +171,15 @@ def _summarize_perf(entries: list[dict]) -> dict:
                 pass
         if event == "vram_layout":
             vram_layout_count += 1
-            if int(entry.get("swap_count", 0)) > 0:
+            swap_count_raw = entry.get("swap_count")
+            if swap_count_raw is None:
+                swap_count = len(entry.get("offloaded") or [])
+            else:
+                try:
+                    swap_count = int(swap_count_raw)
+                except (TypeError, ValueError):
+                    swap_count = len(entry.get("offloaded") or [])
+            if swap_count > 0:
                 vram_swap_count += 1
 
         for key in stage_keys:
