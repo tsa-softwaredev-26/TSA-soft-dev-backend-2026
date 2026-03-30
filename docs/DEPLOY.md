@@ -253,6 +253,10 @@ The backend circuit breaker opens after 3 consecutive Ollama failures and pauses
 all LLM calls for 60 seconds. This prevents a stalled daemon from adding latency
 to every request. The API continues to work in embedding-only mode during that window.
 
+Security note: `/ask` applies an unsafe-query gate before retrieval. Queries with
+prompt-injection or harmful markers return HTTP 400 with `blocked: true` and
+`reason: "unsafe_query"` instead of running semantic match.
+
 ---
 
 ## 8. Environment files
