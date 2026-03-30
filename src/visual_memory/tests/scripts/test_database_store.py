@@ -23,6 +23,7 @@ _runner = TestRunner("database_store")
 def _make_db() -> tuple[DatabaseStore, str]:
     tmp = tempfile.mkdtemp()
     db_path = str(Path(tmp) / "test.db")
+    os.environ.pop("DB_ENCRYPTION_KEY", None)
     return DatabaseStore(db_path), db_path
 
 

@@ -1,21 +1,35 @@
 from __future__ import annotations
 import io
-import sqlite3
+import os
 import time
 from pathlib import Path
 from typing import Optional
 
 import torch
 
+try:
+    from pysqlcipher3 import dbapi2 as sqlite3
+    _SQLCIPHER_AVAILABLE = True
+except ImportError:
+    import sqlite3
+    _SQLCIPHER_AVAILABLE = False
+
+try:
+    from visual_memory.utils import get_logger
+    _log = get_logger(__name__)
+except Exception:
+    _log = None
+
 
 class DatabaseStore:
     def __init__(self, db_path: str | Path):
         self._path = Path(db_path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._set_permissions(self._path.parent, 0o700)
         self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
+        self._configure_encryption()
         self._create_tables()
-
-    # schema 
+        self._set_permissions(self._path, 0o600)
 
     def _create_tables(self):
         self._conn.executescript("""
@@ -93,6 +107,43 @@ class DatabaseStore:
             self._conn.commit()
         except Exception:
             pass  # column already exists
+
+    def _configure_encryption(self) -> None:
+        key = os.environ.get("DB_ENCRYPTION_KEY", "").strip()
+        if not key:
+            return
+        if not _SQLCIPHER_AVAILABLE:
+            pyver = os.sys.version_info
+            if pyver.major == 3 and pyver.minor >= 13:
+                if _log is not None:
+                    _log.warning({
+                        "event": "db_encryption_skipped",
+                        "reason": "sqlcipher_unavailable_py313",
+                        "python": f"{pyver.major}.{pyver.minor}",
+                    })
+                return
+            raise RuntimeError(
+                "DB_ENCRYPTION_KEY is set but SQLCipher is unavailable. "
+                "Install core dependencies with pysqlcipher3 support."
+            )
+
+        escaped = key.replace("'", "''")
+        self._conn.execute(f"PRAGMA key = '{escaped}'")
+        self._conn.execute("PRAGMA kdf_iter = 500000")
+        try:
+            self._conn.execute("SELECT count(*) FROM sqlite_master").fetchone()
+        except sqlite3.DatabaseError as exc:
+            raise RuntimeError(
+                "Failed to unlock encrypted database. "
+                "Check DB_ENCRYPTION_KEY or migrate to a fresh encrypted database."
+            ) from exc
+
+    @staticmethod
+    def _set_permissions(path: Path, mode: int) -> None:
+        try:
+            path.chmod(mode)
+        except OSError:
+            return
 
     def _tensor_to_blob(self, tensor: torch.Tensor) -> bytes:
         buf = io.BytesIO()
@@ -527,8 +578,6 @@ class DatabaseStore:
             "crop_path": crop_path,
             "room_name": room_name,
         }
-
-    # lifecycle 
 
     def close(self):
         self._conn.close()
