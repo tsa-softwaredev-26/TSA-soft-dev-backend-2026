@@ -23,7 +23,12 @@ def get_user_settings_route():
         "voice_speed": float,
         "learning_enabled": bool,
         "button_layout": "default" | "swapped",
-        "performance_config": {"depth_enabled": bool, "target_latency": float}
+        "performance_config": {
+            "depth_enabled": bool,
+            "target_latency": float,
+            "vlm_enabled": bool,
+            "vlm_timeout_seconds": float,
+        }
     }
     """
     return jsonify(get_user_settings().to_dict())

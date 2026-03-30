@@ -76,6 +76,8 @@ def test_get_user_settings_fields():
         assert field in data, f"missing field: {field}"
     assert "depth_enabled" in data["performance_config"]
     assert "target_latency" in data["performance_config"]
+    assert "vlm_enabled" in data["performance_config"]
+    assert "vlm_timeout_seconds" in data["performance_config"]
 
 
 def test_patch_user_settings_performance_mode():
