@@ -91,6 +91,11 @@ def _contains_disallowed_content(text: str) -> bool:
     return any(p.search(text) is not None for p in _DISALLOWED_PATTERNS)
 
 
+def is_unsafe_query(text: str) -> bool:
+    """Return True when a query contains prompt-injection or harmful intent markers."""
+    return _contains_disallowed_content(text)
+
+
 def _sanitize_phrase(
     text: str,
     *,
