@@ -17,6 +17,7 @@ from visual_memory.tests.scripts.test_harness import (
     seed_item,
 )
 from visual_memory.api.routes.find import find_bp, build_narration, _normalize_room
+from visual_memory.api.routes.find import is_document_query
 from visual_memory.api.routes.ask import ask_bp
 import visual_memory.api.routes.ask as _ask_route
 from visual_memory.api.routes.item_ask import item_ask_bp
@@ -62,6 +63,13 @@ def test_normalize_room():
     for raw, expected in cases:
         got = _normalize_room(raw)
         assert got == expected, f"{raw!r} -> {got!r}, expected {expected!r}"
+
+
+def test_document_query_classifier_word_boundaries():
+    assert is_document_query("show me the receipt") is True
+    assert is_document_query("please read the text") is True
+    assert is_document_query("find my notebook") is False
+    assert is_document_query("where is my labelmaker") is False
 
 
 def test_find_exact_label():
@@ -248,6 +256,7 @@ for name, fn in [
     ("ask_mode:build_narration_full", test_build_narration_full),
     ("ask_mode:build_narration_minimal", test_build_narration_minimal),
     ("ask_mode:normalize_room", test_normalize_room),
+    ("ask_mode:document_query_classifier_word_boundaries", test_document_query_classifier_word_boundaries),
     ("ask_mode:find_exact_label", test_find_exact_label),
     ("ask_mode:find_room_query", test_find_room_query),
     ("ask_mode:find_room_normalized_param", test_find_room_normalized_param),
