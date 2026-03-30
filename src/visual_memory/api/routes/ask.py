@@ -6,12 +6,13 @@ over labels and OCR text, and returns a narration string ready to speak.
 """
 from flask import Blueprint, request, jsonify
 
-from visual_memory.api.pipelines import get_database, get_scan_pipeline, get_settings
+from visual_memory.api.pipelines import get_database, get_settings
 from visual_memory.api.routes.find import (
     _fuzzy_label_match,
     _ocr_content_match,
     _format_sighting,
     build_narration,
+    is_document_query,
 )
 from visual_memory.utils.ollama_utils import extract_search_term, is_unsafe_query
 from visual_memory.utils import get_logger
@@ -35,7 +36,9 @@ def ask():
           "ollama_used": true,
           "found": true,
           "matched_label": "wallet",
-          "matched_by": "fuzzy_label",     -- "exact" | "fuzzy_label" | "ocr"
+          "matched_by": "fuzzy_label",     -- "exact" | "fuzzy_label" | "ocr_semantic" | fallback variants
+          "document_query": false,
+          "strategies_tried": ["llm_extraction", "exact", "fuzzy_label"],
           "narration": "Your wallet is in the kitchen, to your left. Last seen 5 minutes ago.",
           "last_sighting": { ... },
           "sightings": [ ... ]
@@ -47,6 +50,7 @@ def ask():
           "search_term": "...",
           "ollama_used": bool,
           "found": false,
+          "strategies_tried": [ ... ],
           "narration": "I couldn't find anything matching that in your memory."
         }
     """
@@ -78,72 +82,114 @@ def ask():
     settings = get_settings()
     db = get_database()
 
-    # Step 1: exact label match on raw query (skip Ollama if already a known label)
-    rows = db.get_sightings(label=query, limit=1)
+    rows = None
     matched_label: str | None = None
     matched_by: str | None = None
     ollama_used = False
     search_term = query
+    strategies_tried: list[str] = []
 
-    if rows:
-        matched_label = query
-        matched_by = "exact"
-
-    # Step 2: Ollama query extraction (only when enabled and raw query didn't match)
-    if not rows and settings.llm_query_fallback_enabled:
+    # Step 1: LLM query extraction as preprocessing (when enabled)
+    if settings.llm_query_fallback_enabled:
         extracted = extract_search_term(query)
-        if extracted and extracted.lower() != query.lower():
-            ollama_used = True
+        if extracted:
             search_term = extracted
-        # re-check exact match on extracted term
-        if ollama_used:
-            rows = db.get_sightings(label=search_term, limit=1)
-            if rows:
-                matched_label = search_term
-                matched_by = "exact"
+            strategies_tried.append("llm_extraction")
+            if extracted.lower() != query.lower():
+                ollama_used = True
+
+    # Step 2: exact label match on preprocessed term
+    rows = db.get_sightings(label=search_term, limit=1)
+    strategies_tried.append("exact")
+    if rows:
+        matched_label = search_term
+        matched_by = "exact"
 
     _log.info({
         "event": "ask_search",
         "query": query,
         "search_term": search_term,
         "ollama_used": ollama_used,
+        "strategies_tried": strategies_tried,
     })
 
-    # Step 3: fuzzy label match
-    if not rows:
-        candidates = _fuzzy_label_match(search_term, settings.text_similarity_threshold)
-        if candidates:
-            matched_label = candidates[0]
-            matched_by = "fuzzy_label"
-            rows = db.get_sightings(label=matched_label, limit=1)
+    # Step 3: complexity classification and primary strategy
+    document_query = is_document_query(query) or is_document_query(search_term)
+    primary_strategy = "ocr_semantic" if document_query else "fuzzy_label"
+    fallback_strategy = "fuzzy_label" if document_query else "ocr_semantic"
 
-    # Step 4: OCR content match
     if not rows:
-        ocr_label = _ocr_content_match(search_term, settings.text_similarity_threshold)
-        if ocr_label:
-            matched_label = ocr_label
-            matched_by = "ocr"
-            rows = db.get_sightings(label=matched_label, limit=1)
+        if primary_strategy == "ocr_semantic":
+            ocr_label = _ocr_content_match(search_term, settings.text_similarity_threshold)
+            strategies_tried.append("ocr_semantic")
+            if ocr_label:
+                matched_label = ocr_label
+                matched_by = "ocr_semantic"
+                rows = db.get_sightings(label=matched_label, limit=1)
+        else:
+            candidates = _fuzzy_label_match(search_term, settings.text_similarity_threshold)
+            strategies_tried.append("fuzzy_label")
+            if candidates:
+                matched_label = candidates[0]
+                matched_by = "fuzzy_label"
+                rows = db.get_sightings(label=matched_label, limit=1)
+
+    # Step 4: cross-strategy fallback
+    if not rows:
+        if fallback_strategy == "ocr_semantic":
+            ocr_label = _ocr_content_match(search_term, settings.text_similarity_threshold)
+            strategies_tried.append("ocr_semantic")
+            if ocr_label:
+                matched_label = ocr_label
+                matched_by = "ocr_semantic_fallback"
+                rows = db.get_sightings(label=matched_label, limit=1)
+        else:
+            candidates = _fuzzy_label_match(search_term, settings.text_similarity_threshold)
+            strategies_tried.append("fuzzy_label")
+            if candidates:
+                matched_label = candidates[0]
+                matched_by = "fuzzy_label_fallback"
+                rows = db.get_sightings(label=matched_label, limit=1)
 
     if not rows or matched_label is None:
+        _log.info({
+            "event": "ask_search_miss",
+            "query": query,
+            "search_term": search_term,
+            "document_query": document_query,
+            "primary_strategy": primary_strategy,
+            "strategies_tried": strategies_tried,
+        })
         return jsonify({
             "query": query,
             "search_term": search_term,
             "ollama_used": ollama_used,
             "found": False,
+            "strategies_tried": strategies_tried,
             "narration": "I couldn't find anything matching that in your memory.",
         })
 
     sightings = [_format_sighting(r) for r in rows]
     narration = build_narration(matched_label, sightings[0])
+    _log.info({
+        "event": "ask_search_hit",
+        "query": query,
+        "search_term": search_term,
+        "document_query": document_query,
+        "matched_label": matched_label,
+        "matched_by": matched_by,
+        "strategies_tried": strategies_tried,
+    })
 
     return jsonify({
         "query": query,
         "search_term": search_term,
         "ollama_used": ollama_used,
         "found": True,
+        "document_query": document_query,
         "matched_label": matched_label,
         "matched_by": matched_by,
+        "strategies_tried": strategies_tried,
         "narration": narration,
         "last_sighting": sightings[0],
         "sightings": sightings,
