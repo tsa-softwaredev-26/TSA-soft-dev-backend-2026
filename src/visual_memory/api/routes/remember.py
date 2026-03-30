@@ -1,102 +1,44 @@
-import tempfile
+import time
 from pathlib import Path
+from uuid import uuid4
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint
 
 from visual_memory.api.pipelines import get_remember_pipeline, get_scan_pipeline
 
 remember_bp = Blueprint("remember", __name__)
+_UPLOADS_DIR = Path(__file__).resolve().parents[4] / "uploads"
 
 
-@remember_bp.post("/remember")
-def remember():
-    """
-    Teach the system a new object.
-
-    Single image:
-        multipart/form-data fields:
-            image  (file, required)
-            prompt (str,  required)
-
-    Multi-image (frontend sends several frames; backend picks the highest-
-    confidence detection and saves only that one):
-        multipart/form-data fields:
-            images[]  (file[], required - one or more files)
-            prompt    (str,    required)
-
-    Response (success):
-        {
-            "success": true,
-            "message": "...",
-            "images_tried": int,            # present when multi-image
-            "images_with_detection": int,   # present when multi-image
-            "result": {
-                "label": str,
-                "confidence": float,
-                "detection_quality": "low" | "medium" | "high",
-                "detection_hint": str,
-                "blur_score": float,
-                "is_blurry": bool,
-                "second_pass": bool,
-                "second_pass_prompt": str | null,
-                "box": [x1, y1, x2, y2],
-                "ocr_text": str,
-                "ocr_confidence": float
-            }
-        }
-    """
-    prompt = request.form.get("prompt", "").strip()
-    if not prompt:
-        return jsonify({"error": "missing field: prompt"}), 400
-
-    # Accept "images[]" (multi) or "image" (single, backward-compat)
-    multi_files = request.files.getlist("images[]")
-    if multi_files:
-        return _remember_multi(multi_files, prompt)
-
-    image_file = request.files.get("image")
-    if not image_file:
-        return jsonify({"error": "missing field: image or images[]"}), 400
-    return _remember_single(image_file, prompt)
-
-
-# helpers
-
-def _save_temp(image_file) -> Path:
+def _save_upload(image_file) -> Path:
     suffix = Path(image_file.filename).suffix if image_file.filename else ".jpg"
-    tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
-    image_file.save(tmp.name)
-    tmp.close()
-    return Path(tmp.name)
+    _UPLOADS_DIR.mkdir(exist_ok=True)
+    path = _UPLOADS_DIR / f"remember_{int(time.time() * 1000)}_{uuid4().hex}{suffix}"
+    image_file.save(str(path))
+    return path
 
 
-def _remember_single(image_file, prompt: str):
-    tmp_path = _save_temp(image_file)
+def _remember_single(image_file, prompt: str) -> tuple[dict, int]:
+    tmp_path = _save_upload(image_file)
     try:
         result = get_remember_pipeline().run(tmp_path, prompt)
     except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+        return {"error": str(exc)}, 500
     finally:
         tmp_path.unlink(missing_ok=True)
 
     if result.get("success"):
         get_scan_pipeline().reload_database()
+    return result, 200
 
-    return jsonify(result)
 
-
-def _remember_multi(image_files, prompt: str):
-    """
-    Save all images to temp files, run detect_score on each to find the best
-    candidate, then run the full pipeline only on the winner.
-    """
+def _remember_multi(image_files, prompt: str) -> tuple[dict, int]:
     pipeline = get_remember_pipeline()
     tmp_paths = []
     try:
         for f in image_files:
-            tmp_paths.append(_save_temp(f))
+            tmp_paths.append(_save_upload(f))
 
-        # Rank by detection score (lightweight, no embedding/DB write)
         try:
             scores = pipeline.detect_score_batch(tmp_paths, prompt)
         except Exception:
@@ -116,23 +58,21 @@ def _remember_multi(image_files, prompt: str):
                 scores.append(s)
 
         detected_count = sum(1 for s in scores if s["detected"])
+        best_idx = max(range(len(scores)), key=lambda i: scores[i]["score"]) if scores else -1
 
-        # Pick the image with the highest detection score
-        best_idx = max(range(len(scores)), key=lambda i: scores[i]["score"])
-
-        if not scores[best_idx]["detected"]:
-            return jsonify({
+        if best_idx < 0 or not scores[best_idx]["detected"]:
+            return {
                 "success": False,
                 "message": "No object detected in any of the provided images.",
                 "images_tried": len(tmp_paths),
                 "images_with_detection": 0,
                 "result": None,
-            })
+            }, 200
 
         try:
             result = pipeline.run(tmp_paths[best_idx], prompt)
         except Exception as exc:
-            return jsonify({"error": str(exc)}), 500
+            return {"error": str(exc)}, 500
 
     finally:
         for p in tmp_paths:
@@ -143,4 +83,15 @@ def _remember_multi(image_files, prompt: str):
         result["images_tried"] = len(tmp_paths)
         result["images_with_detection"] = detected_count
 
-    return jsonify(result)
+    return result, 200
+
+
+def process_remember_request(prompt: str, image_file=None, image_files=None) -> tuple[dict, int]:
+    normalized_prompt = (prompt or "").strip()
+    if not normalized_prompt:
+        return {"error": "missing field: prompt"}, 400
+    if image_files:
+        return _remember_multi(image_files, normalized_prompt)
+    if image_file is None:
+        return {"error": "missing field: image or images[]"}, 400
+    return _remember_single(image_file, normalized_prompt)
