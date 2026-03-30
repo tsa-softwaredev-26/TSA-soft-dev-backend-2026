@@ -1,19 +1,9 @@
 """
-OCR Batch Microbenchmark: Controlled A/B testing of batch vs. sequential modes.
+OCR microbenchmark for sequential OCR requests.
 
-Measures latency impact of batching on OCR service. Runs 20-30 iterations with
-fixed image set, capturing p50/p95 latencies and detailed timing breakdowns.
-
-Separates network overhead from OCR compute time by analyzing per-request timings
-logged by the OCR service.
-
-Run:
-    python -m visual_memory.tests.scripts.ocr_microbench [--iterations N] [--mode {batch,sequential,both}]
-
-Example:
-    python -m visual_memory.tests.scripts.ocr_microbench --iterations 25 --mode both
-
-Output: CSV file with per-iteration and aggregate stats + timing breakdown.
+Note:
+- OCR batch endpoint was removed after reproducible p95 regressions on server.
+- This benchmark remains for per-image OCR latency tracking.
 """
 
 from __future__ import annotations
@@ -51,6 +41,21 @@ _R = "\033[31m"
 _B = "\033[1m"
 _Y = "\033[33m"
 _X = "\033[0m"
+
+def _p50(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    return float(ordered[len(ordered) // 2])
+
+
+def _p95(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    idx = int(0.95 * (len(ordered) - 1))
+    return float(ordered[idx])
+
 
 def load_test_images(limit: int | None = None) -> list[tuple[str, Image.Image]]:
     """Load test images from text_demo."""
@@ -113,48 +118,12 @@ def benchmark_sequential(recognizer: TextRecognizer, images: list[Image.Image], 
         "per_image_times_ms": per_image_times,
         "iter_mean_ms": mean(iter_times),
         "iter_median_ms": median(iter_times),
-        "iter_p95_ms": sorted(iter_times)[int(0.95 * len(iter_times))],
+        "iter_p50_ms": _p50(iter_times),
+        "iter_p95_ms": _p95(iter_times),
         "per_image_mean_ms": mean(per_image_times) if per_image_times else 0,
         "per_image_median_ms": median(per_image_times) if per_image_times else 0,
-        "per_image_p95_ms": sorted(per_image_times)[int(0.95 * len(per_image_times))] if per_image_times else 0,
-    }
-
-def benchmark_batch(recognizer: TextRecognizer, images: list[Image.Image], iterations: int) -> dict:
-    """Benchmark batch OCR calls."""
-    print(f"{_B}Benchmarking Batch Mode ({iterations} iterations){_X}")
-    print(f"  Images per iteration: {len(images)}")
-    print()
-
-    iter_times = []
-    batch_times = []
-
-    for iter_num in range(iterations):
-        iter_start = time.time()
-        try:
-            batch_start = time.time()
-            _ = recognizer.recognize_batch(images)
-            batch_time = (time.time() - batch_start) * 1000
-            batch_times.append(batch_time)
-        except Exception as e:
-            print(f"  {_R}Iteration {iter_num+1}: Batch error - {str(e)[:60]}{_X}")
-            batch_time = 0
-
-        iter_time = (time.time() - iter_start) * 1000
-        iter_times.append(iter_time)
-        print(f"  Iteration {iter_num+1:2d}/{iterations}: {iter_time:7.1f}ms (batch: {batch_time:7.1f}ms)")
-
-    return {
-        "mode": "batch",
-        "iterations": iterations,
-        "images_per_iter": len(images),
-        "iter_times_ms": iter_times,
-        "batch_times_ms": batch_times,
-        "iter_mean_ms": mean(iter_times),
-        "iter_median_ms": median(iter_times),
-        "iter_p95_ms": sorted(iter_times)[int(0.95 * len(iter_times))] if iter_times else 0,
-        "batch_mean_ms": mean(batch_times) if batch_times else 0,
-        "batch_median_ms": median(batch_times) if batch_times else 0,
-        "batch_p95_ms": sorted(batch_times)[int(0.95 * len(batch_times))] if batch_times else 0,
+        "per_image_p50_ms": _p50(per_image_times),
+        "per_image_p95_ms": _p95(per_image_times),
     }
 
 def save_results(results: list[dict], run_id: str) -> tuple[str, str]:
@@ -179,13 +148,12 @@ def save_results(results: list[dict], run_id: str) -> tuple[str, str]:
             "images_per_iter",
             "iter_mean_ms",
             "iter_median_ms",
+            "iter_p50_ms",
             "iter_p95_ms",
             "per_image_mean_ms",
             "per_image_median_ms",
+            "per_image_p50_ms",
             "per_image_p95_ms",
-            "batch_mean_ms",
-            "batch_median_ms",
-            "batch_p95_ms",
             "per_item_ocr_mean_ms",
             "notes",
         ])
@@ -198,13 +166,12 @@ def save_results(results: list[dict], run_id: str) -> tuple[str, str]:
                 "images_per_iter": result.get("images_per_iter"),
                 "iter_mean_ms": f"{result.get('iter_mean_ms', 0):.1f}",
                 "iter_median_ms": f"{result.get('iter_median_ms', 0):.1f}",
+                "iter_p50_ms": f"{result.get('iter_p50_ms', 0):.1f}",
                 "iter_p95_ms": f"{result.get('iter_p95_ms', 0):.1f}",
                 "per_image_mean_ms": f"{result.get('per_image_mean_ms', 0):.1f}",
                 "per_image_median_ms": f"{result.get('per_image_median_ms', 0):.1f}",
+                "per_image_p50_ms": f"{result.get('per_image_p50_ms', 0):.1f}",
                 "per_image_p95_ms": f"{result.get('per_image_p95_ms', 0):.1f}",
-                "batch_mean_ms": f"{result.get('batch_mean_ms', 0):.1f}",
-                "batch_median_ms": f"{result.get('batch_median_ms', 0):.1f}",
-                "batch_p95_ms": f"{result.get('batch_p95_ms', 0):.1f}",
                 "per_item_ocr_mean_ms": f"{result.get('per_item_ocr_mean_ms', 0):.1f}",
                 "notes": result.get("notes", ""),
             }
@@ -225,6 +192,7 @@ def print_summary(results: list[dict]) -> None:
         print(f"  Iteration Latency (wall-clock):")
         print(f"    Mean:   {result.get('iter_mean_ms', 0):.1f} ms")
         print(f"    Median: {result.get('iter_median_ms', 0):.1f} ms")
+        print(f"    P50:    {result.get('iter_p50_ms', 0):.1f} ms")
         print(f"    P95:    {result.get('iter_p95_ms', 0):.1f} ms")
         print()
 
@@ -232,48 +200,19 @@ def print_summary(results: list[dict]) -> None:
             print(f"  Per-Image Latency:")
             print(f"    Mean:   {result.get('per_image_mean_ms', 0):.1f} ms")
             print(f"    Median: {result.get('per_image_median_ms', 0):.1f} ms")
+            print(f"    P50:    {result.get('per_image_p50_ms', 0):.1f} ms")
             print(f"    P95:    {result.get('per_image_p95_ms', 0):.1f} ms")
-        elif mode == "batch":
-            print(f"  Batch Call Latency:")
-            print(f"    Mean:   {result.get('batch_mean_ms', 0):.1f} ms")
-            print(f"    Median: {result.get('batch_median_ms', 0):.1f} ms")
-            print(f"    P95:    {result.get('batch_p95_ms', 0):.1f} ms")
         print()
-
-    if len(results) > 1:
-        seq = next((r for r in results if r.get("mode") == "sequential"), None)
-        batch = next((r for r in results if r.get("mode") == "batch"), None)
-        if seq and batch:
-            print(f"{_B}A/B Comparison{_X}")
-            seq_iter = seq.get("iter_mean_ms", 0)
-            batch_iter = batch.get("iter_mean_ms", 0)
-            pct_change = ((batch_iter - seq_iter) / seq_iter * 100) if seq_iter > 0 else 0
-            symbol = _G if pct_change < 0 else _R
-            print(f"  Iteration Mean: {symbol}Sequential {seq_iter:.1f}ms -> Batch {batch_iter:.1f}ms ({pct_change:+.1f}%){_X}")
-
-            seq_img = seq.get("per_image_mean_ms", 0)
-            batch_img = batch.get("batch_mean_ms", 0) / batch.get("images_per_iter", 1) if batch.get("images_per_iter", 1) > 0 else 0
-            if seq_img > 0 and batch_img > 0:
-                pct_change_img = ((batch_img - seq_img) / seq_img * 100)
-                symbol = _G if pct_change_img < 0 else _R
-                print(f"  Per-Image Mean: {symbol}Sequential {seq_img:.1f}ms -> Batch {batch_img:.1f}ms ({pct_change_img:+.1f}%){_X}")
-            print()
 
 def main():
     parser = argparse.ArgumentParser(
-        description="OCR Batch Microbenchmark - A/B testing of batch vs. sequential modes"
+        description="OCR microbenchmark - sequential OCR latency"
     )
     parser.add_argument(
         "--iterations",
         type=int,
         default=20,
         help="Number of iterations per mode (default: 20)"
-    )
-    parser.add_argument(
-        "--mode",
-        choices=["batch", "sequential", "both"],
-        default="both",
-        help="Which mode(s) to benchmark (default: both)"
     )
     parser.add_argument(
         "--run-id",
@@ -286,10 +225,10 @@ def main():
     if args.run_id is None:
         args.run_id = f"ocr-microbench-{time.strftime('%Y-%m-%d-%H%M%S')}"
 
-    print(f"\n{_B}OCR Batch Microbenchmark{_X}\n")
+    print(f"\n{_B}OCR Microbenchmark{_X}\n")
     print(f"Run ID: {args.run_id}")
     print(f"Iterations: {args.iterations}")
-    print(f"Mode(s): {args.mode}")
+    print(f"Mode(s): sequential")
     print()
 
     # Load test images
@@ -318,15 +257,9 @@ def main():
     results = []
     extracted_images = [img for _, img in images]
 
-    if args.mode in ["sequential", "both"]:
-        seq_result = benchmark_sequential(recognizer, extracted_images, args.iterations)
-        results.append(seq_result)
-        print()
-
-    if args.mode in ["batch", "both"]:
-        batch_result = benchmark_batch(recognizer, extracted_images, args.iterations)
-        results.append(batch_result)
-        print()
+    seq_result = benchmark_sequential(recognizer, extracted_images, args.iterations)
+    results.append(seq_result)
+    print()
 
     # Print summary
     print_summary(results)
@@ -341,49 +274,20 @@ def main():
         f.write("Test Setup:\n")
         f.write(f"- Images: {len(images)} from text_demo/ (receipt OCR test images)\n")
         f.write(f"- Iterations: {args.iterations} per mode\n")
-        f.write(f"- Modes tested: {args.mode}\n")
+        f.write("- Modes tested: sequential\n")
         f.write(f"- Run time: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}\n\n")
+        f.write("Note: OCR batch endpoint was removed after repeatable server regressions.\n\n")
 
         seq = next((r for r in results if r.get("mode") == "sequential"), None)
-        batch = next((r for r in results if r.get("mode") == "batch"), None)
-
         if seq:
             f.write("Sequential Mode Results:\n")
             f.write(f"- Iterations: {seq.get('iterations')}\n")
             f.write(f"- Per-image mean latency: {seq.get('per_image_mean_ms', 0):.1f}ms\n")
             f.write(f"- Per-image p95 latency: {seq.get('per_image_p95_ms', 0):.1f}ms\n")
+            f.write(f"- Per-image p50 latency: {seq.get('per_image_p50_ms', 0):.1f}ms\n")
             f.write(f"- Total iteration mean: {seq.get('iter_mean_ms', 0):.1f}ms ({len(images)} images)\n\n")
 
-        if batch:
-            f.write("Batch Mode Results:\n")
-            f.write(f"- Iterations: {batch.get('iterations')}\n")
-            f.write(f"- Batch call mean latency: {batch.get('batch_mean_ms', 0):.1f}ms\n")
-            f.write(f"- Batch call p95 latency: {batch.get('batch_p95_ms', 0):.1f}ms\n")
-            f.write(f"- Per-item average: {batch.get('batch_mean_ms', 0) / len(images):.1f}ms\n")
-            f.write(f"- Total iteration mean: {batch.get('iter_mean_ms', 0):.1f}ms\n\n")
-
-        if seq and batch:
-            f.write("A/B Analysis:\n")
-            seq_iter = seq.get("iter_mean_ms", 0)
-            batch_iter = batch.get("iter_mean_ms", 0)
-            pct_change = ((batch_iter - seq_iter) / seq_iter * 100) if seq_iter > 0 else 0
-            f.write(f"- Iteration time change: {batch_iter:.1f}ms vs {seq_iter:.1f}ms ({pct_change:+.1f}%)\n")
-
-            seq_per_item = seq.get("per_image_mean_ms", 0)
-            batch_per_item = batch.get("batch_mean_ms", 0) / len(images) if len(images) > 0 else 0
-            pct_per_item = ((batch_per_item - seq_per_item) / seq_per_item * 100) if seq_per_item > 0 else 0
-            f.write(f"- Per-item time change: {batch_per_item:.1f}ms vs {seq_per_item:.1f}ms ({pct_per_item:+.1f}%)\n\n")
-
-            if pct_change < 0:
-                f.write(f"Result: BATCH IS FASTER by {abs(pct_change):.1f}%\n")
-            elif pct_change > 0:
-                f.write(f"Result: BATCH IS SLOWER by {pct_change:.1f}%\n")
-            else:
-                f.write("Result: NO SIGNIFICANT DIFFERENCE\n")
-            f.write(f"Single-run variance is expected. See p95 latencies and run multiple times.\n\n")
-
         f.write("Notes:\n")
-        f.write("- Batch mode processes images in a single HTTP multipart request\n")
         f.write("- Sequential mode makes one HTTP request per image\n")
         f.write("- Per-request OCR timing logged by OCR service (separated network from compute)\n")
         f.write("- High variance expected on single run; recommend 3-5 repeated benchmarks\n")
