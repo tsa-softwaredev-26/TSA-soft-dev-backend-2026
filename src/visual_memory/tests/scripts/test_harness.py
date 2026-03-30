@@ -182,6 +182,36 @@ class StubScanPipeline:
         return {"matches": [], "scan_id": scan_id, "is_dark": False, "darkness_level": 10.0}
 
 
+class StubSpeechRecognizer:
+    def __init__(self):
+        self._text = "where did i leave my wallet"
+        self._language = "en"
+        self._confidence = 1.0
+        self._raise: Exception | None = None
+
+    def set_result(self, text: str, language: str = "en", confidence: float = 1.0) -> None:
+        self._text = text
+        self._language = language
+        self._confidence = confidence
+
+    def set_error(self, exc: Exception | None) -> None:
+        self._raise = exc
+
+    def transcribe(self, audio, sample_rate: int = 16000, context: str | None = None) -> dict:
+        if self._raise is not None:
+            raise self._raise
+        return {
+            "text": self._text,
+            "language": self._language,
+            "confidence": self._confidence,
+        }
+
+    def build_context_prompt(self, db_store) -> str:
+        labels = db_store.get_known_item_labels(limit=8)
+        rooms = db_store.get_recent_room_names(limit=8)
+        return " ".join(labels + rooms + ["where", "find", "last", "seen"])[:256]
+
+
 class StubRememberPipeline:
     """Minimal RememberPipeline stub for API integration tests."""
 

@@ -19,6 +19,7 @@ class ModelRegistry:
         self._depth_estimator = None
         self._gdino_detector  = None
         self._yoloe_detector  = None
+        self._whisper_recognizer = None
 
     def _log_vram_layout(
         self,
@@ -76,6 +77,16 @@ class ModelRegistry:
             from visual_memory.engine.object_detection import YoloeDetector
             self._yoloe_detector = YoloeDetector()
         return self._yoloe_detector
+
+    @property
+    def whisper_recognizer(self):
+        if self._whisper_recognizer is None:
+            from visual_memory.engine.speech_recognition import WhisperRecognizer
+            self._whisper_recognizer = WhisperRecognizer()
+        return self._whisper_recognizer
+
+    def get_whisper_recognizer(self):
+        return self.whisper_recognizer
 
     def prepare_for_remember(self) -> None:
         """Offload scan-only models to CPU; ensure remember models are on GPU.
@@ -144,6 +155,75 @@ class ModelRegistry:
         self._log_vram_layout(
             mode="scan",
             action=action,
+            offloaded=offloaded,
+            promoted=promoted,
+            duration_ms=duration_ms,
+        )
+
+    def prepare_for_voice(self) -> None:
+        """Offload vision models; keep Whisper on GPU when voice mode starts."""
+        import torch
+        if not _settings.save_vram:
+            self._log_vram_layout(mode="voice", action="skipped_save_vram_off")
+            return
+        if _settings.whisper_keep_warm:
+            self._log_vram_layout(mode="voice", action="skipped_keep_warm")
+            return
+        if not torch.cuda.is_available():
+            self._log_vram_layout(mode="voice", action="skipped_no_cuda")
+            return
+
+        t0 = time.monotonic()
+        offloaded = []
+        promoted = []
+        if self._gdino_detector is not None:
+            self._gdino_detector.to_cpu()
+            offloaded.append("gdino")
+        if self._yoloe_detector is not None:
+            self._yoloe_detector.to_cpu()
+            offloaded.append("yoloe")
+        if self._depth_estimator is not None:
+            self._depth_estimator.to_cpu()
+            offloaded.append("depth")
+        torch.cuda.empty_cache()
+        if self._whisper_recognizer is not None:
+            self._whisper_recognizer.to_gpu()
+            promoted.append("whisper")
+
+        duration_ms = round((time.monotonic() - t0) * 1000)
+        action = "noop" if not offloaded and not promoted else "applied"
+        self._log_vram_layout(
+            mode="voice",
+            action=action,
+            offloaded=offloaded,
+            promoted=promoted,
+            duration_ms=duration_ms,
+        )
+
+    def prepare_after_voice(self) -> None:
+        """Restore scan-mode defaults after voice transcription."""
+        import torch
+        if not _settings.save_vram or _settings.whisper_keep_warm or not torch.cuda.is_available():
+            return
+
+        t0 = time.monotonic()
+        offloaded = []
+        promoted = []
+        if self._whisper_recognizer is not None:
+            self._whisper_recognizer.to_cpu()
+            offloaded.append("whisper")
+        torch.cuda.empty_cache()
+        if self._yoloe_detector is not None:
+            self._yoloe_detector.to_gpu()
+            promoted.append("yoloe")
+        if self._depth_estimator is not None and _settings.enable_depth:
+            self._depth_estimator.to_gpu()
+            promoted.append("depth")
+
+        duration_ms = round((time.monotonic() - t0) * 1000)
+        self._log_vram_layout(
+            mode="after_voice",
+            action="applied",
             offloaded=offloaded,
             promoted=promoted,
             duration_ms=duration_ms,

@@ -446,6 +446,29 @@ class DatabaseStore:
         ).fetchall()
         return [r[0] for r in rows]
 
+    def get_known_item_labels(self, limit: int = 64) -> list[str]:
+        """Return known labels from items and sightings, newest first."""
+        rows = self._conn.execute(
+            "SELECT label FROM ("
+            "  SELECT label, timestamp AS ts FROM items "
+            "  UNION ALL "
+            "  SELECT label, timestamp AS ts FROM sightings"
+            ") "
+            "GROUP BY label ORDER BY MAX(ts) DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [str(r[0]) for r in rows if r and r[0]]
+
+    def get_recent_room_names(self, limit: int = 24) -> list[str]:
+        """Return recently used room names from sightings, newest first."""
+        rows = self._conn.execute(
+            "SELECT room_name FROM sightings "
+            "WHERE room_name IS NOT NULL AND room_name != '' "
+            "GROUP BY room_name ORDER BY MAX(timestamp) DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [str(r[0]) for r in rows if r and r[0]]
+
     def count_sightings(self) -> int:
         row = self._conn.execute("SELECT COUNT(*) FROM sightings").fetchone()
         return row[0] if row else 0

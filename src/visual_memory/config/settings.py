@@ -111,6 +111,16 @@ class Settings:
     # giving up. Lower values keep /ask latency predictable when Ollama is slow.
     ollama_timeout_seconds: float = field(default_factory=lambda: float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "5.0")))
 
+    # Whisper speech recognition (voice input)
+    whisper_model: str = "openai/whisper-large-v3-turbo"
+    whisper_sample_rate: int = 16000
+    whisper_language: str = "en"
+    whisper_context_enabled: bool = True
+    whisper_keep_warm: bool = field(default_factory=lambda: os.environ.get("WHISPER_KEEP_WARM", "0") != "0")
+    whisper_context_max_labels: int = 64
+    whisper_context_max_rooms: int = 24
+    whisper_context_max_chars: int = 512
+
     # Database
     db_path: str = "data/memory.db"
 
