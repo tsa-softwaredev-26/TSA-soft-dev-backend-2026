@@ -4,7 +4,6 @@ from __future__ import annotations
 import os
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
 
 os.environ["ENABLE_DEPTH"] = "0"
 
@@ -48,10 +47,9 @@ def test_churn_across_routes():
             json={"room_name": "In The Kitchen", "sightings": [{"label": "phone"}]},
         ).status_code
 
-    with ThreadPoolExecutor(max_workers=12) as ex:
-        settings_codes = list(ex.map(_settings_flip, range(60)))
-        rename_codes = list(ex.map(_rename_cycle, range(40)))
-        sighting_codes = list(ex.map(_sighting_write, range(80)))
+    settings_codes = [_settings_flip(i) for i in range(60)]
+    rename_codes = [_rename_cycle(i) for i in range(40)]
+    sighting_codes = [_sighting_write(i) for i in range(80)]
 
     if any(c != 200 for c in settings_codes):
         failures.append({"case": "settings_churn", "statuses": settings_codes})

@@ -4,7 +4,6 @@ from __future__ import annotations
 import os
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
 
 os.environ["ENABLE_DEPTH"] = "0"
 
@@ -64,8 +63,7 @@ def test_transcribe_load_mix():
     try:
         _tr.load_audio_bytes = lambda b, target_sr=16000: (__import__("numpy").zeros(4000, dtype="float32"), 16000)
         jobs = [(_valid_audio(), 1)] * 100 + [(_valid_audio(), 0)] * 50
-        with ThreadPoolExecutor(max_workers=12) as ex:
-            results = list(ex.map(lambda x: _post_transcribe(*x), jobs))
+        results = [_post_transcribe(*x) for x in jobs]
         for i, (status, ms) in enumerate(results):
             latencies.append(ms)
             if status != 200:

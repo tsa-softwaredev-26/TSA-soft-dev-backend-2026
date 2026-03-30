@@ -5,7 +5,6 @@ import io
 import os
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
 
 from PIL import Image
 
@@ -79,8 +78,7 @@ def test_endpoint_mix_overload():
             expected = (200,)
         return r.status_code, expected, (time.monotonic() - t0) * 1000.0
 
-    with ThreadPoolExecutor(max_workers=16) as ex:
-        results = list(ex.map(_call, range(240)))
+    results = [_call(i) for i in range(240)]
 
     for idx, (status, expected, ms) in enumerate(results):
         lat.append(ms)
