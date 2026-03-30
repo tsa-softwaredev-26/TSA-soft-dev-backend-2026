@@ -7,9 +7,11 @@ import os
 import time
 from functools import lru_cache
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 import numpy as np
 from PIL import Image
+
+_API_KEY = os.environ.get("API_KEY", "").strip()
 
 
 def _bool_env(name: str, default: str = "false") -> bool:
@@ -24,6 +26,21 @@ def _decode_image(data: bytes) -> Image.Image | None:
     except OSError:
         return None
 
+
+def _resize_for_ocr(image: Image.Image) -> Image.Image:
+    max_side = int(os.environ.get("OCR_MAX_SIDE", "2000"))
+    width, height = image.size
+    largest_side = max(width, height)
+    if largest_side <= max_side:
+        return image
+    scale = max_side / float(largest_side)
+    new_size = (
+        max(1, int(round(width * scale))),
+        max(1, int(round(height * scale))),
+    )
+    return image.resize(new_size, Image.Resampling.LANCZOS)
+
+
 @lru_cache(maxsize=1)
 def _get_ocr_engine():
     try:
@@ -36,14 +53,26 @@ def _get_ocr_engine():
 
     lang = os.environ.get("OCR_LANG", "en")
     use_angle_cls = _bool_env("OCR_USE_ANGLE_CLS")
-    return PaddleOCR(use_angle_cls=use_angle_cls, lang=lang)
+    enable_mkldnn = _bool_env("OCR_ENABLE_MKLDNN", "false")
+    return PaddleOCR(
+        lang=lang,
+        use_doc_orientation_classify=use_angle_cls,
+        use_doc_unwarping=False,
+        use_textline_orientation=False,
+        enable_mkldnn=enable_mkldnn,
+    )
 
 
 def _extract_text(image: Image.Image) -> tuple[dict, float]:
     """Extract text from image. Returns (result_dict, elapsed_ms)."""
     start_time = time.time()
     engine = _get_ocr_engine()
-    result = engine.ocr(np.array(image.convert("RGB")), cls=False)
+    rgb = np.array(image.convert("RGB"))
+    try:
+        result = engine.ocr(rgb, cls=False)
+    except TypeError:
+        # PaddleOCR v3 removed the cls kwarg on predict/ocr path.
+        result = engine.ocr(rgb)
     lines = result[0] if result else []
     min_conf = float(os.environ.get("OCR_MIN_CONFIDENCE", "0.3"))
 
@@ -85,7 +114,13 @@ def health() -> dict:
 
 
 @app.post("/ocr")
-async def run_ocr(image: UploadFile = File(...)) -> dict:
+async def run_ocr(
+    image: UploadFile = File(...),
+    api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> dict:
+    if _API_KEY and api_key != _API_KEY:
+        raise HTTPException(status_code=401, detail="unauthorized")
+
     if not image.filename:
         raise HTTPException(status_code=400, detail="missing image")
 
@@ -103,11 +138,12 @@ async def run_ocr(image: UploadFile = File(...)) -> dict:
     decode_ms = (time.time() - decode_t0) * 1000
 
     try:
-        result, ocr_time_ms = _extract_text(pil_image)
+        resized_image = _resize_for_ocr(pil_image)
+        result, ocr_time_ms = _extract_text(resized_image)
         total_ms = decode_ms + ocr_time_ms
         result["_ocr_time_ms"] = ocr_time_ms
         result["_decode_ms"] = decode_ms
         result["_total_ms"] = total_ms
         return result
-    except RuntimeError as exc:
+    except (RuntimeError, NotImplementedError) as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
