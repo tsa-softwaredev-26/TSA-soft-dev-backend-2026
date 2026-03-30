@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+from collections import defaultdict, deque
 import io
 import logging
 import os
 import time
 from functools import lru_cache
 
-from fastapi import FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 import numpy as np
 from PIL import Image
@@ -18,7 +19,11 @@ _API_KEY = os.environ.get("API_KEY", "").strip()
 _OCR_MAX_CONCURRENCY = max(1, int(os.environ.get("OCR_MAX_CONCURRENCY", "1")))
 _OCR_REQUEST_TIMEOUT_SECONDS = float(os.environ.get("OCR_REQUEST_TIMEOUT_SECONDS", "40"))
 _OCR_THROTTLE_RETRY_AFTER_SECONDS = max(1, int(os.environ.get("OCR_THROTTLE_RETRY_AFTER_SECONDS", "2")))
+_OCR_RATE_LIMIT_PER_MIN = max(0, int(os.environ.get("OCR_RATE_LIMIT_PER_MIN", "120")))
 _OCR_SEMAPHORE = asyncio.Semaphore(_OCR_MAX_CONCURRENCY)
+_OCR_RATE_LOCK = asyncio.Lock()
+_OCR_RATE_WINDOW_SECONDS = 60.0
+_OCR_RATE_BUCKETS: dict[str, deque[float]] = defaultdict(deque)
 _LOG = logging.getLogger("spaitra.ocr")
 
 
@@ -148,6 +153,7 @@ def health() -> dict:
 
 @app.post("/ocr")
 async def run_ocr(
+    request: Request,
     image: UploadFile = File(...),
     api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> dict:
@@ -156,6 +162,39 @@ async def run_ocr(
 
     if not image.filename:
         raise HTTPException(status_code=400, detail="missing image")
+
+    client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    if not client_ip and request.client is not None:
+        client_ip = request.client.host or "unknown"
+    if not client_ip:
+        client_ip = "unknown"
+
+    if _OCR_RATE_LIMIT_PER_MIN > 0:
+        now = time.monotonic()
+        async with _OCR_RATE_LOCK:
+            bucket = _OCR_RATE_BUCKETS[client_ip]
+            cutoff = now - _OCR_RATE_WINDOW_SECONDS
+            while bucket and bucket[0] < cutoff:
+                bucket.popleft()
+            if len(bucket) >= _OCR_RATE_LIMIT_PER_MIN:
+                retry_after = max(1, int(bucket[0] + _OCR_RATE_WINDOW_SECONDS - now))
+                _LOG.warning(
+                    "ocr_rate_limited client_ip=%s limit_per_min=%s retry_after_s=%s",
+                    client_ip,
+                    _OCR_RATE_LIMIT_PER_MIN,
+                    retry_after,
+                )
+                return JSONResponse(
+                    status_code=429,
+                    headers={"Retry-After": str(retry_after)},
+                    content={
+                        "error": "rate_limited",
+                        "message": "OCR request rate is limited. Retry later.",
+                        "retry_after_seconds": retry_after,
+                        "limit_per_minute": _OCR_RATE_LIMIT_PER_MIN,
+                    },
+                )
+            bucket.append(now)
 
     acquired = False
     try:
