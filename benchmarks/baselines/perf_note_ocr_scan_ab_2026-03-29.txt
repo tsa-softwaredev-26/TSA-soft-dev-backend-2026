@@ -1,0 +1,12 @@
+OCR scan latency A/B - ocr-scan-ab-2026-03-29
+
+Rule:
+- Keep batch mode only if batch p95 improves by >=10% over sequential.
+
+Results:
+- Iterations per mode: 30
+- Sequential p50/p95: 4009.4ms / 4605.2ms
+- Batch p50/p95: 6881.6ms / 7413.1ms
+- Batch p95 improvement: -61.0%
+- Winner: sequential
+- Recommended OCR_BATCH_CONCURRENCY: 0
