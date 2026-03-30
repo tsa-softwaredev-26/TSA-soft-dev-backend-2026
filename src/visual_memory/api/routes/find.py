@@ -9,15 +9,9 @@ from visual_memory.api.pipelines import get_database
 find_bp = Blueprint("find", __name__)
 
 _ROOM_PREFIX = re.compile(r"^(in (the|my) |the |my )", re.IGNORECASE)
-_DOCUMENT_QUERY_KEYWORDS = (
-    "receipt",
-    "paper",
-    "document",
-    "text",
-    "says",
-    "written",
-    "note",
-    "label",
+_DOCUMENT_QUERY_PATTERN = re.compile(
+    r"\b(?:receipt|paper|document|text|says|written|note|label)\b",
+    re.IGNORECASE,
 )
 
 
@@ -26,8 +20,7 @@ def _normalize_room(name: str) -> str:
 
 
 def is_document_query(query: str) -> bool:
-    normalized = query.lower()
-    return any(keyword in normalized for keyword in _DOCUMENT_QUERY_KEYWORDS)
+    return bool(_DOCUMENT_QUERY_PATTERN.search(query))
 
 
 def _format_sighting(row: dict) -> dict:
