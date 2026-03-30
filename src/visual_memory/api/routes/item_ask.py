@@ -9,13 +9,16 @@ Supported actions:
     export_ocr - return OCR text for copy/export
     rename     - rename the item (auto-replace, no confirmation required)
     find       - last known location of this item
-    describe   - visual description (deferred: requires VLM)
+    describe   - visual description with fallback cascade
 """
 import re
+import time
 from flask import Blueprint, request, jsonify
 
-from visual_memory.api.pipelines import get_database, get_scan_pipeline, get_settings
+from visual_memory.api.pipelines import get_database, get_scan_pipeline, get_settings, get_user_settings
 from visual_memory.api.routes.find import _format_sighting, build_narration
+from visual_memory.engine.visual_attributes import describe_from_attributes
+from visual_memory.engine.vlm import get_vlm_pipeline
 from visual_memory.utils.ollama_utils import (
     extract_item_intent,
     extract_rename_target,
@@ -53,6 +56,16 @@ def _extract_rename_target_keyword(query: str) -> str | None:
     if match:
         return match.group(1).strip().strip("\"'")
     return None
+
+
+def _minimal_description(label: str, ocr_text: str) -> str:
+    text = (ocr_text or "").strip()
+    if text:
+        clipped = text[:120]
+        if len(text) > 120:
+            clipped = f"{clipped}..."
+        return f"This is your {label}. I can read text on it: {clipped}"
+    return f"This is your {label}."
 
 
 @item_ask_bp.post("/item/ask")
@@ -102,8 +115,9 @@ def item_ask():
     describe:
         {
           "action": "describe",
-          "narration": "Visual description is not available yet.",
-          "deferred": true
+          "narration": "...",
+          "method": "vlm" | "attributes" | "minimal",
+          "latency_ms": int
         }
     """
     data = request.get_json(silent=True) or {}
@@ -215,12 +229,66 @@ def item_ask():
             "last_sighting": sighting,
         })
 
-    # describe (deferred)
+    # describe (3-tier fallback: VLM -> attributes -> minimal)
     if intent == "describe":
+        t0 = time.monotonic()
+        rows = db.get_items_metadata(label=label)
+        if not rows:
+            return jsonify({
+                "action": "describe",
+                "label": label,
+                "narration": f"I do not have {label} in memory yet.",
+                "method": "minimal",
+                "latency_ms": round((time.monotonic() - t0) * 1000),
+            }), 404
+
+        item = rows[0]
+        image_path = (item.get("image_path") or "").strip()
+        attributes = item.get("visual_attributes") or {}
+        ocr_text = item.get("ocr_text") or ""
+
+        perf_cfg = get_user_settings().get_performance_config()
+        vlm_enabled = bool(perf_cfg.vlm_enabled)
+        vlm_timeout = float(perf_cfg.vlm_timeout_seconds)
+
+        if vlm_enabled and image_path:
+            try:
+                narration = get_vlm_pipeline().describe(image_path, timeout=vlm_timeout)
+                return jsonify({
+                    "action": "describe",
+                    "label": label,
+                    "narration": narration,
+                    "method": "vlm",
+                    "latency_ms": round((time.monotonic() - t0) * 1000),
+                })
+            except TimeoutError:
+                _log.warning({
+                    "event": "item_ask_describe_vlm_timeout",
+                    "label": label,
+                    "timeout": vlm_timeout,
+                })
+            except Exception as exc:
+                _log.warning({
+                    "event": "item_ask_describe_vlm_error",
+                    "label": label,
+                    "error": str(exc),
+                })
+
+        if attributes:
+            return jsonify({
+                "action": "describe",
+                "label": label,
+                "narration": describe_from_attributes(label, attributes),
+                "method": "attributes",
+                "latency_ms": round((time.monotonic() - t0) * 1000),
+            })
+
         return jsonify({
             "action": "describe",
-            "narration": "Visual description is not available yet.",
-            "deferred": True,
+            "label": label,
+            "narration": _minimal_description(label, ocr_text),
+            "method": "minimal",
+            "latency_ms": round((time.monotonic() - t0) * 1000),
         })
 
     # Unreachable but defensive
