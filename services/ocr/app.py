@@ -16,6 +16,14 @@ def _bool_env(name: str, default: str = "false") -> bool:
     return os.environ.get(name, default).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _decode_image(data: bytes) -> Image.Image | None:
+    if not data:
+        return None
+    try:
+        return Image.open(io.BytesIO(data))
+    except OSError:
+        return None
+
 @lru_cache(maxsize=1)
 def _get_ocr_engine():
     try:
@@ -85,54 +93,21 @@ async def run_ocr(image: UploadFile = File(...)) -> dict:
     if not data:
         raise HTTPException(status_code=400, detail="empty image")
 
+    decode_t0 = time.time()
     try:
-        pil_image = Image.open(io.BytesIO(data))
+        pil_image = _decode_image(data)
     except OSError as exc:
         raise HTTPException(status_code=400, detail="invalid image") from exc
+    if pil_image is None:
+        raise HTTPException(status_code=400, detail="invalid image")
+    decode_ms = (time.time() - decode_t0) * 1000
 
     try:
         result, ocr_time_ms = _extract_text(pil_image)
+        total_ms = decode_ms + ocr_time_ms
         result["_ocr_time_ms"] = ocr_time_ms
+        result["_decode_ms"] = decode_ms
+        result["_total_ms"] = total_ms
         return result
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-
-@app.post("/ocr/batch")
-async def run_ocr_batch(images: list[UploadFile] = File(...)) -> dict:
-    if not images:
-        raise HTTPException(status_code=400, detail="missing images")
-
-    batch_start_time = time.time()
-    out = []
-    ocr_times = []
-
-    for image in images:
-        data = await image.read()
-        if not data:
-            out.append({"text": "", "confidence": 0.0, "segments": []})
-            ocr_times.append(0.0)
-            continue
-        try:
-            pil_image = Image.open(io.BytesIO(data))
-        except OSError:
-            out.append({"text": "", "confidence": 0.0, "segments": []})
-            ocr_times.append(0.0)
-            continue
-        try:
-            result, ocr_time_ms = _extract_text(pil_image)
-            result["_ocr_time_ms"] = ocr_time_ms
-            out.append(result)
-            ocr_times.append(ocr_time_ms)
-        except RuntimeError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    batch_total_ms = (time.time() - batch_start_time) * 1000
-    per_item_avg_ms = sum(ocr_times) / len(ocr_times) if ocr_times else 0.0
-
-    return {
-        "results": out,
-        "_batch_total_ms": batch_total_ms,
-        "_per_item_avg_ms": per_item_avg_ms,
-        "_batch_size": len(images),
-    }
