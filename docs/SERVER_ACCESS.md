@@ -123,6 +123,11 @@ KEY="<your-api-key>"
 BASE="https://nre5bjw44wddpu2zjg4fe4iehq.srv.us"   # or http://100.114.39.23:5000 on VPN
 ```
 
+OCR overload responses are intentional and should be surfaced to callers:
+- `429` + `error: "server_busy"` when OCR concurrency is saturated
+- `429` + `error: "rate_limited"` when per-client OCR request rate is exceeded
+- both include `Retry-After` guidance
+
 ---
 
 ## 5. Common API calls

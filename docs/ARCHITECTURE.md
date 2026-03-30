@@ -647,11 +647,14 @@ Single worker is required - model state is process-local.
 
 **Environment variables:**
 - `API_KEY=<secret>` - enforce `X-API-Key` header on all routes except `/health` (required for production, minimum length enforced)
-- `DB_ENCRYPTION_KEY=<secret>` - enable SQLCipher encryption for `data/memory.db` when SQLCipher bindings are available. On Python 3.13 this is currently unavailable; leave unset there.
+- `DB_ENCRYPTION_KEY=<secret>` - enable SQLCipher encryption for `data/memory.db` (current production runtime is Python 3.12 with SQLCipher enabled)
 - `ENABLE_DEPTH=0` - skip Depth Pro (~2GB VRAM savings)
 - `ENABLE_OCR=0` - skip OCR requests
 - `OCR_SERVICE_URL=http://127.0.0.1:8001/ocr` - external OCR endpoint
 - `OCR_HEALTH_URL=http://127.0.0.1:8001/health` - OCR service health check URL (derived from OCR_SERVICE_URL if unset)
+- `OCR_MAX_CONCURRENCY=1` - OCR request capacity guardrail (over-capacity returns 429 `server_busy`)
+- `OCR_RATE_LIMIT_PER_MIN=120` - per-client OCR rate limit (over-limit returns 429 `rate_limited`)
+- `OCR_THROTTLE_RETRY_AFTER_SECONDS=2` - retry guidance for throttled OCR calls
 - `ENABLE_LEARNING=0` - disable projection head application in scan (also patchable at runtime via PATCH /settings)
 - `api_host` / `api_port` controlled via `settings.py` (defaults: 127.0.0.1:5000)
 
