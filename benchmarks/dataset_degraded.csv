@@ -1,0 +1,14 @@
+# Degraded dataset variants: blur, compression, and noise degradations
+# Each row represents a degradation applied to baseline images
+# degradation_type: blur (Gaussian blur kernel), compression (JPEG quality), noise (Gaussian std)
+# degradation_param: parameter value for the degradation type
+# 
+# Run: python -m visual_memory.benchmarks.create_degraded to generate full variants
+# from benchmarks/dataset.csv and benchmarks/images/
+#
+image,label,distance_ft,dino_prompt,degradation_type,degradation_param
+# Placeholder: actual degraded images created by create_degraded.py
+# Format example:
+# wallet_zipper_1ft_bright_clean_blur1.jpg,wallet_zipper,1.0,wallet,blur,1
+# wallet_zipper_1ft_bright_clean_comp70.jpg,wallet_zipper,1.0,wallet,compression,70
+# wallet_zipper_1ft_bright_clean_noise0.010.jpg,wallet_zipper,1.0,wallet,noise,0.010
