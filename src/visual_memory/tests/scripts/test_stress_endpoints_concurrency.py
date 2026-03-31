@@ -1,4 +1,4 @@
-"""Cross-endpoint overload stress test."""
+"""Cross-endpoint overload stress test with /voice orchestration."""
 from __future__ import annotations
 
 import io
@@ -10,17 +10,13 @@ from PIL import Image
 
 os.environ["ENABLE_DEPTH"] = "0"
 
-from visual_memory.api.routes.ask import ask_bp
 from visual_memory.api.routes.feedback import feedback_bp
 from visual_memory.api.routes.find import find_bp
-from visual_memory.api.routes.item_ask import item_ask_bp
 from visual_memory.api.routes.items import items_bp
-from visual_memory.api.routes.remember import remember_bp
 from visual_memory.api.routes.retrain import retrain_bp
-from visual_memory.api.routes.scan import scan_bp
 from visual_memory.api.routes.settings_route import settings_bp
 from visual_memory.api.routes.sightings import sightings_bp
-from visual_memory.api.routes.transcribe import transcribe_bp
+from visual_memory.api.routes.voice import voice_bp
 from visual_memory.tests.scripts.stress_artifacts import (
     append_recommendations,
     percentile_ms,
@@ -38,7 +34,7 @@ def _seed(db):
 
 
 client, db, cleanup = make_test_app(
-    [remember_bp, scan_bp, ask_bp, find_bp, item_ask_bp, feedback_bp, retrain_bp, settings_bp, items_bp, sightings_bp, transcribe_bp],
+    [voice_bp, find_bp, feedback_bp, retrain_bp, settings_bp, items_bp, sightings_bp],
     seed_fn=_seed,
 )
 
@@ -59,7 +55,7 @@ def test_endpoint_mix_overload():
         t0 = time.monotonic()
         lane = i % 6
         if lane == 0:
-            r = client.post("/ask", json={"query": "wallet"})
+            r = client.post("/voice", json={"request_type": "ask", "text": "wallet"})
             expected = (200, 400)
         elif lane == 1:
             r = client.get("/find?label=wallet")
@@ -71,10 +67,17 @@ def test_endpoint_mix_overload():
             r = client.post("/sightings", json={"room_name": "kitchen", "sightings": [{"label": "wallet"}]})
             expected = (200,)
         elif lane == 4:
-            r = client.post("/scan", data={"image": (io.BytesIO(img), "f.jpg")}, content_type="multipart/form-data")
+            r = client.post(
+                "/voice",
+                data={"request_type": "scan", "image": (io.BytesIO(img), "f.jpg")},
+                content_type="multipart/form-data",
+            )
             expected = (200,)
         else:
-            r = client.post("/item/ask", json={"scan_id": "s", "label": "wallet", "query": "read this"})
+            r = client.post(
+                "/voice",
+                json={"request_type": "item_ask", "scan_id": "s", "label": "wallet", "text": "read this"},
+            )
             expected = (200,)
         return r.status_code, expected, (time.monotonic() - t0) * 1000.0
 

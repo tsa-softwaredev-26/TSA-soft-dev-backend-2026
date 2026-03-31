@@ -1,38 +1,21 @@
-"""POST /item/ask; item-context voice dispatcher.
-
-The user is focused on a specific item (scrolling through scan results) and
-asks something about it. Frontend provides scan_id + label so the backend
-knows exactly which item is in focus; no search needed.
-
-Supported actions:
-    read_ocr   - read the OCR text aloud
-    export_ocr - return OCR text for copy/export
-    rename     - rename the item (auto-replace, no confirmation required)
-    find       - last known location of this item
-    describe   - visual description (deferred: requires VLM)
-"""
 import re
-from flask import Blueprint, request, jsonify
+
+from flask import Blueprint
 
 from visual_memory.api.pipelines import get_database, get_scan_pipeline, get_settings
 from visual_memory.api.routes.find import _format_sighting, build_narration
-from visual_memory.utils.ollama_utils import (
-    extract_item_intent,
-    extract_rename_target,
-)
 from visual_memory.utils import get_logger
-
-_log = get_logger(__name__)
+from visual_memory.utils.ollama_utils import extract_item_intent, extract_rename_target
 
 item_ask_bp = Blueprint("item_ask", __name__)
+_log = get_logger(__name__)
 
-# Keyword patterns used as fallback when Ollama is unavailable
 _INTENT_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("export_ocr", re.compile(r"\b(export|copy|share|send)\b", re.IGNORECASE)),
-    ("read_ocr",   re.compile(r"\b(read|text|say|says|written|write|content)\b", re.IGNORECASE)),
-    ("rename",     re.compile(r"\b(rename|call|name)\b", re.IGNORECASE)),
-    ("find",       re.compile(r"\b(where|find|location|last seen|last time)\b", re.IGNORECASE)),
-    ("describe",   re.compile(r"\b(describe|what is|what's|look|looks like)\b", re.IGNORECASE)),
+    ("read_ocr", re.compile(r"\b(read|text|say|says|written|write|content)\b", re.IGNORECASE)),
+    ("rename", re.compile(r"\b(rename|call|name)\b", re.IGNORECASE)),
+    ("find", re.compile(r"\b(where|find|location|last seen|last time)\b", re.IGNORECASE)),
+    ("describe", re.compile(r"\b(describe|what is|what's|look|looks like)\b", re.IGNORECASE)),
 ]
 
 
@@ -44,17 +27,13 @@ def _keyword_intent(query: str) -> str | None:
 
 
 def _extract_rename_target_keyword(query: str) -> str | None:
-    """Keyword fallback: extract text after 'to', 'as', or 'it' in a rename request."""
-    match = re.search(
-        r"\b(?:rename|call|name)\b.*?\b(?:to|as|it)\b\s+(.+)",
-        query,
-        re.IGNORECASE,
-    )
+    match = re.search(r"\b(?:rename|call|name)\b.*?\b(?:to|as|it)\b\s+(.+)", query, re.IGNORECASE)
     if match:
-        return match.group(1).strip().strip("\"'")
+        return match.group(1).strip().strip('"\'')
     return None
 
 
+<<<<<<< HEAD
 @item_ask_bp.post("/item/ask")
 def item_ask():
     """Ask a question about a specific focused item.
@@ -116,6 +95,9 @@ def item_ask():
 
 
 def process_item_ask_request(scan_id: str, label: str, query: str, intent: str | None = None) -> tuple[dict, int]:
+=======
+def process_item_ask_request(scan_id: str, label: str, query: str) -> tuple[dict, int]:
+>>>>>>> api/whisper-update
     scan_id = (scan_id or "").strip()
     label = (label or "").strip()
     query = (query or "").strip()
@@ -127,6 +109,7 @@ def process_item_ask_request(scan_id: str, label: str, query: str, intent: str |
     if not query:
         return {"error": "missing field: query"}, 400
 
+<<<<<<< HEAD
     resolved_intent = intent
     ollama_used = False
     if resolved_intent is None:
@@ -137,6 +120,16 @@ def process_item_ask_request(scan_id: str, label: str, query: str, intent: str |
                 ollama_used = True
         if resolved_intent is None:
             resolved_intent = "read_ocr"
+=======
+    intent = _keyword_intent(query)
+    ollama_used = False
+    if intent is None and get_settings().llm_query_fallback_enabled:
+        intent = extract_item_intent(query)
+        if intent is not None:
+            ollama_used = True
+    if intent is None:
+        intent = "read_ocr"
+>>>>>>> api/whisper-update
 
     _log.info({
         "event": "item_ask",
@@ -148,12 +141,16 @@ def process_item_ask_request(scan_id: str, label: str, query: str, intent: str |
 
     db = get_database()
 
+<<<<<<< HEAD
     if resolved_intent in ("read_ocr", "export_ocr"):
+=======
+    if intent in ("read_ocr", "export_ocr"):
+>>>>>>> api/whisper-update
         rows = db.get_items_metadata(label=label)
         ocr_text = rows[0]["ocr_text"] if rows else ""
-
         if not ocr_text:
             return {
+<<<<<<< HEAD
                 "action": resolved_intent,
                 "label": label,
                 "ocr_text": "",
@@ -170,6 +167,23 @@ def process_item_ask_request(scan_id: str, label: str, query: str, intent: str |
         }, 200
 
     if resolved_intent == "rename":
+=======
+                "action": intent,
+                "label": label,
+                "ocr_text": "",
+                "narration": f"There's no text stored for {label}.",
+                "export": intent == "export_ocr",
+            }, 200
+        return {
+            "action": intent,
+            "label": label,
+            "ocr_text": ocr_text,
+            "narration": f"The text says: {ocr_text}",
+            "export": intent == "export_ocr",
+        }, 200
+
+    if intent == "rename":
+>>>>>>> api/whisper-update
         new_label = _extract_rename_target_keyword(query)
         if new_label is None and get_settings().llm_query_fallback_enabled:
             new_label = extract_rename_target(query)
@@ -181,7 +195,6 @@ def process_item_ask_request(scan_id: str, label: str, query: str, intent: str |
             }, 400
 
         new_label = new_label.strip()
-
         if new_label.lower() == label.lower():
             return {
                 "action": "rename",
@@ -191,7 +204,10 @@ def process_item_ask_request(scan_id: str, label: str, query: str, intent: str |
 
         result = db.rename_label(label, new_label)
         get_scan_pipeline().reload_database()
+<<<<<<< HEAD
 
+=======
+>>>>>>> api/whisper-update
         return {
             "action": "rename",
             "old_label": label,
@@ -200,7 +216,11 @@ def process_item_ask_request(scan_id: str, label: str, query: str, intent: str |
             "replaced_existing": result["replaced"] > 0,
         }, 200
 
+<<<<<<< HEAD
     if resolved_intent == "find":
+=======
+    if intent == "find":
+>>>>>>> api/whisper-update
         row = db.get_last_sighting(label)
         if row is None:
             return {
@@ -218,11 +238,19 @@ def process_item_ask_request(scan_id: str, label: str, query: str, intent: str |
             "last_sighting": sighting,
         }, 200
 
+<<<<<<< HEAD
     if resolved_intent == "describe":
+=======
+    if intent == "describe":
+>>>>>>> api/whisper-update
         return {
             "action": "describe",
             "narration": "Visual description is not available yet.",
             "deferred": True,
         }, 200
 
+<<<<<<< HEAD
     return {"error": f"unknown intent: {resolved_intent}"}, 400
+=======
+    return {"error": f"unknown intent: {intent}"}, 400
+>>>>>>> api/whisper-update

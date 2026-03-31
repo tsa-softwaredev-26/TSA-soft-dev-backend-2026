@@ -1,9 +1,8 @@
-"""POST /transcribe - Whisper-based voice transcription."""
-from __future__ import annotations
+"""Voice transcription helpers for the unified /voice endpoint."""
 
 import time
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint
 
 from visual_memory.api.pipelines import get_database, get_settings
 from visual_memory.engine.model_registry import registry
@@ -11,11 +10,14 @@ from visual_memory.utils import get_logger
 from visual_memory.utils.audio_utils import load_audio_bytes, validate_audio_format
 from visual_memory.utils.logger import LogTag
 
+transcribe_bp = Blueprint("transcribe", __name__)
 _log = get_logger(__name__)
 
-transcribe_bp = Blueprint("transcribe", __name__)
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> api/whisper-update
 def transcribe_audio_bytes(audio_bytes: bytes, use_context: bool = True) -> tuple[dict, int]:
     t0 = time.monotonic()
     settings = get_settings()
@@ -52,17 +54,17 @@ def transcribe_audio_bytes(audio_bytes: bytes, use_context: bool = True) -> tupl
 
     try:
         registry.prepare_for_voice()
-        result = recognizer.transcribe(
-            audio_array,
-            sample_rate=sample_rate,
-            context=context_prompt,
-        )
+        result = recognizer.transcribe(audio_array, sample_rate=sample_rate, context=context_prompt)
     except Exception as exc:
+<<<<<<< HEAD
         _log.error({
             "event": "transcribe_error",
             "tag": LogTag.API,
             "error": str(exc),
         })
+=======
+        _log.error({"event": "transcribe_error", "tag": LogTag.API, "error": str(exc)})
+>>>>>>> api/whisper-update
         return {"error": "transcription failed", "detail": str(exc)}, 500
     finally:
         registry.prepare_after_voice()
@@ -87,6 +89,7 @@ def transcribe_audio_bytes(audio_bytes: bytes, use_context: bool = True) -> tupl
         "context_used": bool(context_prompt),
     })
     return response, 200
+<<<<<<< HEAD
 
 
 @transcribe_bp.post("/transcribe")
@@ -95,3 +98,5 @@ def transcribe():
     use_context = request.args.get("context", "1") != "0"
     response, status = transcribe_audio_bytes(audio_bytes, use_context=use_context)
     return jsonify(response), status
+=======
+>>>>>>> api/whisper-update

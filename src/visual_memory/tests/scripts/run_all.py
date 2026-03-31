@@ -54,6 +54,7 @@ _API_TESTS = [
     ("test_settings_routes",  "api",  ["settings"]),
     ("test_health_debug",     "api",  ["health", "debug"]),
     ("test_ask_mode",         "api",  ["ask", "find"]),
+    ("test_voice_ws",         "api",  ["voice", "ws"]),
 ]
 
 _SYSTEM_TESTS = [
