@@ -145,9 +145,9 @@ This project depends on multiple third-party models and model-adjacent assets
 with mixed license terms.
 
 - Full attribution inventory, source links, model pages, and license notes:
-  [LICENSES.md](LICENSES.md)
+  [LICENSES.md](docs/LICENSES.md)
 - BibTeX citations:
-  [CITATIONS.bib](CITATIONS.bib)
+  [CITATIONS.bib](docs/CITATIONS.bib)
 
-Before deployment or redistribution, review `LICENSES.md` to confirm terms for
+Before deployment or redistribution, review `docs/LICENSES.md` to confirm terms for
 the exact model set you enable.
