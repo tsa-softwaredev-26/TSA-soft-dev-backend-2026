@@ -3,54 +3,54 @@
 # Place images in benchmarks/images/ before running full_benchmark.py
 # Receipts: run redact_receipt.py first.
 image,label,ground_truth_distance_ft,dino_prompt
-wallet_camo_1ft_bright_clean.jpg,wallet_camo,1.0,wallet
-wallet_camo_1ft_bright_messy.jpg,wallet_camo,1.0,wallet
-wallet_camo_1ft_dim_clean.jpg,wallet_camo,1.0,wallet
-wallet_camo_1ft_dim_messy.jpg,wallet_camo,1.0,wallet
-wallet_camo_3ft_bright_clean.jpg,wallet_camo,3.0,wallet
-wallet_camo_3ft_bright_messy.jpg,wallet_camo,3.0,wallet
-wallet_camo_3ft_dim_clean.jpg,wallet_camo,3.0,wallet
-wallet_camo_3ft_dim_messy.jpg,wallet_camo,3.0,wallet
-wallet_camo_6ft_bright_clean.jpg,wallet_camo,6.0,wallet
-wallet_camo_6ft_bright_messy.jpg,wallet_camo,6.0,wallet
-wallet_camo_6ft_dim_clean.jpg,wallet_camo,6.0,wallet
-wallet_camo_6ft_dim_messy.jpg,wallet_camo,6.0,wallet
-wallet_bifold_1ft_bright_clean.jpg,wallet_bifold,1.0,wallet
-wallet_bifold_1ft_bright_messy.jpg,wallet_bifold,1.0,wallet
-wallet_bifold_1ft_dim_clean.jpg,wallet_bifold,1.0,wallet
-wallet_bifold_1ft_dim_messy.jpg,wallet_bifold,1.0,wallet
-wallet_bifold_3ft_bright_clean.jpg,wallet_bifold,3.0,wallet
-wallet_bifold_3ft_bright_messy.jpg,wallet_bifold,3.0,wallet
-wallet_bifold_3ft_dim_clean.jpg,wallet_bifold,3.0,wallet
-wallet_bifold_3ft_dim_messy.jpg,wallet_bifold,3.0,wallet
-wallet_bifold_6ft_bright_clean.jpg,wallet_bifold,6.0,wallet
-wallet_bifold_6ft_bright_messy.jpg,wallet_bifold,6.0,wallet
-wallet_bifold_6ft_dim_clean.jpg,wallet_bifold,6.0,wallet
-wallet_bifold_6ft_dim_messy.jpg,wallet_bifold,6.0,wallet
-book_moby_dick_1ft_bright_clean.jpg,book_moby_dick,1.0,book
-book_moby_dick_1ft_bright_messy.jpg,book_moby_dick,1.0,book
-book_moby_dick_1ft_dim_clean.jpg,book_moby_dick,1.0,book
-book_moby_dick_1ft_dim_messy.jpg,book_moby_dick,1.0,book
-book_moby_dick_3ft_bright_clean.jpg,book_moby_dick,3.0,book
-book_moby_dick_3ft_bright_messy.jpg,book_moby_dick,3.0,book
-book_moby_dick_3ft_dim_clean.jpg,book_moby_dick,3.0,book
-book_moby_dick_3ft_dim_messy.jpg,book_moby_dick,3.0,book
-book_moby_dick_6ft_bright_clean.jpg,book_moby_dick,6.0,book
-book_moby_dick_6ft_bright_messy.jpg,book_moby_dick,6.0,book
-book_moby_dick_6ft_dim_clean.jpg,book_moby_dick,6.0,book
-book_moby_dick_6ft_dim_messy.jpg,book_moby_dick,6.0,book
-book_meditations_1ft_bright_clean.jpg,book_meditations,1.0,book
-book_meditations_1ft_bright_messy.jpg,book_meditations,1.0,book
-book_meditations_1ft_dim_clean.jpg,book_meditations,1.0,book
-book_meditations_1ft_dim_messy.jpg,book_meditations,1.0,book
-book_meditations_3ft_bright_clean.jpg,book_meditations,3.0,book
-book_meditations_3ft_bright_messy.jpg,book_meditations,3.0,book
-book_meditations_3ft_dim_clean.jpg,book_meditations,3.0,book
-book_meditations_3ft_dim_messy.jpg,book_meditations,3.0,book
-book_meditations_6ft_bright_clean.jpg,book_meditations,6.0,book
-book_meditations_6ft_bright_messy.jpg,book_meditations,6.0,book
-book_meditations_6ft_dim_clean.jpg,book_meditations,6.0,book
-book_meditations_6ft_dim_messy.jpg,book_meditations,6.0,book
+wallet_zipper_1ft_bright_clean.jpg,wallet_zipper,1.0,wallet
+wallet_zipper_1ft_bright_messy.jpg,wallet_zipper,1.0,wallet
+wallet_zipper_1ft_dim_clean.jpg,wallet_zipper,1.0,wallet
+wallet_zipper_1ft_dim_messy.jpg,wallet_zipper,1.0,wallet
+wallet_zipper_3ft_bright_clean.jpg,wallet_zipper,3.0,wallet
+wallet_zipper_3ft_bright_messy.jpg,wallet_zipper,3.0,wallet
+wallet_zipper_3ft_dim_clean.jpg,wallet_zipper,3.0,wallet
+wallet_zipper_3ft_dim_messy.jpg,wallet_zipper,3.0,wallet
+wallet_zipper_6ft_bright_clean.jpg,wallet_zipper,6.0,wallet
+wallet_zipper_6ft_bright_messy.jpg,wallet_zipper,6.0,wallet
+wallet_zipper_6ft_dim_clean.jpg,wallet_zipper,6.0,wallet
+wallet_zipper_6ft_dim_messy.jpg,wallet_zipper,6.0,wallet
+wallet_trifold_1ft_bright_clean.jpg,wallet_trifold,1.0,wallet
+wallet_trifold_1ft_bright_messy.jpg,wallet_trifold,1.0,wallet
+wallet_trifold_1ft_dim_clean.jpg,wallet_trifold,1.0,wallet
+wallet_trifold_1ft_dim_messy.jpg,wallet_trifold,1.0,wallet
+wallet_trifold_3ft_bright_clean.jpg,wallet_trifold,3.0,wallet
+wallet_trifold_3ft_bright_messy.jpg,wallet_trifold,3.0,wallet
+wallet_trifold_3ft_dim_clean.jpg,wallet_trifold,3.0,wallet
+wallet_trifold_3ft_dim_messy.jpg,wallet_trifold,3.0,wallet
+wallet_trifold_6ft_bright_clean.jpg,wallet_trifold,6.0,wallet
+wallet_trifold_6ft_bright_messy.jpg,wallet_trifold,6.0,wallet
+wallet_trifold_6ft_dim_clean.jpg,wallet_trifold,6.0,wallet
+wallet_trifold_6ft_dim_messy.jpg,wallet_trifold,6.0,wallet
+magnesium_bottle_1ft_bright_clean.jpg,magnesium_bottle,1.0,book
+magnesium_bottle_1ft_bright_messy.jpg,magnesium_bottle,1.0,book
+magnesium_bottle_1ft_dim_clean.jpg,magnesium_bottle,1.0,book
+magnesium_bottle_1ft_dim_messy.jpg,magnesium_bottle,1.0,book
+magnesium_bottle_3ft_bright_clean.jpg,magnesium_bottle,3.0,book
+magnesium_bottle_3ft_bright_messy.jpg,magnesium_bottle,3.0,book
+magnesium_bottle_3ft_dim_clean.jpg,magnesium_bottle,3.0,book
+magnesium_bottle_3ft_dim_messy.jpg,magnesium_bottle,3.0,book
+magnesium_bottle_6ft_bright_clean.jpg,magnesium_bottle,6.0,book
+magnesium_bottle_6ft_bright_messy.jpg,magnesium_bottle,6.0,book
+magnesium_bottle_6ft_dim_clean.jpg,magnesium_bottle,6.0,book
+magnesium_bottle_6ft_dim_messy.jpg,magnesium_bottle,6.0,book
+water_bottle_1ft_bright_clean.jpg,water_bottle,1.0,book
+water_bottle_1ft_bright_messy.jpg,water_bottle,1.0,book
+water_bottle_1ft_dim_clean.jpg,water_bottle,1.0,book
+water_bottle_1ft_dim_messy.jpg,water_bottle,1.0,book
+water_bottle_3ft_bright_clean.jpg,water_bottle,3.0,book
+water_bottle_3ft_bright_messy.jpg,water_bottle,3.0,book
+water_bottle_3ft_dim_clean.jpg,water_bottle,3.0,book
+water_bottle_3ft_dim_messy.jpg,water_bottle,3.0,book
+water_bottle_6ft_bright_clean.jpg,water_bottle,6.0,book
+water_bottle_6ft_bright_messy.jpg,water_bottle,6.0,book
+water_bottle_6ft_dim_clean.jpg,water_bottle,6.0,book
+water_bottle_6ft_dim_messy.jpg,water_bottle,6.0,book
 sunglasses_sun_1ft_bright_clean.jpg,sunglasses_sun,1.0,sunglasses
 sunglasses_sun_1ft_bright_messy.jpg,sunglasses_sun,1.0,sunglasses
 sunglasses_sun_1ft_dim_clean.jpg,sunglasses_sun,1.0,sunglasses
@@ -75,30 +75,30 @@ glasses_prescription_6ft_bright_clean.jpg,glasses_prescription,6.0,glasses
 glasses_prescription_6ft_bright_messy.jpg,glasses_prescription,6.0,glasses
 glasses_prescription_6ft_dim_clean.jpg,glasses_prescription,6.0,glasses
 glasses_prescription_6ft_dim_messy.jpg,glasses_prescription,6.0,glasses
-receipt_grocery_1ft_bright_clean.jpg,receipt_grocery,1.0,paper receipt
-receipt_grocery_1ft_bright_messy.jpg,receipt_grocery,1.0,paper receipt
-receipt_grocery_1ft_dim_clean.jpg,receipt_grocery,1.0,paper receipt
-receipt_grocery_1ft_dim_messy.jpg,receipt_grocery,1.0,paper receipt
-receipt_grocery_3ft_bright_clean.jpg,receipt_grocery,3.0,paper receipt
-receipt_grocery_3ft_bright_messy.jpg,receipt_grocery,3.0,paper receipt
-receipt_grocery_3ft_dim_clean.jpg,receipt_grocery,3.0,paper receipt
-receipt_grocery_3ft_dim_messy.jpg,receipt_grocery,3.0,paper receipt
-receipt_grocery_6ft_bright_clean.jpg,receipt_grocery,6.0,paper receipt
-receipt_grocery_6ft_bright_messy.jpg,receipt_grocery,6.0,paper receipt
-receipt_grocery_6ft_dim_clean.jpg,receipt_grocery,6.0,paper receipt
-receipt_grocery_6ft_dim_messy.jpg,receipt_grocery,6.0,paper receipt
-receipt_cvs_1ft_bright_clean.jpg,receipt_cvs,1.0,paper receipt
-receipt_cvs_1ft_bright_messy.jpg,receipt_cvs,1.0,paper receipt
-receipt_cvs_1ft_dim_clean.jpg,receipt_cvs,1.0,paper receipt
-receipt_cvs_1ft_dim_messy.jpg,receipt_cvs,1.0,paper receipt
-receipt_cvs_3ft_bright_clean.jpg,receipt_cvs,3.0,paper receipt
-receipt_cvs_3ft_bright_messy.jpg,receipt_cvs,3.0,paper receipt
-receipt_cvs_3ft_dim_clean.jpg,receipt_cvs,3.0,paper receipt
-receipt_cvs_3ft_dim_messy.jpg,receipt_cvs,3.0,paper receipt
-receipt_cvs_6ft_bright_clean.jpg,receipt_cvs,6.0,paper receipt
-receipt_cvs_6ft_bright_messy.jpg,receipt_cvs,6.0,paper receipt
-receipt_cvs_6ft_dim_clean.jpg,receipt_cvs,6.0,paper receipt
-receipt_cvs_6ft_dim_messy.jpg,receipt_cvs,6.0,paper receipt
+receipt_salon_1ft_bright_clean.jpg,receipt_salon,1.0,paper receipt
+receipt_salon_1ft_bright_messy.jpg,receipt_salon,1.0,paper receipt
+receipt_salon_1ft_dim_clean.jpg,receipt_salon,1.0,paper receipt
+receipt_salon_1ft_dim_messy.jpg,receipt_salon,1.0,paper receipt
+receipt_salon_3ft_bright_clean.jpg,receipt_salon,3.0,paper receipt
+receipt_salon_3ft_bright_messy.jpg,receipt_salon,3.0,paper receipt
+receipt_salon_3ft_dim_clean.jpg,receipt_salon,3.0,paper receipt
+receipt_salon_3ft_dim_messy.jpg,receipt_salon,3.0,paper receipt
+receipt_salon_6ft_bright_clean.jpg,receipt_salon,6.0,paper receipt
+receipt_salon_6ft_bright_messy.jpg,receipt_salon,6.0,paper receipt
+receipt_salon_6ft_dim_clean.jpg,receipt_salon,6.0,paper receipt
+receipt_salon_6ft_dim_messy.jpg,receipt_salon,6.0,paper receipt
+receipt_eye_doctor_1ft_bright_clean.jpg,receipt_eye_doctor,1.0,paper receipt
+receipt_eye_doctor_1ft_bright_messy.jpg,receipt_eye_doctor,1.0,paper receipt
+receipt_eye_doctor_1ft_dim_clean.jpg,receipt_eye_doctor,1.0,paper receipt
+receipt_eye_doctor_1ft_dim_messy.jpg,receipt_eye_doctor,1.0,paper receipt
+receipt_eye_doctor_3ft_bright_clean.jpg,receipt_eye_doctor,3.0,paper receipt
+receipt_eye_doctor_3ft_bright_messy.jpg,receipt_eye_doctor,3.0,paper receipt
+receipt_eye_doctor_3ft_dim_clean.jpg,receipt_eye_doctor,3.0,paper receipt
+receipt_eye_doctor_3ft_dim_messy.jpg,receipt_eye_doctor,3.0,paper receipt
+receipt_eye_doctor_6ft_bright_clean.jpg,receipt_eye_doctor,6.0,paper receipt
+receipt_eye_doctor_6ft_bright_messy.jpg,receipt_eye_doctor,6.0,paper receipt
+receipt_eye_doctor_6ft_dim_clean.jpg,receipt_eye_doctor,6.0,paper receipt
+receipt_eye_doctor_6ft_dim_messy.jpg,receipt_eye_doctor,6.0,paper receipt
 keys_house_1ft_bright_clean.jpg,keys_house,1.0,keys
 keys_house_1ft_bright_messy.jpg,keys_house,1.0,keys
 keys_house_1ft_dim_clean.jpg,keys_house,1.0,keys

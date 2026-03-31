@@ -1,40 +1,44 @@
-"""POST /ask; open-ended natural language memory search.
+"""Natural language memory search helpers."""
 
-The user asks anything about their stored world in plain speech.
-Backend parses intent (via Ollama when available), runs semantic search
-over labels and OCR text, and returns a narration string ready to speak.
-"""
-from flask import Blueprint, request, jsonify
+from flask import Blueprint
 
-from visual_memory.api.pipelines import get_database, get_scan_pipeline, get_settings
-from visual_memory.api.routes.find import (
-    _fuzzy_label_match,
-    _ocr_content_match,
-    _format_sighting,
-    build_narration,
-)
-from visual_memory.utils.ollama_utils import extract_search_term, is_unsafe_query
+from visual_memory.api.pipelines import get_database, get_settings
+from visual_memory.api.routes.find import _fuzzy_label_match, _format_sighting, _ocr_content_match, build_narration
 from visual_memory.utils import get_logger
-
-_log = get_logger(__name__)
+from visual_memory.utils.ollama_utils import extract_search_term, is_unsafe_query
 
 ask_bp = Blueprint("ask", __name__)
+_log = get_logger(__name__)
 
 
+<<<<<<< HEAD
 def process_ask_query(query: str) -> tuple[dict, int]:
     if query is None:
         return {"error": "missing field: query"}, 400
     if not isinstance(query, str):
         return {"error": "query must be a string"}, 400
     query = query.strip()
+=======
+def process_ask_query(raw_query) -> tuple[dict, int]:
+    if raw_query is None:
+        return {"error": "missing field: query"}, 400
+    if not isinstance(raw_query, str):
+        return {"error": "query must be a string"}, 400
+
+    query = raw_query.strip()
+>>>>>>> api/whisper-update
     if not query:
         return {"error": "missing field: query"}, 400
 
     if is_unsafe_query(query):
+<<<<<<< HEAD
         _log.warning({
             "event": "ask_blocked_unsafe_query",
             "query": query,
         })
+=======
+        _log.warning({"event": "ask_blocked_unsafe_query", "query": query})
+>>>>>>> api/whisper-update
         return {
             "query": query,
             "search_term": None,
@@ -100,7 +104,10 @@ def process_ask_query(query: str) -> tuple[dict, int]:
         }, 200
 
     sightings = [_format_sighting(r) for r in rows]
+<<<<<<< HEAD
     narration = build_narration(matched_label, sightings[0])
+=======
+>>>>>>> api/whisper-update
     return {
         "query": query,
         "search_term": search_term,
@@ -108,6 +115,7 @@ def process_ask_query(query: str) -> tuple[dict, int]:
         "found": True,
         "matched_label": matched_label,
         "matched_by": matched_by,
+<<<<<<< HEAD
         "narration": narration,
         "last_sighting": sightings[0],
         "sightings": sightings,
@@ -146,3 +154,9 @@ def ask():
     data = request.get_json(silent=True) or {}
     result, status = process_ask_query(data.get("query"))
     return jsonify(result), status
+=======
+        "narration": build_narration(matched_label, sightings[0]),
+        "last_sighting": sightings[0],
+        "sightings": sightings,
+    }, 200
+>>>>>>> api/whisper-update

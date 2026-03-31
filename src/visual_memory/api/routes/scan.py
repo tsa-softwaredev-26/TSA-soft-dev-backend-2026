@@ -1,25 +1,32 @@
 from pathlib import Path
 from uuid import uuid4
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint
 from PIL import Image
 
-from visual_memory.api.pipelines import get_scan_pipeline, get_database
+from visual_memory.api.pipelines import get_database, get_scan_pipeline
 
 scan_bp = Blueprint("scan", __name__)
-
 _SCANS_DIR = Path(__file__).resolve().parents[4] / "scans"
 
 
+<<<<<<< HEAD
 def process_scan_request(image_file, focal_length_raw: str) -> tuple[dict, int]:
+=======
+def process_scan_request(image_file, focal_length_raw: str = "") -> tuple[dict, int]:
+>>>>>>> api/whisper-update
     if image_file is None:
         return {"error": "missing field: image"}, 400
 
     focal_length_px = 0.0
+<<<<<<< HEAD
     raw = (focal_length_raw or "").strip()
     if raw:
+=======
+    if focal_length_raw:
+>>>>>>> api/whisper-update
         try:
-            focal_length_px = float(raw)
+            focal_length_px = float(focal_length_raw)
         except ValueError:
             return {"error": "focal_length_px must be a float"}, 400
 
@@ -53,6 +60,7 @@ def process_scan_request(image_file, focal_length_raw: str) -> tuple[dict, int]:
 
     result["scan_id"] = scan_id
     return result, 200
+<<<<<<< HEAD
 
 
 @scan_bp.post("/scan")
@@ -62,3 +70,5 @@ def scan():
         focal_length_raw=request.form.get("focal_length_px", ""),
     )
     return jsonify(result), status
+=======
+>>>>>>> api/whisper-update
