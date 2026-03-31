@@ -888,10 +888,21 @@ Rename auto-replaces any existing memory with the same name - no confirmation st
 }
 ```
 
-**describe response (not yet available):**
+**describe response:**
 ```json
-{ "action": "describe", "narration": "Visual description is not available yet.", "deferred": true }
+{
+  "action": "describe",
+  "label": "wallet",
+  "narration": "This is your black wallet with a rectangular shape.",
+  "method": "vlm",
+  "latency_ms": 412
+}
 ```
+
+`method` values:
+- `"vlm"`: moondream2 description succeeded
+- `"attributes"`: fallback from stored teach-time visual attributes
+- `"minimal"`: fallback from label and OCR summary
 
 **When to call:** user is scrolling through scan results and asks something about the item currently on screen.
 

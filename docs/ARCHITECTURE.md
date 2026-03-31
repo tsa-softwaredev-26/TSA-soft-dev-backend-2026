@@ -176,9 +176,8 @@ src/visual_memory/
 │   ├── settings.py                     # All ML tuning thresholds
 │   └── user_settings.py                # User preferences: PerformanceMode, UserSettings (JSON-persisted)
 ├── api/
-│   ├── app.py                          # create_app() factory - blueprints, SocketIO init, auth, upload cap
+│   ├── app.py                          # create_app() factory - blueprints, auth, upload cap
 │   ├── pipelines.py                    # Lazy singletons: get_remember_pipeline(), get_scan_pipeline(), get_feedback_store(), get_user_settings(), warm_all()
-│   ├── voice_session.py                # VoiceSession dataclass + per-connection session dict; get_session() / clear_session()
 │   ├── run.py                          # Compatibility shim; prefer services/core/run.py
 │   └── routes/
 │       ├── health.py                   # GET /health
@@ -192,7 +191,6 @@ src/visual_memory/
 │       ├── items.py                    # GET /items, DELETE /items/<label>, POST /items/<label>/rename
 │       ├── sightings.py               # POST /sightings - user-confirmed location update
 │       ├── crop.py                    # GET /crop - fetch cropped image from cached scan
-│       ├── voice_ws.py                # WebSocket voice session: connect/disconnect/audio/navigate events; register_events(sio)
 │       └── debug.py                   # GET /debug/state, POST /debug/echo, POST /debug/image, GET /debug/db, GET /debug/logs, GET /debug/perf, GET /debug/test-remember, GET /debug/test-scan, POST /debug/wipe, PATCH /debug/config
 └── tests/                             # Test scripts + test data
     ├── scripts/                        # Runnable .py test scripts
@@ -415,31 +413,6 @@ Multi-image (POST /remember with `images[]`):
 - `get_depth_at_bbox(depth_map, bbox) -> float` -mean depth in feet, inner 50% of bbox
 - `get_direction(bbox, img_w) -> str` -5-zone direction string
 - `build_narration(label, direction, distance_ft, similarity, bbox=None, img_h=None) -> str | None` -final narration; prepends "look down," or "look up," when object is in the bottom 40% or top 25% of frame
-
-### `api/voice_session.py` - `VoiceSession`
-- `VoiceSession(sid, state, context)` - per-connection dataclass; state drives dispatch in voice_ws.py
-- `get_session(sid) -> VoiceSession` - returns existing or creates new session
-- `clear_session(sid)` - removes session on disconnect
-- States: `idle`, `awaiting_image`, `awaiting_location`, `awaiting_confirmation`, `focused_on_item`, `onboarding_teach`, `onboarding_await_scan`
-- `context` keys used across handlers: `pending_action`, `label`, `scan_id`, `scan_matches`, `item_index`, `current_label`, `onboarding_phase`, `scan_count`, `teach_count`, `hints_given`
-- In-process dict (single gunicorn worker - no Redis needed)
-
-### `api/routes/voice_ws.py` - WebSocket event handlers
-- `register_events(sio: SocketIO)` - attaches all handlers to the SocketIO instance
-- Events handled: `connect`, `disconnect`, `audio`, `navigate`
-- `connect`: auth check via `X-API-Key` header or `?key=` param; emits onboarding TTS or "Ready." based on DB item count
-- `audio`: decodes audio bytes + optional image, calls `transcribe_audio_bytes()`, emits `transcription`, then dispatches via `_dispatch()`
-- `navigate`: advances/retreats `item_index` in session context, emits `tts` narration for that item and `action_result: item_focus`
-- `_dispatch()`: state machine router; delegates to `_handle_scan`, `_handle_remember`, `_handle_location`, `_handle_confirmation`, `_handle_item_query`, `_handle_feedback`, `_run_find`, `process_ask_query`
-- Hint system: `_get_hint(session)` fires deferred feature hints at usage milestones (scan_count, teach_count); appended to TTS narration
-- `_BytesFileStorage`: minimal FileStorage-compatible wrapper so image bytes can pass into `process_scan_request` / `process_remember_request` without an active Flask request context
-
-Server-to-client events emitted:
-- `tts` - `{narration: str, next_state: str}` - primary output; read aloud by client TTS
-- `transcription` - `{text: str, context_used: bool}` - intermediate; for UI feedback
-- `action_result` - `{type: str, data: dict}` - structured pipeline result
-- `control` - `{action: "request_image", context?: str}` - instructs frontend to activate camera
-- `error` - `{code: str, message: str}`
 
 ---
 
@@ -762,16 +735,11 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - Text embedder: CLIP text encoder only (`openai/clip-vit-base-patch32`, 512-dim, ~180MB)
 - Deployment: `deploy/install.sh` installs systemd units from templates; primary units are `deploy/spaitra-core.service` and `deploy/spaitra-ocr.service`
  - Debug endpoints: /debug/state, /debug/echo, /debug/image, /debug/db, /debug/logs, /debug/perf, /debug/test-remember, /debug/test-scan, /debug/wipe (selective), /debug/config (live settings patch)
-<<<<<<< HEAD
- - Ask Mode: POST /ask remains available, and POST /voice adds state-aware command routing across ask, find, item, scan, and remember flows
- - Voice transcription: POST /transcribe remains available, and /voice can invoke the same transcription pipeline before routing
- - Voice state management: /voice validates commands against `current_mode` and returns `command_unavailable` with `available_commands` when the command does not fit the current state
-=======
- - Unified voice API: POST /voice routes remember, scan, ask, find, item_ask, and location confirmation from one endpoint with optional state context
- - Ask helpers: internal ask and item-ask logic are now consumed by /voice routing rather than exposed as direct public routes
- - Voice transcription: Whisper Turbo remains in use through internal transcribe helpers invoked by /voice
->>>>>>> api/whisper-update
+ - Ask Mode: POST /ask (NL query -> embedding search -> narration), POST /item/ask (item-context dispatcher: read_ocr, export_ocr, rename, find, describe)
+ - Voice transcription: POST /transcribe (Whisper Turbo) with optional context bias from known item labels and room names
  - Ollama integration: llama3.2:1b via `ollama_utils.py`; structured JSON output (format="json"); circuit breaker (3-strike, 60 s cooldown); configurable timeout via OLLAMA_TIMEOUT_SECONDS; OLLAMA_HOST env for non-localhost daemon
+ - VLM describe path: `/item/ask` describe now uses local moondream2 (`moondream==0.2.0`) with bounded timeout and 3-tier fallback (vlm -> attributes -> minimal)
+ - Teach-time attribute extraction: remember pipeline stores `visual_attributes` in `items.visual_attributes` for fast non-LLM description fallback
  - Jailbreak resistance: `/ask` now applies an unsafe-query gate before retrieval. Queries with prompt-injection or harmful markers are blocked with `400` (`blocked: true`, `reason: "unsafe_query"`) instead of running fuzzy search.
 - OCR pre-embedding: `add_to_database()` embeds OCR text at teach time and stores in `items.ocr_embedding`; `/ask` OCR content match uses stored embedding, re-embeds only for legacy items
 
@@ -830,11 +798,7 @@ All server-transition items are complete as of March 2026.
 
 - **Input Enhancement in Remember Mode** - [x] Wired as third-pass Ollama fallback in `_detect_with_fallback()`. After all `_SECOND_PASS_TEMPLATES` fail, Ollama (llama3.2:1b) suggests `ollama_detection_retries` alternative phrasings; each is tried with GroundingDINO. Degrades silently if Ollama unavailable. Logged as `remember_third_pass_ollama`.
 - **OCR content pre-embedding** - [x] `add_to_database()` now embeds OCR text via CLIP at teach time and stores in `items.ocr_embedding`. `_ocr_content_match()` in `find.py` uses the stored embedding instead of re-embedding N items per query. Backward compatible: items without stored embedding are re-embedded on the fly.
-<<<<<<< HEAD
-- **Voice-state command policy** - [x] /voice command classifier now enforces mode-specific availability and returns deterministic navigation actions (`navigate_back`, `navigate_next`, `navigate_previous`, `open_settings`, `stop`) for frontend state machines.
-=======
-- **Vision-Language Model for item description** - item describe remains deferred in this branch. /voice routes describe intent to item-ask fallback response.
->>>>>>> api/whisper-update
+- **Vision-Language Model for item description** - [x] `POST /item/ask` describe now returns live narration via moondream2 with fallback cascade (`vlm`, `attributes`, `minimal`) and per-mode timeouts.
 - **Bloat Prevention** - Duplicate entry detection, pruning unused entries, user confirmation before overwriting similar embeddings.
 - **HNSW index** - Marginal benefit below ~10k entries; defer until scale requires it.
 - **Pipeline batching** - ScanPipeline can call `batch_embed()` and `detect_all_batch()` instead of per-crop loops for full GPU utilization on the server.

@@ -234,7 +234,6 @@ To pull manually:
 
 ```bash
 ollama pull llama3.2:1b
-ollama pull phi3:mini
 ollama list   # verify model appears
 ```
 
@@ -254,15 +253,6 @@ ollama run llama3.2:1b "respond with JSON: {\"intent\": \"find\"}"
 | Slow /ask responses | Lower `OLLAMA_TIMEOUT_SECONDS` in `.env` (default: 5.0 s) |
 | Remote Ollama host | Set `OLLAMA_HOST=http://<host>:11434` in `.env` |
 
-Model selection by performance mode:
-- Fast mode: Ollama query parsing is disabled.
-- Balanced mode: `OLLAMA_MODEL_BALANCED` (default `llama3.2:1b`)
-- Accurate mode: `OLLAMA_MODEL_ACCURATE` (default `phi3:mini`)
-
-Optional env overrides in `.env`:
-- `OLLAMA_MODEL_BALANCED=llama3.2:1b`
-- `OLLAMA_MODEL_ACCURATE=phi3:mini`
-
 The backend circuit breaker opens after 3 consecutive Ollama failures and pauses
 all LLM calls for 60 seconds. This prevents a stalled daemon from adding latency
 to every request. The API continues to work in embedding-only mode during that window.
@@ -273,18 +263,21 @@ prompt-injection or harmful markers return HTTP 400 with `blocked: true` and
 
 ---
 
-## 7. Unified voice endpoint
+## 7. VLM item description (moondream2)
 
-This branch exposes `POST /voice` as the primary command surface.
+`POST /item/ask` now supports live `describe` responses with a 3-tier fallback:
 
-- `/voice` accepts audio or text plus optional frontend state
-- `/voice` can route remember, scan, ask, item context actions, and location confirmation
-- transcribe, ask, and item logic are kept as internal helpers for voice routing
+1. moondream2 VLM (`method: "vlm"`)
+2. stored visual attributes from teach-time analysis (`method: "attributes"`)
+3. minimal label and OCR summary (`method: "minimal"`)
 
-Deployment impact:
-- no new dependencies
-- no extra service required
-- existing API key and OCR service setup stays the same
+moondream2 is loaded from HuggingFace via `transformers` and `moondream==0.2.0`.
+This path is local and does not use Ollama.
+
+Performance-mode behavior for describe:
+- fast: VLM disabled, fallback uses attributes or minimal
+- balanced: VLM enabled with shorter timeout
+- accurate: VLM enabled with longer timeout
 
 ---
 
@@ -428,10 +421,6 @@ deactivate
 The service files in `deploy/` assume the flat layout (`/opt/spaitra/venv-core`).
 If your venvs are inside the repo subdir, edit the two paths before copying:
 
-WebSocket voice sessions currently store per-connection state in process memory.
-Run the core gunicorn service with exactly one worker (`-w 1`) until session state
-is moved to a shared backend.
-
 ```bash
 # For subdirectory layout; create adjusted copies:
 sed 's|/opt/spaitra/venv-core|'"$REPO"'/venv-core|g; s|/opt/spaitra/venv-ocr|'"$REPO"'/venv-ocr|g; s|WorkingDirectory=/opt/spaitra$|WorkingDirectory='"$REPO"'|' \
@@ -450,9 +439,6 @@ systemctl enable --now spaitra-core
 
 systemctl status spaitra-ocr spaitra-core --no-pager
 journalctl -u spaitra-core -n 50 --no-pager
-
-# Verify worker count stays at 1 (required for in-memory WS session state)
-systemctl cat spaitra-core | grep -E -- "-w[[:space:]]+1|--workers[[:space:]]+1"
 
 # Harden file permissions once env files and services are in place
 sudo -u spaitra bash $REPO/deploy/secure_permissions.sh "$REPO"
