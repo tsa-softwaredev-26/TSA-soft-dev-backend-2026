@@ -8,6 +8,8 @@ from typing import Optional
 
 import torch
 
+from visual_memory.config import Settings
+
 try:
     from pysqlcipher3 import dbapi2 as sqlite3
     _SQLCIPHER_AVAILABLE = True
@@ -20,6 +22,8 @@ try:
     _log = get_logger(__name__)
 except Exception:
     _log = None
+
+_settings = Settings()
 
 
 class DatabaseStore:
@@ -42,6 +46,7 @@ class DatabaseStore:
                 image_path       TEXT,
                 confidence       REAL,
                 timestamp        REAL,
+                embedding_count  INTEGER NOT NULL DEFAULT 1,
                 visual_attributes TEXT
             );
             -- id is the user ID; hardcoded to 1 for single-user demo.
@@ -109,6 +114,17 @@ class DatabaseStore:
             self._conn.commit()
         except Exception:
             pass  # column already exists
+        # migrate existing items tables that predate embedding_count
+        try:
+            self._conn.execute("ALTER TABLE items ADD COLUMN embedding_count INTEGER DEFAULT 1")
+            self._conn.commit()
+        except Exception:
+            pass  # column already exists
+        try:
+            self._conn.execute("UPDATE items SET embedding_count = 1 WHERE embedding_count IS NULL")
+            self._conn.commit()
+        except Exception:
+            pass  # best-effort backfill
         # migrate existing user_state tables that predate ml_settings
         try:
             self._conn.execute("ALTER TABLE user_state ADD COLUMN ml_settings TEXT")
@@ -162,6 +178,11 @@ class DatabaseStore:
         buf = io.BytesIO(blob)
         return torch.load(buf, map_location="cpu", weights_only=True)
 
+    def _embedding_average_weight(self, count: int) -> float:
+        base = _settings.embedding_average_weight_new - (4 * _settings.embedding_average_ramp_factor)
+        weight = base + (count * _settings.embedding_average_ramp_factor)
+        return max(0.0, min(weight, 1.0))
+
     def add_item(
         self,
         label: str,
@@ -173,6 +194,7 @@ class DatabaseStore:
         label_embedding: Optional[torch.Tensor] = None,
         ocr_embedding: Optional[torch.Tensor] = None,
         visual_attributes: Optional[dict] = None,
+        embedding_count: int = 1,
     ) -> int:
         if timestamp is None:
             timestamp = time.time()
@@ -181,8 +203,8 @@ class DatabaseStore:
         ocr_blob = self._tensor_to_blob(ocr_embedding) if ocr_embedding is not None else None
         cur = self._conn.execute(
             "INSERT INTO items "
-            "(label, combined_embedding, ocr_text, image_path, confidence, timestamp, label_embedding, ocr_embedding, visual_attributes) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(label, combined_embedding, ocr_text, image_path, confidence, timestamp, label_embedding, ocr_embedding, embedding_count, visual_attributes) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 label,
                 blob,
@@ -192,11 +214,89 @@ class DatabaseStore:
                 timestamp,
                 label_blob,
                 ocr_blob,
+                embedding_count,
                 json.dumps(visual_attributes or {}),
             ),
         )
         self._conn.commit()
         return cur.lastrowid
+
+    def upsert_or_average_item(
+        self,
+        label: str,
+        combined_embedding: torch.Tensor,
+        ocr_text: str = "",
+        image_path: str = "",
+        confidence: float = 0.0,
+        timestamp: Optional[float] = None,
+        label_embedding: Optional[torch.Tensor] = None,
+        ocr_embedding: Optional[torch.Tensor] = None,
+        visual_attributes: Optional[dict] = None,
+    ) -> dict:
+        if timestamp is None:
+            timestamp = time.time()
+        row = self._conn.execute(
+            "SELECT id, combined_embedding, embedding_count FROM items "
+            "WHERE label = ? ORDER BY id DESC LIMIT 1",
+            (label,),
+        ).fetchone()
+        if row is None:
+            item_id = self.add_item(
+                label=label,
+                combined_embedding=combined_embedding,
+                ocr_text=ocr_text,
+                image_path=image_path,
+                confidence=confidence,
+                timestamp=timestamp,
+                label_embedding=label_embedding,
+                ocr_embedding=ocr_embedding,
+                visual_attributes=visual_attributes,
+                embedding_count=1,
+            )
+            return {"item_id": item_id, "averaged": False, "embedding_count": 1}
+
+        item_id, old_blob, old_count = row
+        old_embedding = self._blob_to_tensor(old_blob)
+        old_count = int(old_count or 1)
+        new_count = old_count + 1
+        weight_new = self._embedding_average_weight(new_count)
+        weight_old = 1.0 - weight_new
+        new_embedding = combined_embedding.detach().cpu()
+        blended = (weight_new * new_embedding) + (weight_old * old_embedding)
+        blob = self._tensor_to_blob(blended)
+        label_blob = self._tensor_to_blob(label_embedding) if label_embedding is not None else None
+        ocr_blob = self._tensor_to_blob(ocr_embedding) if ocr_embedding is not None else None
+        self._conn.execute(
+            "UPDATE items SET "
+            "combined_embedding = ?, ocr_text = ?, image_path = ?, confidence = ?, timestamp = ?, "
+            "label_embedding = ?, ocr_embedding = ?, embedding_count = ?, visual_attributes = ? "
+            "WHERE id = ?",
+            (
+                blob,
+                ocr_text or "",
+                image_path or "",
+                confidence,
+                timestamp,
+                label_blob,
+                ocr_blob,
+                new_count,
+                json.dumps(visual_attributes or {}),
+                item_id,
+            ),
+        )
+        self._conn.execute(
+            "DELETE FROM items WHERE label = ? AND id != ?",
+            (label, item_id),
+        )
+        self._conn.commit()
+        if _log is not None:
+            _log.info({
+                "event": "embedding_averaged",
+                "label": label,
+                "count": new_count,
+                "weight": round(weight_new, 4),
+            })
+        return {"item_id": item_id, "averaged": True, "embedding_count": new_count}
 
     def get_all_items(self) -> list[dict]:
         rows = self._conn.execute(
@@ -314,6 +414,15 @@ class DatabaseStore:
         ).fetchone()
         if row and row[0] is not None:
             return float(row[0])
+        return None
+
+    def get_embedding_count(self, label: str) -> Optional[int]:
+        row = self._conn.execute(
+            "SELECT embedding_count FROM items WHERE label = ? ORDER BY id DESC LIMIT 1",
+            (label,),
+        ).fetchone()
+        if row and row[0] is not None:
+            return int(row[0])
         return None
 
     def delete_item(self, item_id: int) -> bool:

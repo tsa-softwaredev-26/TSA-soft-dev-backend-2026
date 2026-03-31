@@ -107,13 +107,13 @@ class RememberPipeline:
 
         self.db = DatabaseStore(Path(_settings.db_path))
 
-    def add_to_database(self, embedding, metadata):
+    def add_to_database(self, embedding, metadata) -> dict:
         ocr_text = metadata.get("ocr_text", "")
         ocr_embedding = None
         if ocr_text and self.text_embedder is not None:
             ocr_embedding = self.text_embedder.embed_text(ocr_text)
 
-        self.db.add_item(
+        return self.db.upsert_or_average_item(
             label=metadata["label"],
             combined_embedding=embedding,
             ocr_text=ocr_text,
@@ -418,12 +418,8 @@ class RememberPipeline:
         # Query historical average BEFORE writing the new item
         avg_conf = self.db.get_label_avg_confidence(label)
 
-        # Auto-replace: remove any previous teaches for this label before storing
-        # the new one. Queried avg_conf already captured the history above.
         db_t0 = time.monotonic()
-        replaced_count = self.db.delete_items_by_label(label)
-
-        self.add_to_database(
+        db_result = self.add_to_database(
             combined,
             metadata={
                 "label": label,
@@ -449,7 +445,7 @@ class RememberPipeline:
             "is_blurry": is_blurry,
             "is_dark": False,
             "darkness_level": round(lum, 2),
-            "replaced_previous": replaced_count > 0,
+            "replaced_previous": db_result.get("averaged", False),
             "second_pass": second_pass_prompt is not None,
             "second_pass_prompt": second_pass_prompt,
             "box": box,

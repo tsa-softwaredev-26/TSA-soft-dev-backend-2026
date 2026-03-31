@@ -76,6 +76,10 @@ class Settings:
     projection_head_path: str = "models/projection_head.pt"
     projection_head_dim: int = 1536
 
+    # Embedding averaging (remember mode)
+    embedding_average_weight_new: float = 0.7
+    embedding_average_ramp_factor: float = 0.05
+
     # VRAM management; offload exclusive-pipeline models to CPU RAM between calls.
     # Enable on GPUs with < 8 GB VRAM (e.g. GTX 1060 6 GB).
     # Remember mode keeps GDino + DINOv3 + CLIP on GPU; offloads YOLOE + Depth.
