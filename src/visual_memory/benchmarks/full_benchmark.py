@@ -18,6 +18,7 @@ test set (simulating real scan conditions after teaching).
 from __future__ import annotations
 
 import argparse
+import gc
 import csv
 import json
 import sys
@@ -49,6 +50,7 @@ from visual_memory.engine.model_registry import registry
 from visual_memory.engine.text_recognition import TextRecognizer
 from visual_memory.learning import ProjectionHead, ProjectionTrainer
 from visual_memory.utils.image_utils import load_image
+from visual_memory.utils.memory_monitor import MemoryMonitor
 from visual_memory.utils.quality_utils import mean_luminance, estimate_text_likelihood
 from visual_memory.utils.similarity_utils import find_match
 
@@ -128,6 +130,7 @@ def _embed_rows(
     images_dir: Path,
     no_ocr: bool,
     settings: Settings,
+    monitor: Optional[MemoryMonitor] = None,
 ) -> Dict[str, dict]:
     embedded: Dict[str, dict] = {}
     ocr_client = TextRecognizer() if not no_ocr else None
@@ -178,6 +181,11 @@ def _embed_rows(
             "text_likelihood": round(text_likelihood, 3),
             "should_skip_ocr": text_likelihood < settings.ocr_text_likelihood_threshold,
         }
+        if monitor is not None and (i + 1) % 20 == 0:
+            if monitor.suggest_throttle():
+                monitor.log_memory_state(level="warning")
+                time.sleep(5)
+                gc.collect()
     return embedded
 
 
@@ -262,11 +270,12 @@ def _eval_retrieval(
     database: List[Tuple[str, torch.Tensor]],
     head: ProjectionHead,
     threshold: float,
+    monitor: Optional[MemoryMonitor] = None,
 ) -> List[dict]:
     head.eval()
     projected_db = [(lbl, head.project(e)) for lbl, e in database]
     results = []
-    for fname in test_set:
+    for i, fname in enumerate(test_set):
         data = embedded[fname]
         test_emb = data["embedding"]
         true_label = data["label"]
@@ -301,6 +310,11 @@ def _eval_retrieval(
             "text_likelihood": data["text_likelihood"],
             "should_skip_ocr": data["should_skip_ocr"],
         })
+        if monitor is not None and (i + 1) % 20 == 0:
+            if monitor.suggest_throttle():
+                monitor.log_memory_state(level="warning")
+                time.sleep(5)
+                gc.collect()
     return results
 
 
@@ -355,10 +369,11 @@ def _eval_detection(
     test_set: List[str],
     embedded: Dict[str, dict],
     settings: Settings,
+    monitor: Optional[MemoryMonitor] = None,
 ) -> Dict[str, dict]:
     detector = registry.gdino_detector
     results: Dict[str, dict] = {}
-    for fname in test_set:
+    for i, fname in enumerate(test_set):
         data = embedded[fname]
         t0 = time.perf_counter()
         det, used_prompt = _detect_with_fallback(detector, data["image"], data["dino_prompt"], settings)
@@ -371,6 +386,11 @@ def _eval_detection(
             results[fname] = {"detected": 0, "confidence": 0.0,
                               "box": None, "lat_detect": lat_detect,
                               "second_pass_prompt": None}
+        if monitor is not None and (i + 1) % 20 == 0:
+            if monitor.suggest_throttle():
+                monitor.log_memory_state(level="warning")
+                time.sleep(5)
+                gc.collect()
     return results
 
 
@@ -388,6 +408,7 @@ def _eval_depth(
     dino_results: Dict[str, dict],
     focal_length: Optional[float],
     no_depth: bool,
+    monitor: Optional[MemoryMonitor] = None,
 ) -> Dict[str, dict]:
     blank = {"predicted_ft": None, "abs_error": None, "pct_error": None, "lat_depth": 0.0}
     results = {fname: dict(blank) for fname in test_set}
@@ -400,7 +421,7 @@ def _eval_depth(
         print("  [info] depth checkpoint not found; skipping")
         return results
 
-    for fname in test_set:
+    for i, fname in enumerate(test_set):
         data = embedded[fname]
         det = dino_results[fname]
         gt_dist = data["distance_ft"]
@@ -417,6 +438,11 @@ def _eval_depth(
             "pct_error": abs_err / gt_dist * 100.0,
             "lat_depth": lat_depth,
         }
+        if monitor is not None and (i + 1) % 20 == 0:
+            if monitor.suggest_throttle():
+                monitor.log_memory_state(level="warning")
+                time.sleep(5)
+                gc.collect()
     return results
 
 
@@ -577,6 +603,18 @@ def _write_output(
     print(f"\nResults written to: {csv_path}, {json_path}")
 
 
+def _enforce_memory_guard(monitor: MemoryMonitor, phase_name: str) -> None:
+    if monitor.is_oom_risk(threshold=0.80):
+        monitor.log_memory_state(level="critical")
+        killed = monitor.cleanup_zombies(max_age_hours=1)
+        if killed:
+            print(f"  [memory] cleaned zombie pids before {phase_name}: {killed}")
+        if monitor.is_oom_risk(threshold=0.85):
+            raise RuntimeError(f"OOM risk too high before {phase_name}, aborting benchmark")
+    elif monitor.suggest_throttle():
+        monitor.log_memory_state(level="warning")
+
+
 def _print_summary(
     retrieval: List[dict],
     dino: Dict[str, dict],
@@ -702,6 +740,7 @@ def main() -> None:
     args = _parse_args()
     settings = Settings()
     threshold = settings.similarity_threshold
+    monitor = MemoryMonitor()
 
     print(f"Dataset: {args.dataset}")
     print(f"Images:  {args.images}")
@@ -710,14 +749,16 @@ def main() -> None:
           f"blur={BLUR_THRESHOLD:.1f}")
 
     # Phase 1: Embed
+    _enforce_memory_guard(monitor, "phase 1")
     print("\n[1/7] Loading and embedding images...")
     rows = _load_dataset(args.dataset)
-    embedded = _embed_rows(rows, args.images, args.no_ocr, settings)
+    embedded = _embed_rows(rows, args.images, args.no_ocr, settings, monitor=monitor)
     if not embedded:
         print("No images found. Check --images path.", file=sys.stderr)
         sys.exit(1)
 
     # Phase 2: Split
+    _enforce_memory_guard(monitor, "phase 2")
     print("\n[2/7] Splitting: 1ft_bright_clean -> DB, all 1ft -> triplet train, 3ft/6ft -> test...")
     train_set, db_set, test_set = _split(embedded)
     print(f"  db (teach): {len(db_set)},  triplet train: {len(train_set)},  test (scan): {len(test_set)}")
@@ -729,35 +770,41 @@ def main() -> None:
         sys.exit(1)
 
     # Phase 3: Database
+    _enforce_memory_guard(monitor, "phase 3")
     print("\n[3/7] Building reference database from 1ft_bright_clean images...")
     database = _build_database(db_set, embedded)
     print(f"  {len(database)} entries")
 
     # Phase 4: Train
+    _enforce_memory_guard(monitor, "phase 4")
     print(f"\n[4/7] Training projection head ({args.epochs} epochs, all 1ft images)...")
     head_path = _BENCHMARKS_DIR / "projection_head_bench.pt"
     head, final_loss = _train_head(train_set, embedded, args.epochs, args.lr, head_path)
     print(f"  final loss: {final_loss:.4f}")
 
     # Phase 5: Retrieval
+    _enforce_memory_guard(monitor, "phase 5")
     print("\n[5/7] Evaluating retrieval (3ft/6ft test set against 1ft_bright_clean DB)...")
-    retrieval_results = _eval_retrieval(test_set, embedded, database, head, threshold)
+    retrieval_results = _eval_retrieval(test_set, embedded, database, head, threshold, monitor=monitor)
 
     # Phase 6: Detection
+    _enforce_memory_guard(monitor, "phase 6")
     print("\n[6/7] Evaluating GroundingDINO detection (with full fallback chain)...")
-    dino_results = _eval_detection(test_set, embedded, settings)
+    dino_results = _eval_detection(test_set, embedded, settings, monitor=monitor)
 
     # Phase 7: Depth
+    _enforce_memory_guard(monitor, "phase 7")
     print("\n[7/7] Evaluating depth estimation...")
     depth_results = _eval_depth(
-        test_set, embedded, dino_results, args.focal_length, args.no_depth)
+        test_set, embedded, dino_results, args.focal_length, args.no_depth, monitor=monitor)
 
     # Negative FP evaluation
     neg_results: List[dict] = []
     if args.negative_dataset.exists():
         print("\n[neg] Evaluating false positive rate on negative images...")
         neg_rows = _load_negative_dataset(args.negative_dataset)
-        neg_embedded = _embed_rows(neg_rows, args.images_neg, args.no_ocr, settings)
+        _enforce_memory_guard(monitor, "negative evaluation")
+        neg_embedded = _embed_rows(neg_rows, args.images_neg, args.no_ocr, settings, monitor=monitor)
         if neg_embedded:
             neg_results = _eval_negatives(neg_embedded, database, head, threshold)
             print(f"  {len(neg_results)} negative images evaluated")
