@@ -418,6 +418,10 @@ deactivate
 The service files in `deploy/` assume the flat layout (`/opt/spaitra/venv-core`).
 If your venvs are inside the repo subdir, edit the two paths before copying:
 
+WebSocket voice sessions currently store per-connection state in process memory.
+Run the core gunicorn service with exactly one worker (`-w 1`) until session state
+is moved to a shared backend.
+
 ```bash
 # For subdirectory layout; create adjusted copies:
 sed 's|/opt/spaitra/venv-core|'"$REPO"'/venv-core|g; s|/opt/spaitra/venv-ocr|'"$REPO"'/venv-ocr|g; s|WorkingDirectory=/opt/spaitra$|WorkingDirectory='"$REPO"'|' \
@@ -436,6 +440,9 @@ systemctl enable --now spaitra-core
 
 systemctl status spaitra-ocr spaitra-core --no-pager
 journalctl -u spaitra-core -n 50 --no-pager
+
+# Verify worker count stays at 1 (required for in-memory WS session state)
+systemctl cat spaitra-core | grep -E -- "-w[[:space:]]+1|--workers[[:space:]]+1"
 
 # Harden file permissions once env files and services are in place
 sudo -u spaitra bash $REPO/deploy/secure_permissions.sh "$REPO"
