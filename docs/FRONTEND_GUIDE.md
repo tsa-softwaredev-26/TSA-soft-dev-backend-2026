@@ -529,9 +529,185 @@ Content-Type: application/json
 
 ---
 
+## WebSocket Voice Session
+
+The primary interface for voice interaction. A single persistent WebSocket connection per user. The server manages the entire conversation state machine. The frontend connects, plays whatever audio narration it receives, sends audio/images when the server requests them, and handles navigation gestures by emitting events.
+
+### Connecting
+
+```
+ws://server/socket.io/
+```
+
+Auth: pass the API key as a query param or header on the upgrade request.
+
+```
+ws://server/socket.io/?key=<API_KEY>
+```
+or
+```
+GET /socket.io/  HTTP/1.1
+X-API-Key: <API_KEY>
+```
+
+On connect, the server immediately sends a `tts` event. If the DB is empty, this is the onboarding welcome. Otherwise it's "Ready."
+
+```json
+{ "narration": "Ready.", "next_state": "idle" }
+```
+
+### Onboarding (empty DB)
+
+```json
+{
+  "narration": "Welcome to Spaitra. I remember where your things are. Grab two items near you and let's start. Say teach, then the name of the first item.",
+  "next_state": "onboarding_teach"
+}
+```
+
+The server drives the full onboarding flow:
+
+1. **Teach item 1** - user says "teach my keys", server asks for photo via `control: request_image`, user sends image, server saves and asks for room
+2. **Location item 1** - user says "the kitchen", server saves sighting, prompts for second item
+3. **Teach item 2** - same flow as item 1
+4. **Location item 2** - server transitions to `onboarding_await_scan`
+5. **Scan** - user says "scan", server asks for photo, user sends it, server announces what it found and introduces swiping
+6. **Swipe intro** - user swipes through items (navigate events), server introduces the ask demo
+7. **Ask demo** - user asks "where is my keys", server answers and completes onboarding
+
+No feedback is collected during onboarding.
+
+### Client to Server Events
+
+#### `audio`
+
+Send after the user finishes speaking (or tap-to-speak gesture). Always include `audio`. Include `image` when the camera is open. Include `focal_length_px` whenever available.
+
+```json
+{
+  "audio": "<base64-encoded webm or ogg>",
+  "image": "<base64-encoded jpeg, optional>",
+  "focal_length_px": 3094.0
+}
+```
+
+The server emits `transcription` immediately after processing the audio, then dispatches the result.
+
+#### `navigate`
+
+Send when the user swipes to browse scan results. The server tracks the current item index and returns the right narration.
+
+```json
+{ "direction": "next" }
+```
+
+```json
+{ "direction": "prev" }
+```
+
+Optionally jump to a specific index:
+
+```json
+{ "direction": "select", "item_index": 2 }
+```
+
+### Server to Client Events
+
+#### `tts`
+
+The server's primary output. Read `narration` aloud with the device TTS engine. Apply `voice_speed` from `/user-settings`.
+
+```json
+{ "narration": "Wallet to your left, 2 feet.", "next_state": "focused_on_item" }
+```
+
+`next_state` is informational - the server already manages state. The frontend can use it to update UI (e.g. show a scan overlay when `focused_on_item`).
+
+#### `transcription`
+
+Emitted immediately after Whisper processes the audio. Use for live UI feedback (show what was heard before the result arrives).
+
+```json
+{ "text": "where is my wallet", "context_used": true }
+```
+
+#### `action_result`
+
+Structured result of the dispatched action. Use for rendering scan matches, find results, etc.
+
+```json
+{ "type": "scan", "data": { "matches": [...], "count": 2, "scan_id": "abc123" } }
+```
+
+```json
+{ "type": "find", "data": { "label": "wallet", "found": true, "last_sighting": { ... } } }
+```
+
+```json
+{ "type": "remember", "data": { "success": true, "result": { "label": "wallet", ... } } }
+```
+
+```json
+{ "type": "set_location", "data": { "label": "wallet", "location": "kitchen" } }
+```
+
+```json
+{ "type": "item_focus", "data": { "label": "wallet", "narration": "Wallet to your left." } }
+```
+
+#### `control`
+
+Instruction to the frontend to perform an action.
+
+```json
+{ "action": "request_image", "context": "scan" }
+```
+
+When `request_image` arrives: activate camera, capture, and send the next `audio` event with the `image` field populated.
+
+#### `error`
+
+```json
+{ "code": "transcription_failed", "message": "Transcription failed." }
+```
+
+Common codes: `transcription_failed`, `scan_failed`, `remember_failed`, `bad_payload`, `bad_state`.
+
+### Session States (server-side)
+
+The server emits `next_state` in each `tts` event so the frontend can update its UI layer, but the server owns the authoritative state.
+
+| State | What it means |
+|---|---|
+| `idle` | Ready for any command |
+| `awaiting_image` | Server waiting for a photo (sent `control: request_image`) |
+| `awaiting_location` | Server waiting for room name after a teach |
+| `awaiting_confirmation` | Server waiting for yes/no |
+| `focused_on_item` | Scan results active; item navigation and queries enabled |
+| `onboarding_teach` | First-time: teaching items |
+| `onboarding_await_scan` | First-time: ready for the demo scan |
+
+### Hints
+
+The server plants short feature hints in TTS narrations as the user reaches usage milestones:
+
+| Hint | Trigger |
+|---|---|
+| "Swipe right to browse each detected item one at a time." | After first scan |
+| "If a detection was wrong, just say wrong." | After second scan |
+| "You can ask questions about your items, like what is in a receipt." | After second teach |
+| "Try saying export this when looking at a document." | After third teach |
+| "Double tap to save a location while browsing items." | After fifth scan |
+
+Hints appear appended to the normal narration. They are not announced mid-sentence or as separate events.
+
+---
+
 ## Ask Mode
 
 ### Unified voice routing with state: POST /voice
+
+The HTTP endpoint is kept for backwards compatibility. Prefer the WebSocket interface for all new development.
 
 Use `/voice` when you want one endpoint to transcribe audio and route commands.
 Always send frontend state so the backend can disambiguate short follow-ups.
