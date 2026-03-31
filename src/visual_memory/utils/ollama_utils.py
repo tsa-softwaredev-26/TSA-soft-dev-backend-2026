@@ -37,7 +37,7 @@ _WS_RE = re.compile(r"\s+")
 _SAFE_TEXT_RE = re.compile(r"[^a-zA-Z0-9\s\-']")
 _TERM_FROM_JSONISH_RE = re.compile(r'"term"\s*:\s*"([^"]+)"', re.IGNORECASE)
 _ARTICLE_PREFIX_RE = re.compile(r"^(?:the|my|a|an)\s+", re.IGNORECASE)
-_INTENT_FROM_TEXT_RE = re.compile(r"\b(read_ocr|export_ocr|rename|find|describe)\b", re.IGNORECASE)
+_INTENT_FROM_TEXT_RE = re.compile(r"\b(read_ocr|export_ocr|rename|find|describe|question|ocr_question)\b", re.IGNORECASE)
 _NONE_INTENT_RE = re.compile(r"\b(none|unknown|unclear|other)\b", re.IGNORECASE)
 _DISALLOWED_PATTERNS = [
     re.compile(r"\b(ignore|override)\b.{0,30}\b(instruction|system|prompt|policy)\b", re.IGNORECASE),
@@ -514,7 +514,7 @@ def extract_search_term(query: str, known_labels: list[str] | None = None) -> st
 def extract_item_intent(query: str, known_labels: list[str] | None = None) -> str | None:
     """Classify the user's intent when asking about a specific focused item.
 
-    Returns one of: read_ocr | export_ocr | rename | find | describe
+    Returns one of: read_ocr | export_ocr | rename | find | describe | question | ocr_question
     Returns None if Ollama is unavailable; caller falls back to keyword matching.
     """
     if _contains_disallowed_content(query):
@@ -564,7 +564,7 @@ def extract_item_intent(query: str, known_labels: list[str] | None = None) -> st
     retry_prompt = (
         "Return JSON only.\n"
         'Output format: {"intent": "<value>"}\n'
-        "Valid values: read_ocr, export_ocr, rename, find, describe.\n"
+        "Valid values: read_ocr, export_ocr, rename, find, describe, question, ocr_question.\n"
         "If unclear, return find.\n"
         f"Request: {json.dumps(query)}"
     )
