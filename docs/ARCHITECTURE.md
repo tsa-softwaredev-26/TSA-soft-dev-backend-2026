@@ -315,7 +315,7 @@ Multi-image (POST /remember with `images[]`):
 ### `config/settings.py` - `Settings`
 - Single dataclass, all ML tuning params in one place
 - Detection: `grounding_dino_model`, `box_threshold`, `text_threshold`, `yoloe_confidence`, `yoloe_iou`
-- Embedding: `image_embedder_model` (`dinov3-vits16`), `embedder_model` (`clip-vit-base-patch32`)
+- Embedding: `image_embedder_model` (`dinov3-vitl16`), `embedder_model` (`clip-vit-base-patch32`)
 - Matching: `similarity_threshold` (0.2), `dedup_iou_threshold` (0.5), `narration_high_confidence` (0.6)
 - OCR: `ocr_backend` ("http"), `ocr_service_url`, `ocr_health_url` (derived from ocr_service_url if empty), `ocr_timeout_seconds`, `ocr_languages`, `ocr_min_confidence` (0.3), `text_similarity_threshold` (0.4)
 - Toggles (env-overridable): `enable_depth` (`ENABLE_DEPTH`), `enable_ocr` (`ENABLE_OCR`), `enable_dedup` (`ENABLE_DEDUP`)
@@ -731,7 +731,7 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - Database: SQLite via DatabaseStore; items, sightings, feedback, user_state, ml_settings all in one file
 - OCR pre-check: `estimate_text_likelihood()` skips OCR service calls for plain-color crops
 - OCR backend: external HTTP service (`ocr_backend = "http"`, `ocr_health_url` settable via `OCR_HEALTH_URL`)
-- Image embedder: DINOv3 ViT-S/16 (`facebook/dinov3-vits16-pretrain-lvd1689m`, gated on HuggingFace)
+- Image embedder: DINOv3 ViT-L/16 (`facebook/dinov3-vitl16-pretrain-lvd1689m`, gated on HuggingFace)
 - Text embedder: CLIP text encoder only (`openai/clip-vit-base-patch32`, 512-dim, ~180MB)
 - Deployment: `deploy/install.sh` installs systemd units from templates; primary units are `deploy/spaitra-core.service` and `deploy/spaitra-ocr.service`
  - Debug endpoints: /debug/state, /debug/echo, /debug/image, /debug/db, /debug/logs, /debug/perf, /debug/test-remember, /debug/test-scan, /debug/wipe (selective), /debug/config (live settings patch)

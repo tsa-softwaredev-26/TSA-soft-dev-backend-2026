@@ -14,7 +14,7 @@ class Settings:
     yoloe_iou: float = 0.45
 
     # Image embedder (both modes) - DINOv3 vision-only, better object discrimination
-    image_embedder_model: str = "facebook/dinov3-vits16-pretrain-lvd1689m"
+    image_embedder_model: str = "facebook/dinov3-vitl16-pretrain-lvd1689m"
 
     # Text embedder (both modes) - CLIP text encoder only (no vision model loaded)
     embedder_model: str = "openai/clip-vit-base-patch32"
