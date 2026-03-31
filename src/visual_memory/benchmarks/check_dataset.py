@@ -79,7 +79,7 @@ def main() -> None:
 
     # receipt ground truth
     gt_dir = _BENCHMARKS_DIR / "ground_truth"
-    for rid in ("receipt_grocery", "receipt_cvs"):
+    for rid in ("receipt_salon", "receipt_eye_doctor"):
         gt_file = gt_dir / f"{rid}.txt"
         status = "ok" if gt_file.exists() else "MISSING; run: python -m visual_memory.benchmarks.redact_receipt"
         print(f"Ground truth {rid}: {status}")

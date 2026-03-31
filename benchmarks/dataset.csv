@@ -3,123 +3,123 @@
 # Place images in benchmarks/images/ before running full_benchmark.py
 # Receipts: run redact_receipt.py first.
 image,label,ground_truth_distance_ft,dino_prompt
-wallet_zipper_1ft_bright_clean.jpg,wallet_zipper,1.0,wallet
-wallet_zipper_1ft_bright_messy.jpg,wallet_zipper,1.0,wallet
-wallet_zipper_1ft_dim_clean.jpg,wallet_zipper,1.0,wallet
-wallet_zipper_1ft_dim_messy.jpg,wallet_zipper,1.0,wallet
-wallet_zipper_3ft_bright_clean.jpg,wallet_zipper,3.0,wallet
-wallet_zipper_3ft_bright_messy.jpg,wallet_zipper,3.0,wallet
-wallet_zipper_3ft_dim_clean.jpg,wallet_zipper,3.0,wallet
-wallet_zipper_3ft_dim_messy.jpg,wallet_zipper,3.0,wallet
-wallet_zipper_6ft_bright_clean.jpg,wallet_zipper,6.0,wallet
-wallet_zipper_6ft_bright_messy.jpg,wallet_zipper,6.0,wallet
-wallet_zipper_6ft_dim_clean.jpg,wallet_zipper,6.0,wallet
-wallet_zipper_6ft_dim_messy.jpg,wallet_zipper,6.0,wallet
-wallet_trifold_1ft_bright_clean.jpg,wallet_trifold,1.0,wallet
-wallet_trifold_1ft_bright_messy.jpg,wallet_trifold,1.0,wallet
-wallet_trifold_1ft_dim_clean.jpg,wallet_trifold,1.0,wallet
-wallet_trifold_1ft_dim_messy.jpg,wallet_trifold,1.0,wallet
-wallet_trifold_3ft_bright_clean.jpg,wallet_trifold,3.0,wallet
-wallet_trifold_3ft_bright_messy.jpg,wallet_trifold,3.0,wallet
-wallet_trifold_3ft_dim_clean.jpg,wallet_trifold,3.0,wallet
-wallet_trifold_3ft_dim_messy.jpg,wallet_trifold,3.0,wallet
-wallet_trifold_6ft_bright_clean.jpg,wallet_trifold,6.0,wallet
-wallet_trifold_6ft_bright_messy.jpg,wallet_trifold,6.0,wallet
-wallet_trifold_6ft_dim_clean.jpg,wallet_trifold,6.0,wallet
-wallet_trifold_6ft_dim_messy.jpg,wallet_trifold,6.0,wallet
-magnesium_bottle_1ft_bright_clean.jpg,magnesium_bottle,1.0,book
-magnesium_bottle_1ft_bright_messy.jpg,magnesium_bottle,1.0,book
-magnesium_bottle_1ft_dim_clean.jpg,magnesium_bottle,1.0,book
-magnesium_bottle_1ft_dim_messy.jpg,magnesium_bottle,1.0,book
-magnesium_bottle_3ft_bright_clean.jpg,magnesium_bottle,3.0,book
-magnesium_bottle_3ft_bright_messy.jpg,magnesium_bottle,3.0,book
-magnesium_bottle_3ft_dim_clean.jpg,magnesium_bottle,3.0,book
-magnesium_bottle_3ft_dim_messy.jpg,magnesium_bottle,3.0,book
-magnesium_bottle_6ft_bright_clean.jpg,magnesium_bottle,6.0,book
-magnesium_bottle_6ft_bright_messy.jpg,magnesium_bottle,6.0,book
-magnesium_bottle_6ft_dim_clean.jpg,magnesium_bottle,6.0,book
-magnesium_bottle_6ft_dim_messy.jpg,magnesium_bottle,6.0,book
-water_bottle_1ft_bright_clean.jpg,water_bottle,1.0,book
-water_bottle_1ft_bright_messy.jpg,water_bottle,1.0,book
-water_bottle_1ft_dim_clean.jpg,water_bottle,1.0,book
-water_bottle_1ft_dim_messy.jpg,water_bottle,1.0,book
-water_bottle_3ft_bright_clean.jpg,water_bottle,3.0,book
-water_bottle_3ft_bright_messy.jpg,water_bottle,3.0,book
-water_bottle_3ft_dim_clean.jpg,water_bottle,3.0,book
-water_bottle_3ft_dim_messy.jpg,water_bottle,3.0,book
-water_bottle_6ft_bright_clean.jpg,water_bottle,6.0,book
-water_bottle_6ft_bright_messy.jpg,water_bottle,6.0,book
-water_bottle_6ft_dim_clean.jpg,water_bottle,6.0,book
-water_bottle_6ft_dim_messy.jpg,water_bottle,6.0,book
-sunglasses_sun_1ft_bright_clean.jpg,sunglasses_sun,1.0,sunglasses
-sunglasses_sun_1ft_bright_messy.jpg,sunglasses_sun,1.0,sunglasses
-sunglasses_sun_1ft_dim_clean.jpg,sunglasses_sun,1.0,sunglasses
-sunglasses_sun_1ft_dim_messy.jpg,sunglasses_sun,1.0,sunglasses
-sunglasses_sun_3ft_bright_clean.jpg,sunglasses_sun,3.0,sunglasses
-sunglasses_sun_3ft_bright_messy.jpg,sunglasses_sun,3.0,sunglasses
-sunglasses_sun_3ft_dim_clean.jpg,sunglasses_sun,3.0,sunglasses
-sunglasses_sun_3ft_dim_messy.jpg,sunglasses_sun,3.0,sunglasses
-sunglasses_sun_6ft_bright_clean.jpg,sunglasses_sun,6.0,sunglasses
-sunglasses_sun_6ft_bright_messy.jpg,sunglasses_sun,6.0,sunglasses
-sunglasses_sun_6ft_dim_clean.jpg,sunglasses_sun,6.0,sunglasses
-sunglasses_sun_6ft_dim_messy.jpg,sunglasses_sun,6.0,sunglasses
-glasses_prescription_1ft_bright_clean.jpg,glasses_prescription,1.0,glasses
-glasses_prescription_1ft_bright_messy.jpg,glasses_prescription,1.0,glasses
-glasses_prescription_1ft_dim_clean.jpg,glasses_prescription,1.0,glasses
-glasses_prescription_1ft_dim_messy.jpg,glasses_prescription,1.0,glasses
-glasses_prescription_3ft_bright_clean.jpg,glasses_prescription,3.0,glasses
-glasses_prescription_3ft_bright_messy.jpg,glasses_prescription,3.0,glasses
-glasses_prescription_3ft_dim_clean.jpg,glasses_prescription,3.0,glasses
-glasses_prescription_3ft_dim_messy.jpg,glasses_prescription,3.0,glasses
-glasses_prescription_6ft_bright_clean.jpg,glasses_prescription,6.0,glasses
-glasses_prescription_6ft_bright_messy.jpg,glasses_prescription,6.0,glasses
-glasses_prescription_6ft_dim_clean.jpg,glasses_prescription,6.0,glasses
-glasses_prescription_6ft_dim_messy.jpg,glasses_prescription,6.0,glasses
-receipt_salon_1ft_bright_clean.jpg,receipt_salon,1.0,paper receipt
-receipt_salon_1ft_bright_messy.jpg,receipt_salon,1.0,paper receipt
-receipt_salon_1ft_dim_clean.jpg,receipt_salon,1.0,paper receipt
-receipt_salon_1ft_dim_messy.jpg,receipt_salon,1.0,paper receipt
-receipt_salon_3ft_bright_clean.jpg,receipt_salon,3.0,paper receipt
-receipt_salon_3ft_bright_messy.jpg,receipt_salon,3.0,paper receipt
-receipt_salon_3ft_dim_clean.jpg,receipt_salon,3.0,paper receipt
-receipt_salon_3ft_dim_messy.jpg,receipt_salon,3.0,paper receipt
-receipt_salon_6ft_bright_clean.jpg,receipt_salon,6.0,paper receipt
-receipt_salon_6ft_bright_messy.jpg,receipt_salon,6.0,paper receipt
-receipt_salon_6ft_dim_clean.jpg,receipt_salon,6.0,paper receipt
-receipt_salon_6ft_dim_messy.jpg,receipt_salon,6.0,paper receipt
-receipt_eye_doctor_1ft_bright_clean.jpg,receipt_eye_doctor,1.0,paper receipt
-receipt_eye_doctor_1ft_bright_messy.jpg,receipt_eye_doctor,1.0,paper receipt
-receipt_eye_doctor_1ft_dim_clean.jpg,receipt_eye_doctor,1.0,paper receipt
-receipt_eye_doctor_1ft_dim_messy.jpg,receipt_eye_doctor,1.0,paper receipt
-receipt_eye_doctor_3ft_bright_clean.jpg,receipt_eye_doctor,3.0,paper receipt
-receipt_eye_doctor_3ft_bright_messy.jpg,receipt_eye_doctor,3.0,paper receipt
-receipt_eye_doctor_3ft_dim_clean.jpg,receipt_eye_doctor,3.0,paper receipt
-receipt_eye_doctor_3ft_dim_messy.jpg,receipt_eye_doctor,3.0,paper receipt
-receipt_eye_doctor_6ft_bright_clean.jpg,receipt_eye_doctor,6.0,paper receipt
-receipt_eye_doctor_6ft_bright_messy.jpg,receipt_eye_doctor,6.0,paper receipt
-receipt_eye_doctor_6ft_dim_clean.jpg,receipt_eye_doctor,6.0,paper receipt
-receipt_eye_doctor_6ft_dim_messy.jpg,receipt_eye_doctor,6.0,paper receipt
-keys_house_1ft_bright_clean.jpg,keys_house,1.0,keys
-keys_house_1ft_bright_messy.jpg,keys_house,1.0,keys
-keys_house_1ft_dim_clean.jpg,keys_house,1.0,keys
-keys_house_1ft_dim_messy.jpg,keys_house,1.0,keys
-keys_house_3ft_bright_clean.jpg,keys_house,3.0,keys
-keys_house_3ft_bright_messy.jpg,keys_house,3.0,keys
-keys_house_3ft_dim_clean.jpg,keys_house,3.0,keys
-keys_house_3ft_dim_messy.jpg,keys_house,3.0,keys
-keys_house_6ft_bright_clean.jpg,keys_house,6.0,keys
-keys_house_6ft_bright_messy.jpg,keys_house,6.0,keys
-keys_house_6ft_dim_clean.jpg,keys_house,6.0,keys
-keys_house_6ft_dim_messy.jpg,keys_house,6.0,keys
-keys_safe_1ft_bright_clean.jpg,keys_safe,1.0,keys
-keys_safe_1ft_bright_messy.jpg,keys_safe,1.0,keys
-keys_safe_1ft_dim_clean.jpg,keys_safe,1.0,keys
-keys_safe_1ft_dim_messy.jpg,keys_safe,1.0,keys
-keys_safe_3ft_bright_clean.jpg,keys_safe,3.0,keys
-keys_safe_3ft_bright_messy.jpg,keys_safe,3.0,keys
-keys_safe_3ft_dim_clean.jpg,keys_safe,3.0,keys
-keys_safe_3ft_dim_messy.jpg,keys_safe,3.0,keys
-keys_safe_6ft_bright_clean.jpg,keys_safe,6.0,keys
-keys_safe_6ft_bright_messy.jpg,keys_safe,6.0,keys
-keys_safe_6ft_dim_clean.jpg,keys_safe,6.0,keys
-keys_safe_6ft_dim_messy.jpg,keys_safe,6.0,keys
+wallet_zipper_1ft_bright_clean.jpeg,wallet_zipper,1.0,wallet
+wallet_zipper_1ft_bright_messy.jpeg,wallet_zipper,1.0,wallet
+wallet_zipper_1ft_dim_clean.jpeg,wallet_zipper,1.0,wallet
+wallet_zipper_1ft_dim_messy.jpeg,wallet_zipper,1.0,wallet
+wallet_zipper_3ft_bright_clean.jpeg,wallet_zipper,3.0,wallet
+wallet_zipper_3ft_bright_messy.jpeg,wallet_zipper,3.0,wallet
+wallet_zipper_3ft_dim_clean.jpeg,wallet_zipper,3.0,wallet
+wallet_zipper_3ft_dim_messy.jpeg,wallet_zipper,3.0,wallet
+wallet_zipper_6ft_bright_clean.jpeg,wallet_zipper,6.0,wallet
+wallet_zipper_6ft_bright_messy.jpeg,wallet_zipper,6.0,wallet
+wallet_zipper_6ft_dim_clean.jpeg,wallet_zipper,6.0,wallet
+wallet_zipper_6ft_dim_messy.jpeg,wallet_zipper,6.0,wallet
+wallet_trifold_1ft_bright_clean.jpeg,wallet_trifold,1.0,wallet
+wallet_trifold_1ft_bright_messy.jpeg,wallet_trifold,1.0,wallet
+wallet_trifold_1ft_dim_clean.jpeg,wallet_trifold,1.0,wallet
+wallet_trifold_1ft_dim_messy.jpeg,wallet_trifold,1.0,wallet
+wallet_trifold_3ft_bright_clean.jpeg,wallet_trifold,3.0,wallet
+wallet_trifold_3ft_bright_messy.jpeg,wallet_trifold,3.0,wallet
+wallet_trifold_3ft_dim_clean.jpeg,wallet_trifold,3.0,wallet
+wallet_trifold_3ft_dim_messy.jpeg,wallet_trifold,3.0,wallet
+wallet_trifold_6ft_bright_clean.jpeg,wallet_trifold,6.0,wallet
+wallet_trifold_6ft_bright_messy.jpeg,wallet_trifold,6.0,wallet
+wallet_trifold_6ft_dim_clean.jpeg,wallet_trifold,6.0,wallet
+wallet_trifold_6ft_dim_messy.jpeg,wallet_trifold,6.0,wallet
+magnesium_bottle_1ft_bright_clean.jpeg,magnesium_bottle,1.0,pill bottle
+magnesium_bottle_1ft_bright_messy.jpeg,magnesium_bottle,1.0,pill bottle
+magnesium_bottle_1ft_dim_clean.jpeg,magnesium_bottle,1.0,pill bottle
+magnesium_bottle_1ft_dim_messy.jpeg,magnesium_bottle,1.0,pill bottle
+magnesium_bottle_3ft_bright_clean.jpeg,magnesium_bottle,3.0,pill bottle
+magnesium_bottle_3ft_bright_messy.jpeg,magnesium_bottle,3.0,pill bottle
+magnesium_bottle_3ft_dim_clean.jpeg,magnesium_bottle,3.0,pill bottle
+magnesium_bottle_3ft_dim_messy.jpeg,magnesium_bottle,3.0,pill bottle
+magnesium_bottle_6ft_bright_clean.jpeg,magnesium_bottle,6.0,pill bottle
+magnesium_bottle_6ft_bright_messy.jpeg,magnesium_bottle,6.0,pill bottle
+magnesium_bottle_6ft_dim_clean.jpeg,magnesium_bottle,6.0,pill bottle
+magnesium_bottle_6ft_dim_messy.jpeg,magnesium_bottle,6.0,pill bottle
+water_bottle_1ft_bright_clean.jpeg,water_bottle,1.0,water bottle
+water_bottle_1ft_bright_messy.jpeg,water_bottle,1.0,water bottle
+water_bottle_1ft_dim_clean.jpeg,water_bottle,1.0,water bottle
+water_bottle_1ft_dim_messy.jpeg,water_bottle,1.0,water bottle
+water_bottle_3ft_bright_clean.jpeg,water_bottle,3.0,water bottle
+water_bottle_3ft_bright_messy.jpeg,water_bottle,3.0,water bottle
+water_bottle_3ft_dim_clean.jpeg,water_bottle,3.0,water bottle
+water_bottle_3ft_dim_messy.jpeg,water_bottle,3.0,water bottle
+water_bottle_6ft_bright_clean.jpeg,water_bottle,6.0,water bottle
+water_bottle_6ft_bright_messy.jpeg,water_bottle,6.0,water bottle
+water_bottle_6ft_dim_clean.jpeg,water_bottle,6.0,water bottle
+water_bottle_6ft_dim_messy.jpeg,water_bottle,6.0,water bottle
+sunglasses_sun_1ft_bright_clean.jpeg,sunglasses_sun,1.0,sunglasses
+sunglasses_sun_1ft_bright_messy.jpeg,sunglasses_sun,1.0,sunglasses
+sunglasses_sun_1ft_dim_clean.jpeg,sunglasses_sun,1.0,sunglasses
+sunglasses_sun_1ft_dim_messy.jpeg,sunglasses_sun,1.0,sunglasses
+sunglasses_sun_3ft_bright_clean.jpeg,sunglasses_sun,3.0,sunglasses
+sunglasses_sun_3ft_bright_messy.jpeg,sunglasses_sun,3.0,sunglasses
+sunglasses_sun_3ft_dim_clean.jpeg,sunglasses_sun,3.0,sunglasses
+sunglasses_sun_3ft_dim_messy.jpeg,sunglasses_sun,3.0,sunglasses
+sunglasses_sun_6ft_bright_clean.jpeg,sunglasses_sun,6.0,sunglasses
+sunglasses_sun_6ft_bright_messy.jpeg,sunglasses_sun,6.0,sunglasses
+sunglasses_sun_6ft_dim_clean.jpeg,sunglasses_sun,6.0,sunglasses
+sunglasses_sun_6ft_dim_messy.jpeg,sunglasses_sun,6.0,sunglasses
+glasses_prescription_1ft_bright_clean.jpeg,glasses_prescription,1.0,glasses
+glasses_prescription_1ft_bright_messy.jpeg,glasses_prescription,1.0,glasses
+glasses_prescription_1ft_dim_clean.jpeg,glasses_prescription,1.0,glasses
+glasses_prescription_1ft_dim_messy.jpeg,glasses_prescription,1.0,glasses
+glasses_prescription_3ft_bright_clean.jpeg,glasses_prescription,3.0,glasses
+glasses_prescription_3ft_bright_messy.jpeg,glasses_prescription,3.0,glasses
+glasses_prescription_3ft_dim_clean.jpeg,glasses_prescription,3.0,glasses
+glasses_prescription_3ft_dim_messy.jpeg,glasses_prescription,3.0,glasses
+glasses_prescription_6ft_bright_clean.jpeg,glasses_prescription,6.0,glasses
+glasses_prescription_6ft_bright_messy.jpeg,glasses_prescription,6.0,glasses
+glasses_prescription_6ft_dim_clean.jpeg,glasses_prescription,6.0,glasses
+glasses_prescription_6ft_dim_messy.jpeg,glasses_prescription,6.0,glasses
+receipt_salon_1ft_bright_clean.jpeg,receipt_salon,1.0,paper receipt
+receipt_salon_1ft_bright_messy.jpeg,receipt_salon,1.0,paper receipt
+receipt_salon_1ft_dim_clean.jpeg,receipt_salon,1.0,paper receipt
+receipt_salon_1ft_dim_messy.jpeg,receipt_salon,1.0,paper receipt
+receipt_salon_3ft_bright_clean.jpeg,receipt_salon,3.0,paper receipt
+receipt_salon_3ft_bright_messy.jpeg,receipt_salon,3.0,paper receipt
+receipt_salon_3ft_dim_clean.jpeg,receipt_salon,3.0,paper receipt
+receipt_salon_3ft_dim_messy.jpeg,receipt_salon,3.0,paper receipt
+receipt_salon_6ft_bright_clean.jpeg,receipt_salon,6.0,paper receipt
+receipt_salon_6ft_bright_messy.jpeg,receipt_salon,6.0,paper receipt
+receipt_salon_6ft_dim_clean.jpeg,receipt_salon,6.0,paper receipt
+receipt_salon_6ft_dim_messy.jpeg,receipt_salon,6.0,paper receipt
+receipt_eye_doctor_1ft_bright_clean.jpeg,receipt_eye_doctor,1.0,paper receipt
+receipt_eye_doctor_1ft_bright_messy.jpeg,receipt_eye_doctor,1.0,paper receipt
+receipt_eye_doctor_1ft_dim_clean.jpeg,receipt_eye_doctor,1.0,paper receipt
+receipt_eye_doctor_1ft_dim_messy.jpeg,receipt_eye_doctor,1.0,paper receipt
+receipt_eye_doctor_3ft_bright_clean.jpeg,receipt_eye_doctor,3.0,paper receipt
+receipt_eye_doctor_3ft_bright_messy.jpeg,receipt_eye_doctor,3.0,paper receipt
+receipt_eye_doctor_3ft_dim_clean.jpeg,receipt_eye_doctor,3.0,paper receipt
+receipt_eye_doctor_3ft_dim_messy.jpeg,receipt_eye_doctor,3.0,paper receipt
+receipt_eye_doctor_6ft_bright_clean.jpeg,receipt_eye_doctor,6.0,paper receipt
+receipt_eye_doctor_6ft_bright_messy.jpeg,receipt_eye_doctor,6.0,paper receipt
+receipt_eye_doctor_6ft_dim_clean.jpeg,receipt_eye_doctor,6.0,paper receipt
+receipt_eye_doctor_6ft_dim_messy.jpeg,receipt_eye_doctor,6.0,paper receipt
+keys_house_1ft_bright_clean.jpeg,keys_house,1.0,keys
+keys_house_1ft_bright_messy.jpeg,keys_house,1.0,keys
+keys_house_1ft_dim_clean.jpeg,keys_house,1.0,keys
+keys_house_1ft_dim_messy.jpeg,keys_house,1.0,keys
+keys_house_3ft_bright_clean.jpeg,keys_house,3.0,keys
+keys_house_3ft_bright_messy.jpeg,keys_house,3.0,keys
+keys_house_3ft_dim_clean.jpeg,keys_house,3.0,keys
+keys_house_3ft_dim_messy.jpeg,keys_house,3.0,keys
+keys_house_6ft_bright_clean.jpeg,keys_house,6.0,keys
+keys_house_6ft_bright_messy.jpeg,keys_house,6.0,keys
+keys_house_6ft_dim_clean.jpeg,keys_house,6.0,keys
+keys_house_6ft_dim_messy.jpeg,keys_house,6.0,keys
+keys_safe_1ft_bright_clean.jpeg,keys_safe,1.0,keys
+keys_safe_1ft_bright_messy.jpeg,keys_safe,1.0,keys
+keys_safe_1ft_dim_clean.jpeg,keys_safe,1.0,keys
+keys_safe_1ft_dim_messy.jpeg,keys_safe,1.0,keys
+keys_safe_3ft_bright_clean.jpeg,keys_safe,3.0,keys
+keys_safe_3ft_bright_messy.jpeg,keys_safe,3.0,keys
+keys_safe_3ft_dim_clean.jpeg,keys_safe,3.0,keys
+keys_safe_3ft_dim_messy.jpeg,keys_safe,3.0,keys
+keys_safe_6ft_bright_clean.jpeg,keys_safe,6.0,keys
+keys_safe_6ft_bright_messy.jpeg,keys_safe,6.0,keys
+keys_safe_6ft_dim_clean.jpeg,keys_safe,6.0,keys
+keys_safe_6ft_dim_messy.jpeg,keys_safe,6.0,keys
