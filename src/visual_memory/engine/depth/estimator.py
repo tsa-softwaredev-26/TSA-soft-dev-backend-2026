@@ -85,7 +85,7 @@ class DepthEstimator:
                            max(cx-hw,0):min(cx+hw, depth_map.shape[1])]
         if region.numel() == 0:
             return 0.0
-        return region.mean().item() * 3.28084  # meters → feet
+        return region.mean().item() * 3.28084  # meters -> feet
 
     # Previously used 12-hour clock position (e.g. "3 o'clock"); switched to plain
     # directions to remove mental translation step for blind users. Could revert if
