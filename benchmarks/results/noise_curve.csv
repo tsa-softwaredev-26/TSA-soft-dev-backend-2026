@@ -1,0 +1,5 @@
+degradation_type,degradation_level,n_images,n_with_results,baseline_accuracy,personalized_accuracy,detection_rate,mean_similarity_gap,proxy_quality_score,data_status
+noise,10.000000,120,0,,,,,0.750000,proxy_only
+noise,20.000000,120,0,,,,,0.500000,proxy_only
+noise,30.000000,120,0,,,,,0.250000,proxy_only
+noise,40.000000,120,0,,,,,0.000000,proxy_only

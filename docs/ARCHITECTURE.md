@@ -548,7 +548,31 @@ python -m visual_memory.benchmarks.full_benchmark \
 
 # Format into BENCHMARKS.md
 python -m visual_memory.benchmarks.format_results
+
+# Build Phase 6 degradation curves (CSV + figures)
+PYTHONPATH=src python3 -m visual_memory.benchmarks.degradation_curves
 ```
+
+### Phase 6 degradation curves
+
+Degradation curve artifacts are generated under:
+
+- `benchmarks/results/blur_curve.csv`
+- `benchmarks/results/brightness_curve.csv`
+- `benchmarks/results/noise_curve.csv`
+- `benchmarks/results/degradation_zones.csv`
+- `benchmarks/figures/*_degradation_curve.svg`
+
+If `benchmarks/results.csv` exists from a benchmark run, curves include measured
+retrieval and detection metrics by degradation level. If not, the script emits
+proxy-only curves with `data_status=proxy_only` and records fallback zones.
+
+Current practical fallback guidance (until measured degraded benchmark results
+are available):
+
+- Blur safe/danger: `<= 4` / `>= 8`
+- Brightness safe/danger: `>= 0.8` / `<= 0.4`
+- Noise safe/danger: `<= 20` / `>= 40`
 
 ### Metrics
 

@@ -1,0 +1,4 @@
+degradation_type,safe_zone,caution_zone,danger_zone,basis
+blur,<= 4,6,>= 8,proxy_only_no_results_csv
+brightness,>= 0.8,0.6,<= 0.4,proxy_only_no_results_csv
+noise,<= 20,30,>= 40,proxy_only_no_results_csv
