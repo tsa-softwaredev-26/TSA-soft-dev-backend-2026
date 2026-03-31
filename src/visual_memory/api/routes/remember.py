@@ -2,7 +2,7 @@ import time
 from pathlib import Path
 from uuid import uuid4
 
-from flask import Blueprint
+from flask import Blueprint, jsonify, request
 
 from visual_memory.api.pipelines import get_remember_pipeline, get_scan_pipeline
 
@@ -10,58 +10,7 @@ remember_bp = Blueprint("remember", __name__)
 _UPLOADS_DIR = Path(__file__).resolve().parents[4] / "uploads"
 
 
-<<<<<<< HEAD
-@remember_bp.post("/remember")
-def remember():
-    """
-    Teach the system a new object.
-
-    Single image:
-        multipart/form-data fields:
-            image  (file, required)
-            prompt (str,  required)
-
-    Multi-image (frontend sends several frames; backend picks the highest-
-    confidence detection and saves only that one):
-        multipart/form-data fields:
-            images[]  (file[], required - one or more files)
-            prompt    (str,    required)
-
-    Response (success):
-        {
-            "success": true,
-            "message": "...",
-            "images_tried": int,            # present when multi-image
-            "images_with_detection": int,   # present when multi-image
-            "result": {
-                "label": str,
-                "confidence": float,
-                "detection_quality": "low" | "medium" | "high",
-                "detection_hint": str,
-                "blur_score": float,
-                "is_blurry": bool,
-                "second_pass": bool,
-                "second_pass_prompt": str | null,
-                "box": [x1, y1, x2, y2],
-                "ocr_text": str,
-                "ocr_confidence": float
-            }
-        }
-    """
-    result, status = process_remember_request(
-        prompt=request.form.get("prompt", ""),
-        image_file=request.files.get("image"),
-        image_files=request.files.getlist("images[]"),
-    )
-    return jsonify(result), status
-
-
-# helpers
-
-def _save_temp(image_file) -> Path:
-=======
 def _save_upload(image_file) -> Path:
->>>>>>> api/whisper-update
     suffix = Path(image_file.filename).suffix if image_file.filename else ".jpg"
     _UPLOADS_DIR.mkdir(exist_ok=True)
     path = _UPLOADS_DIR / f"remember_{int(time.time() * 1000)}_{uuid4().hex}{suffix}"
@@ -70,11 +19,7 @@ def _save_upload(image_file) -> Path:
 
 
 def _remember_single(image_file, prompt: str) -> tuple[dict, int]:
-<<<<<<< HEAD
-    tmp_path = _save_temp(image_file)
-=======
     tmp_path = _save_upload(image_file)
->>>>>>> api/whisper-update
     try:
         result = get_remember_pipeline().run(tmp_path, prompt)
     except Exception as exc:
@@ -84,21 +29,10 @@ def _remember_single(image_file, prompt: str) -> tuple[dict, int]:
 
     if result.get("success"):
         get_scan_pipeline().reload_database()
-<<<<<<< HEAD
-
-=======
->>>>>>> api/whisper-update
     return result, 200
 
 
 def _remember_multi(image_files, prompt: str) -> tuple[dict, int]:
-<<<<<<< HEAD
-    """
-    Save all images to temp files, run detect_score on each to find the best
-    candidate, then run the full pipeline only on the winner.
-    """
-=======
->>>>>>> api/whisper-update
     pipeline = get_remember_pipeline()
     tmp_paths = []
     try:
@@ -111,9 +45,9 @@ def _remember_multi(image_files, prompt: str) -> tuple[dict, int]:
             scores = []
             for p in tmp_paths:
                 try:
-                    s = pipeline.detect_score(p, prompt)
+                    score = pipeline.detect_score(p, prompt)
                 except Exception:
-                    s = {
+                    score = {
                         "detected": False,
                         "score": 0.0,
                         "blur_score": 0.0,
@@ -121,19 +55,12 @@ def _remember_multi(image_files, prompt: str) -> tuple[dict, int]:
                         "darkness_level": 0.0,
                         "second_pass_prompt": None,
                     }
-                scores.append(s)
+                scores.append(score)
 
         detected_count = sum(1 for s in scores if s["detected"])
         best_idx = max(range(len(scores)), key=lambda i: scores[i]["score"]) if scores else -1
 
-<<<<<<< HEAD
-        # Pick the image with the highest detection score
-        best_idx = max(range(len(scores)), key=lambda i: scores[i]["score"])
-
-        if not scores[best_idx]["detected"]:
-=======
         if best_idx < 0 or not scores[best_idx]["detected"]:
->>>>>>> api/whisper-update
             return {
                 "success": False,
                 "message": "No object detected in any of the provided images.",
@@ -159,19 +86,6 @@ def _remember_multi(image_files, prompt: str) -> tuple[dict, int]:
     return result, 200
 
 
-<<<<<<< HEAD
-def process_remember_request(prompt: str, image_file, image_files) -> tuple[dict, int]:
-    prompt = (prompt or "").strip()
-    if not prompt:
-        return {"error": "missing field: prompt"}, 400
-
-    if image_files:
-        return _remember_multi(image_files, prompt)
-
-    if not image_file:
-        return {"error": "missing field: image or images[]"}, 400
-    return _remember_single(image_file, prompt)
-=======
 def process_remember_request(prompt: str, image_file=None, image_files=None) -> tuple[dict, int]:
     normalized_prompt = (prompt or "").strip()
     if not normalized_prompt:
@@ -181,4 +95,13 @@ def process_remember_request(prompt: str, image_file=None, image_files=None) -> 
     if image_file is None:
         return {"error": "missing field: image or images[]"}, 400
     return _remember_single(image_file, normalized_prompt)
->>>>>>> api/whisper-update
+
+
+@remember_bp.post("/remember")
+def remember():
+    result, status = process_remember_request(
+        prompt=request.form.get("prompt", ""),
+        image_file=request.files.get("image"),
+        image_files=request.files.getlist("images[]"),
+    )
+    return jsonify(result), status
