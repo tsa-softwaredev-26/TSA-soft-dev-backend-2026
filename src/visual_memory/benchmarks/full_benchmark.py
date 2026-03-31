@@ -3,21 +3,23 @@
 Usage:
     python -m visual_memory.benchmarks.full_benchmark \
         --dataset benchmarks/dataset.csv \
-        --images benchmarks/images \
-        --seed 42
+        --images benchmarks/images
 
     # Fast smoke test (skip depth + OCR, ~5-10 min):
     python -m visual_memory.benchmarks.full_benchmark \
         --dataset benchmarks/dataset.csv \
         --images benchmarks/images \
-        --seed 42 --no-depth --no-ocr --epochs 5
+        --no-depth --no-ocr --epochs 5
+
+Split strategy: 1ft_bright_clean images per label form the reference DB (simulating a
+teach session), all 1ft images train the projection head, and 3ft/6ft images are the
+test set (simulating real scan conditions after teaching).
 """
 from __future__ import annotations
 
 import argparse
 import csv
 import json
-import random
 import sys
 import time
 from datetime import datetime, timezone
@@ -33,6 +35,13 @@ try:
     pillow_heif.register_heif_opener()
 except ImportError:
     pass
+
+# Same second-pass templates as RememberPipeline - must stay in sync.
+_SECOND_PASS_TEMPLATES = [
+    "a {prompt}",
+    "{prompt} object",
+    "close up of a {prompt}",
+]
 
 from visual_memory.config import Settings
 from visual_memory.engine.embedding import make_combined_embedding
@@ -74,7 +83,6 @@ def _parse_args() -> argparse.Namespace:
                    default=_BENCHMARKS_DIR / "negative_dataset.csv")
     p.add_argument("--images-neg", type=Path, default=_DEFAULT_NEG_IMAGES,
                    help="Directory containing negative test images")
-    p.add_argument("--seed", type=int, default=42)
     p.add_argument("--focal-length", type=float, default=None)
     p.add_argument("--epochs", type=int, default=20)
     p.add_argument("--lr", type=float, default=1e-4)
@@ -173,32 +181,29 @@ def _embed_rows(
     return embedded
 
 
-# phase 2: train/test split
+# phase 2: split into db set, triplet train set, and test set
+#
+# DB set (reference embeddings for cosine matching): 1ft_bright_clean images only.
+# This mirrors a real teach session - user holds the item close under good lighting.
+#
+# Triplet train set: all 1ft images (4 per label). Gives enough positives per label
+# for the projection head to train without leaking 3ft/6ft conditions into training.
+#
+# Test set: all 3ft and 6ft images - the actual scan conditions.
 
 def _split(
     embedded: Dict[str, dict],
-    seed: int,
-) -> Tuple[List[str], List[str]]:
-    rng = random.Random(seed)
-    by_label: Dict[str, List[str]] = {}
-    for fname, data in embedded.items():
-        by_label.setdefault(data["label"], []).append(fname)
+) -> Tuple[List[str], List[str], List[str]]:
+    """Return (train_set, db_set, test_set).
 
-    train_set: List[str] = []
-    test_set: List[str] = []
-    for label in sorted(by_label):
-        fnames = list(by_label[label])
-        rng.shuffle(fnames)
-        if len(fnames) == 1:
-            train_set.extend(fnames)
-        elif len(fnames) == 2:
-            train_set.append(fnames[0])
-            test_set.append(fnames[1])
-        else:
-            n_train = max(1, round(len(fnames) * 0.6))
-            train_set.extend(fnames[:n_train])
-            test_set.extend(fnames[n_train:])
-    return train_set, test_set
+    train_set: all 1ft images, used to build projection head triplets.
+    db_set: 1ft_bright_clean subset of train_set, used as the reference DB for matching.
+    test_set: 3ft and 6ft images, used to evaluate retrieval under real scan conditions.
+    """
+    train_set = [f for f in embedded if "_1ft_" in f]
+    db_set = [f for f in train_set if "_1ft_bright_clean." in f]
+    test_set = [f for f in embedded if "_1ft_" not in f]
+    return train_set, db_set, test_set
 
 
 # phase 3: build reference database
@@ -299,25 +304,73 @@ def _eval_retrieval(
     return results
 
 
-# phase 6: grounding dino evaluation
+# phase 6: grounding dino evaluation with full production fallback chain
+
+def _detect_with_fallback(
+    detector,
+    image: Image.Image,
+    prompt: str,
+    settings: Settings,
+) -> Tuple[Optional[dict], Optional[str]]:
+    """Mirror RememberPipeline._detect_with_fallback: second-pass templates then Ollama.
+
+    Returns (detection_or_None, used_alt_prompt_or_None).
+    """
+    detection = detector.detect(image, prompt)
+    if detection is not None:
+        return detection, None
+
+    if not settings.detection_second_pass_enabled:
+        return None, None
+
+    for template in _SECOND_PASS_TEMPLATES:
+        alt_prompt = template.format(prompt=prompt)
+        detection = detector.detect(image, alt_prompt)
+        if detection is not None:
+            return detection, alt_prompt
+
+    # Ollama third pass - same logic as RememberPipeline._detect_with_ollama_fallback
+    try:
+        from visual_memory.utils.ollama_utils import _chat
+        n = max(1, settings.ollama_detection_retries)
+        ollama_prompt = (
+            f"A vision model failed to detect '{prompt}' in an image. "
+            f"Give {n} alternative phrasings that a vision model might recognize better. "
+            f"Reply with only the phrases, one per line, no numbering, no explanation."
+        )
+        suggestions_raw = _chat(ollama_prompt)
+        if suggestions_raw:
+            suggestions = [s.strip() for s in suggestions_raw.splitlines() if s.strip()][:n]
+            for suggestion in suggestions:
+                detection = detector.detect(image, suggestion)
+                if detection is not None:
+                    return detection, suggestion
+    except Exception:
+        pass
+
+    return None, None
+
 
 def _eval_detection(
     test_set: List[str],
     embedded: Dict[str, dict],
+    settings: Settings,
 ) -> Dict[str, dict]:
     detector = registry.gdino_detector
     results: Dict[str, dict] = {}
     for fname in test_set:
         data = embedded[fname]
         t0 = time.perf_counter()
-        det = detector.detect(data["image"], data["dino_prompt"])
+        det, used_prompt = _detect_with_fallback(detector, data["image"], data["dino_prompt"], settings)
         lat_detect = time.perf_counter() - t0
         if det:
             results[fname] = {"detected": 1, "confidence": det["score"],
-                              "box": det["box"], "lat_detect": lat_detect}
+                              "box": det["box"], "lat_detect": lat_detect,
+                              "second_pass_prompt": used_prompt}
         else:
             results[fname] = {"detected": 0, "confidence": 0.0,
-                              "box": None, "lat_detect": lat_detect}
+                              "box": None, "lat_detect": lat_detect,
+                              "second_pass_prompt": None}
     return results
 
 
@@ -400,7 +453,7 @@ _CSV_FIELDS = [
     "image", "label", "ground_truth_distance_ft",
     "baseline_similarity", "personalized_similarity", "similarity_gap",
     "baseline_correct", "personalized_correct",
-    "dino_detected", "dino_confidence",
+    "dino_detected", "dino_confidence", "dino_second_pass_prompt",
     "predicted_distance_ft", "depth_absolute_error", "depth_percentage_error",
     "lat_embed_img_s", "lat_ocr_s", "lat_embed_txt_s",
     "lat_retrieve_bl_s", "lat_retrieve_pe_s", "lat_detect_s", "lat_depth_s",
@@ -420,7 +473,7 @@ def _merge_rows(
     rows = []
     for r in retrieval:
         fname = r["image"]
-        d = dino.get(fname, {"detected": 0, "confidence": 0.0, "lat_detect": 0.0})
+        d = dino.get(fname, {"detected": 0, "confidence": 0.0, "lat_detect": 0.0, "second_pass_prompt": None})
         dep = depth.get(fname, {"predicted_ft": None, "abs_error": None,
                                  "pct_error": None, "lat_depth": 0.0})
         rows.append({
@@ -434,6 +487,7 @@ def _merge_rows(
             "personalized_correct": r["personalized_correct"],
             "dino_detected": d["detected"],
             "dino_confidence": round(d["confidence"], 6),
+            "dino_second_pass_prompt": d.get("second_pass_prompt") or "",
             "predicted_distance_ft": (
                 round(dep["predicted_ft"], 3) if dep["predicted_ft"] is not None else ""),
             "depth_absolute_error": (
@@ -486,6 +540,7 @@ def _write_output(
     args: argparse.Namespace,
     final_loss: float,
     threshold: float,
+    db_set: List[str],
     train_set: List[str],
     settings: Settings,
 ) -> None:
@@ -499,7 +554,7 @@ def _write_output(
         writer.writerows(rows)
 
     metadata = {
-        "seed": args.seed,
+        "split_strategy": "1ft_bright_clean_db",
         "epochs": args.epochs,
         "lr": args.lr,
         "similarity_threshold": threshold,
@@ -508,7 +563,8 @@ def _write_output(
         "blur_threshold": BLUR_THRESHOLD,
         "detection_quality_low_max": settings.detection_quality_low_max,
         "detection_quality_high_min": settings.detection_quality_high_min,
-        "n_train": len(train_set),
+        "n_db": len(db_set),
+        "n_triplet_train": len(train_set),
         "n_test": len(rows),
         "n_negatives": len(neg_results),
         "final_triplet_loss": round(final_loss, 6),
@@ -649,7 +705,6 @@ def main() -> None:
 
     print(f"Dataset: {args.dataset}")
     print(f"Images:  {args.images}")
-    print(f"Seed:    {args.seed}")
     print(f"Thresholds: darkness={settings.darkness_threshold:.1f}, "
           f"ocr_text_likelihood={settings.ocr_text_likelihood_threshold:.2f}, "
           f"blur={BLUR_THRESHOLD:.1f}")
@@ -663,31 +718,34 @@ def main() -> None:
         sys.exit(1)
 
     # Phase 2: Split
-    print("\n[2/7] Train/test split (60/40 per label)...")
-    train_set, test_set = _split(embedded, args.seed)
-    print(f"  train: {len(train_set)}, test: {len(test_set)}")
+    print("\n[2/7] Splitting: 1ft_bright_clean -> DB, all 1ft -> triplet train, 3ft/6ft -> test...")
+    train_set, db_set, test_set = _split(embedded)
+    print(f"  db (teach): {len(db_set)},  triplet train: {len(train_set)},  test (scan): {len(test_set)}")
     if not test_set:
-        print("Not enough images for a test split.", file=sys.stderr)
+        print("No 3ft/6ft images found. Check dataset and image filenames.", file=sys.stderr)
+        sys.exit(1)
+    if not db_set:
+        print("No 1ft_bright_clean images found. Check dataset and image filenames.", file=sys.stderr)
         sys.exit(1)
 
     # Phase 3: Database
-    print("\n[3/7] Building reference database...")
-    database = _build_database(train_set, embedded)
+    print("\n[3/7] Building reference database from 1ft_bright_clean images...")
+    database = _build_database(db_set, embedded)
     print(f"  {len(database)} entries")
 
     # Phase 4: Train
-    print(f"\n[4/7] Training projection head ({args.epochs} epochs)...")
+    print(f"\n[4/7] Training projection head ({args.epochs} epochs, all 1ft images)...")
     head_path = _BENCHMARKS_DIR / "projection_head_bench.pt"
     head, final_loss = _train_head(train_set, embedded, args.epochs, args.lr, head_path)
     print(f"  final loss: {final_loss:.4f}")
 
     # Phase 5: Retrieval
-    print("\n[5/7] Evaluating retrieval...")
+    print("\n[5/7] Evaluating retrieval (3ft/6ft test set against 1ft_bright_clean DB)...")
     retrieval_results = _eval_retrieval(test_set, embedded, database, head, threshold)
 
     # Phase 6: Detection
-    print("\n[6/7] Evaluating GroundingDINO detection...")
-    dino_results = _eval_detection(test_set, embedded)
+    print("\n[6/7] Evaluating GroundingDINO detection (with full fallback chain)...")
+    dino_results = _eval_detection(test_set, embedded, settings)
 
     # Phase 7: Depth
     print("\n[7/7] Evaluating depth estimation...")
@@ -710,7 +768,7 @@ def main() -> None:
     _print_summary(retrieval_results, dino_results, depth_results,
                    neg_results, final_loss, threshold, args.no_depth)
     merged = _merge_rows(retrieval_results, dino_results, depth_results)
-    _write_output(merged, neg_results, args, final_loss, threshold, train_set, settings)
+    _write_output(merged, neg_results, args, final_loss, threshold, db_set, train_set, settings)
 
 
 if __name__ == "__main__":
