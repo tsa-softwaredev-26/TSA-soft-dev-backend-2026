@@ -25,6 +25,40 @@ _TEACH_PATTERNS = [
     re.compile(r"\b(?:this is my|that's my|it's my)\b\s+(.+)", re.IGNORECASE),
     re.compile(r"\b(?:save this as|store this as|call this)\b\s+(.+)", re.IGNORECASE),
 ]
+_SCAN_PATTERNS = [
+    re.compile(r"\bscan\b", re.IGNORECASE),
+    re.compile(r"\blook around\b", re.IGNORECASE),
+    re.compile(r"\bwhat'?s around\b", re.IGNORECASE),
+    re.compile(r"\bwhat do you see\b", re.IGNORECASE),
+]
+_FIND_PATTERNS = [
+    re.compile(r"\bwhere is\b", re.IGNORECASE),
+    re.compile(r"\bwhere are\b", re.IGNORECASE),
+    re.compile(r"\bwhere did i\b", re.IGNORECASE),
+    re.compile(r"\bfind\b", re.IGNORECASE),
+    re.compile(r"\bloc(?:ate|ation)\b", re.IGNORECASE),
+]
+_ITEM_QUERY_PATTERNS = [
+    re.compile(r"\b(read|text|says|written)\b", re.IGNORECASE),
+    re.compile(r"\b(export|copy|share|send)\b", re.IGNORECASE),
+    re.compile(r"\b(rename|call it|call this|name it|name this)\b", re.IGNORECASE),
+    re.compile(r"\b(describe|looks? like|what is this|what color)\b", re.IGNORECASE),
+]
+_DELETE_PATTERNS = [
+    re.compile(r"\b(delete|remove|forget)\b", re.IGNORECASE),
+]
+_BACK_PATTERNS = [
+    re.compile(r"\b(back|go back|home|cancel)\b", re.IGNORECASE),
+]
+_SETTINGS_PATTERNS = [
+    re.compile(r"\b(settings|preferences)\b", re.IGNORECASE),
+]
+_NAV_NEXT_PATTERNS = [
+    re.compile(r"\bnext\b", re.IGNORECASE),
+]
+_NAV_PREV_PATTERNS = [
+    re.compile(r"\b(previous|prev)\b", re.IGNORECASE),
+]
 _ALLOWED_REQUEST_TYPES = {
     "ask",
     "find",
@@ -38,6 +72,11 @@ _ALLOWED_REQUEST_TYPES = {
     "set_location",
     "confirm_action",
     "stop",
+    "open_settings",
+    "navigate_next",
+    "navigate_previous",
+    "navigate_back",
+    "error",
 }
 
 
@@ -122,17 +161,47 @@ def extract_teach_label(transcription: str) -> str | None:
 
 def classify_item_intent(query: str) -> str:
     lower = (query or "").lower()
-    if any(kw in lower for kw in ["read", "text", "say", "says"]):
+    if any(kw in lower for kw in ["read", "text", "say", "says", "written", "what does it say"]):
         return "read_ocr"
-    if any(kw in lower for kw in ["export", "copy", "share"]):
+    if any(kw in lower for kw in ["export", "copy", "share", "send"]):
         return "export_ocr"
-    if any(kw in lower for kw in ["describe", "look", "what is"]):
+    if any(kw in lower for kw in ["describe", "look", "looks like", "what is", "what color"]):
         return "describe"
-    if any(kw in lower for kw in ["rename", "call"]):
+    if any(kw in lower for kw in ["rename", "call", "name"]):
         return "rename"
     if any(kw in lower for kw in ["where", "location"]):
         return "find"
     return "read_ocr"
+
+
+def _matches_any(text: str, patterns: list[re.Pattern]) -> bool:
+    return any(pattern.search(text) for pattern in patterns)
+
+
+def _command_unavailable(requested: str, current_mode: str, available: list[str]) -> dict:
+    return {
+        "command": "error",
+        "error": "command_unavailable",
+        "requested_command": requested,
+        "current_mode": current_mode,
+        "available_commands": available,
+    }
+
+
+def _extract_find_query_text(command_text: str) -> str:
+    text = (command_text or "").strip()
+    if not text:
+        return ""
+    lowered = text.lower().strip()
+    if lowered in {"find", "locate", "search"}:
+        return ""
+    cleaned = text
+    for pattern in _FIND_PATTERNS:
+        if pattern.search(cleaned):
+            cleaned = pattern.sub("", cleaned).strip()
+            break
+    cleaned = cleaned.strip(" ?.")
+    return cleaned
 
 
 def classify_command(transcription: str, state: dict) -> dict:
@@ -143,24 +212,61 @@ def classify_command(transcription: str, state: dict) -> dict:
         return {"command": "set_location", "location": transcription}
 
     if mode == "focused_on_item":
+        available = ["describe/read", "export", "rename", "find"]
+        if _matches_any(lower, _NAV_NEXT_PATTERNS):
+            return {"command": "navigate_next"}
+        if _matches_any(lower, _NAV_PREV_PATTERNS):
+            return {"command": "navigate_previous"}
+        if _matches_any(lower, _BACK_PATTERNS):
+            return {"command": "navigate_back"}
+        if _matches_any(lower, _SETTINGS_PATTERNS):
+            return _command_unavailable("open_settings", mode, available)
+        if _matches_any(lower, _DELETE_PATTERNS):
+            return _command_unavailable("delete_item", mode, available)
         intent = classify_item_intent(transcription)
         return {"command": "item_ask", "intent": intent}
 
-    if lower in ["scan", "stop"]:
-        return {"command": lower}
+    if not lower:
+        return {"command": "ask", "query_type": "unknown"}
+
+    if lower == "stop":
+        return {"command": "stop"}
+
+    if _matches_any(lower, _NAV_NEXT_PATTERNS) or _matches_any(lower, _NAV_PREV_PATTERNS):
+        return _command_unavailable("navigate", mode, ["scan", "remember", "find", "ask", "open_settings"])
+
+    if _matches_any(lower, _BACK_PATTERNS):
+        return {"command": "navigate_back"}
+
+    if _matches_any(lower, _SCAN_PATTERNS):
+        return {"command": "scan"}
+
+    if _matches_any(lower, _SETTINGS_PATTERNS):
+        return {"command": "open_settings"}
 
     teach_label = extract_teach_label(transcription)
     if teach_label:
         return {"command": "remember", "label": teach_label}
+    if any(token in lower for token in ["teach", "remember", "save", "learn"]):
+        return {"command": "remember"}
 
-    if any(kw in lower for kw in ["where", "find"]):
-        return {"command": "find", "query": transcription}
+    if _matches_any(lower, _DELETE_PATTERNS):
+        return _command_unavailable("delete_item", mode, ["scan", "remember", "find", "ask", "open_settings"])
+
+    if _matches_any(lower, _FIND_PATTERNS):
+        return {"command": "find", "query": _extract_find_query_text(transcription)}
+
+    if _matches_any(lower, _ITEM_QUERY_PATTERNS):
+        return _command_unavailable("item_ask", mode, ["scan", "remember", "find", "ask", "open_settings"])
 
     if any(kw in lower for kw in ["receipt", "paper", "says", "written"]):
         return {"command": "ask", "query_type": "document"}
 
     if any(kw in lower for kw in ["what", "when", "how", "tell me"]):
         return {"command": "ask", "query_type": "general"}
+
+    if lower == "ask":
+        return {"command": "ask"}
 
     return {"command": "ask", "query_type": "unknown"}
 
@@ -282,10 +388,29 @@ def voice():
     request_type = classification.get("command", "ask")
     next_state = None
 
-    if request_type in {"rename", "read_ocr", "export_ocr", "describe", "item_ask"}:
+    if classification.get("error"):
+        result = {
+            "error": classification.get("error"),
+            "requested_command": classification.get("requested_command"),
+            "current_mode": classification.get("current_mode", mode),
+            "available_commands": classification.get("available_commands", []),
+        }
+        request_type = "error"
+    elif request_type in {"rename", "read_ocr", "export_ocr", "describe", "item_ask"}:
         intent = classification.get("intent")
         result, status = process_item_ask_request(scan_id=scan_id, label=label, query=command_text, intent=intent)
         request_type = "item_ask"
+    elif request_type in {"open_settings", "navigate_next", "navigate_previous", "navigate_back"}:
+        narration_map = {
+            "open_settings": "Opening settings.",
+            "navigate_next": "Next item.",
+            "navigate_previous": "Previous item.",
+            "navigate_back": "Going back.",
+        }
+        result, status = {
+            "action": request_type,
+            "narration": narration_map.get(request_type, ""),
+        }, 200
     elif request_type == "remember":
         image_file = request.files.get("image")
         image_files = request.files.getlist("images[]")
