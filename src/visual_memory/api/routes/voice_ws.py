@@ -23,6 +23,7 @@ from visual_memory.utils.logger import LogTag
 _log = get_logger(__name__)
 _API_KEY = os.environ.get("API_KEY", "")
 _ROOM_PREFIX = re.compile(r"^(in (the|my) |the |my )", re.IGNORECASE)
+_MAX_WS_MEDIA_BYTES = 50 * 1024 * 1024
 
 # Hint content and when to fire them (counter_key, threshold count)
 _HINTS: dict[str, str] = {
@@ -587,7 +588,17 @@ def register_events(sio: SocketIO) -> None:
         t0 = time.monotonic()
 
         audio_bytes = _decode_audio(data.get("audio", b""))
-        image_bytes = _decode_image(data.get("image"))
+        raw_image = data.get("image")
+        image_bytes = _decode_image(raw_image)
+        if raw_image not in (None, "") and image_bytes is None:
+            emit("error", {"code": "bad_payload", "message": "Invalid image payload."})
+            return
+        if len(audio_bytes) > _MAX_WS_MEDIA_BYTES:
+            emit("error", {"code": "bad_payload", "message": "Audio payload exceeds 50MB limit."})
+            return
+        if image_bytes is not None and len(image_bytes) > _MAX_WS_MEDIA_BYTES:
+            emit("error", {"code": "bad_payload", "message": "Image payload exceeds 50MB limit."})
+            return
         focal_length = data.get("focal_length_px")
         if isinstance(focal_length, str):
             try:
