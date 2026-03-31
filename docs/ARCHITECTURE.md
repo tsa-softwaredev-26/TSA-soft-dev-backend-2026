@@ -816,3 +816,48 @@ All server-transition items are complete as of March 2026.
 - **Depth Pro** - Only monocular model with metric (absolute) depth; no scale factor needed.
 - **OCR moved out of core backend (March 2026)** - OCR is now an external HTTP microservice so backend deployment avoids Paddle dependency conflicts. The core backend sends crop images to `OCR_SERVICE_URL` (`/ocr`) and consumes a stable JSON response (`text`, `confidence`). `/ocr/batch` was tested and removed after reproducible p95 regressions on server benchmarks.
 - **Combined embedding over hybrid matching** - `max(image_sim, text_sim)` could false-match two white documents with different text (image similarity alone passes threshold). The combined embedding `normalize(img) || normalize(text)` means cosine similarity is approximately the average of both sub-similarities, so both image AND text must match. Non-document objects get a zero text slot; image similarity dominates unchanged.
+
+---
+
+## Phase 8: Tuning & Server-Side Optimization
+
+### Server-Only Heavy Workload Policy
+
+Intensive training, optimization, and benchmark workloads (text likelihood tuning, detection threshold calibration, similarity threshold sweeps) run **server-only** (via SSH on production hosts). This isolates:
+- GPU contention from user-facing services
+- VRAM pressure and model swapping from live requests
+- Noisy benchmark results from local network latency variance
+
+Local development uses small test sets only (5–10 images); production tuning and validation use full labelled datasets on server infrastructure.
+
+### Single-GPU Contention Avoidance
+
+When tuning ML parameters on single-GPU systems:
+
+1. Stop live services: `systemctl stop spaitra-core spaitra-ocr`
+2. Clear GPU memory: `nvidia-smi --query-gpu=memory.free --format=csv`
+3. Run optimization workloads isolated with no concurrent system load
+4. Monitor GPU utilization and VRAM: `nvidia-smi dmon`
+5. Validate stability before restarting services: `systemctl start spaitra-core spaitra-ocr && sleep 5 && systemctl status spaitra-core spaitra-ocr`
+
+### Text/Textless Tuning Objective
+
+**Priority: Low false positives on textless images.** Textless images (pure visual content, no OCR text) form the majority of scan targets (product bottles, labels without text, photographs). Tuning strategy:
+
+- **Text likelihood threshold (`OCR_MIN_LIKELIHOOD`)**: Calibrate to minimize false-positive text detection on genuinely textless images. Default 0.10 is heuristic; run `src/visual_memory/benchmarks/text_likelihood_tuning.py` against labelled crops (text vs. textless) to find the optimal cutoff.
+- **Similarity threshold (`SIMILARITY_THRESHOLD`)**: Text-bearing and textless items must pass the same similarity bar to avoid misclassification of textless items as "high confidence text matches." Use `src/visual_memory/benchmarks/optimize_similarity_threshold.py` with separate test sets for textless items.
+- **Detection threshold (`DETECTION_CONFIDENCE_MIN`)**: Lower threshold (0.25–0.35) to catch subtle objects on clean backgrounds; higher threshold (0.40–0.50) on cluttered scenes. Use `src/visual_memory/benchmarks/optimize_detection_threshold.py` to sweep and report per-scene sensitivity.
+
+Run all tuning scripts on server after stopping services; results are committed to `benchmarks/` directory for historical tracking.
+
+### Merge-to-Main Integration Workflow
+
+Before merging tuning/performance changes to `main`:
+
+1. Run full benchmark suite on server: `python -m pytest src/visual_memory/benchmarks/ -v --tb=short`
+2. Validate no regressions in latency (stage timing) or accuracy (detection/retrieval rates)
+3. Commit benchmark results and ML settings snapshots to `benchmarks/` and document changes in PR description
+4. Ensure `PATCH /settings` accepts new tuning params and persists them to `user_state.ml_settings`
+5. Test settings persistence on server: stop core service, load new settings, verify `warm_all()` applies changes
+6. Merge with squash to `main` and tag release with benchmark results
+

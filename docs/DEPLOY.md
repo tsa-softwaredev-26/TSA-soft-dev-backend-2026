@@ -794,6 +794,75 @@ curl -sf http://127.0.0.1:5000/retrain/status -H "X-API-Key: $KEY"
 
 ---
 
+
+---
+
+## 14. Server-Only Optimization Workloads
+
+Heavy training, threshold calibration, and benchmark sweeps run **server-only** via SSH. Stop live services before starting tuning workloads:
+
+```bash
+systemctl stop spaitra-core spaitra-ocr
+```
+
+### Text Likelihood Tuning
+
+```bash
+cd /opt/spaitra/TSA-soft-dev-backend-2026
+source venv-core/bin/activate
+python src/visual_memory/benchmarks/text_likelihood_tuning.py \
+  --crops-dir /path/to/labelled/crops \
+  --text-dir /path/to/text-bearing \
+  --textless-dir /path/to/textless \
+  --output-dir benchmarks/text_likelihood_results
+```
+
+Objective: minimize false positives on textless images. Examine confusion matrix to find optimal `OCR_MIN_LIKELIHOOD` cutoff.
+
+### Detection Threshold Optimization
+
+```bash
+python src/visual_memory/benchmarks/optimize_detection_threshold.py \
+  --images-dir /path/to/test/set \
+  --output-dir benchmarks/detection_results
+```
+
+Reports detection rate and false-positive rate by threshold. Recommend threshold 0.25–0.50 depending on scene clutter.
+
+### Similarity Threshold Sweeps
+
+```bash
+python src/visual_memory/benchmarks/optimize_similarity_threshold.py \
+  --train-dir /path/to/train \
+  --test-dir /path/to/test \
+  --output-dir benchmarks/similarity_results
+```
+
+Test with separate datasets for text-bearing and textless items.
+
+### Validate & Restart
+
+After tuning, verify no regressions:
+
+```bash
+python -m pytest src/visual_memory/benchmarks/ -v --tb=short
+```
+
+Commit results to `benchmarks/`:
+
+```bash
+git add benchmarks/
+git commit -m "Phase 8: Update ML tuning params (text_likelihood_threshold=X, detection_confidence_min=Y, similarity_threshold=Z)"
+```
+
+Restart services:
+
+```bash
+systemctl start spaitra-core spaitra-ocr
+sleep 5
+systemctl status spaitra-core spaitra-ocr
+```
+
 ## 15. Deployment layout
 
 ```text
