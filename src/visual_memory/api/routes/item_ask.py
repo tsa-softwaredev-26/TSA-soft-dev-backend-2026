@@ -31,11 +31,13 @@ item_ask_bp = Blueprint("item_ask", __name__)
 
 # Keyword patterns used as fallback when Ollama is unavailable
 _INTENT_PATTERNS: list[tuple[str, re.Pattern]] = [
+    ("ocr_question", re.compile(r"\b(?:who|when|how much|total|amount|date)\b.*\b(?:written|text|receipt|document|say|says)\b", re.IGNORECASE)),
+    ("question", re.compile(r"\b(what color|how many|is there|can you see|does it have)\b", re.IGNORECASE)),
     ("export_ocr", re.compile(r"\b(export|copy|share|send)\b", re.IGNORECASE)),
-    ("read_ocr",   re.compile(r"\b(read|text|say|says|written|write|content)\b", re.IGNORECASE)),
-    ("rename",     re.compile(r"\b(rename|call|name)\b", re.IGNORECASE)),
-    ("find",       re.compile(r"\b(where|find|location|last seen|last time)\b", re.IGNORECASE)),
-    ("describe",   re.compile(r"\b(describe|what is|what's|look|looks like)\b", re.IGNORECASE)),
+    ("read_ocr", re.compile(r"\b(read|text|say|says|written|write|content)\b", re.IGNORECASE)),
+    ("rename", re.compile(r"\b(rename|call|name)\b", re.IGNORECASE)),
+    ("find", re.compile(r"\b(where|find|location|last seen|last time)\b", re.IGNORECASE)),
+    ("describe", re.compile(r"\b(describe|what is|what's|look|looks like)\b", re.IGNORECASE)),
 ]
 
 
@@ -137,6 +139,131 @@ def process_item_ask_request(
             "ocr_text": ocr_text,
             "narration": f"The text says: {ocr_text}",
             "export": resolved_intent == "export_ocr",
+        }, 200
+
+
+    if resolved_intent == "question":
+        t0 = time.monotonic()
+        rows = db.get_items_metadata(label=label)
+        if not rows:
+            return {
+                "action": "question",
+                "label": label,
+                "question": query,
+                "answer": "",
+                "narration": f"I do not have {label} in memory yet.",
+                "method": "vlm",
+                "latency_ms": round((time.monotonic() - t0) * 1000),
+            }, 404
+
+        image_path = (rows[0].get("image_path") or "").strip()
+        if not image_path:
+            return {
+                "action": "question",
+                "label": label,
+                "question": query,
+                "answer": "",
+                "narration": f"I do not have an image stored for {label}.",
+                "method": "vlm",
+                "latency_ms": round((time.monotonic() - t0) * 1000),
+            }, 200
+
+        vlm_timeout = float(get_user_settings().get_performance_config().vlm_timeout_seconds)
+        try:
+            answer = get_vlm_pipeline().answer(image_path, question=query, timeout=vlm_timeout)
+            return {
+                "action": "question",
+                "label": label,
+                "question": query,
+                "answer": answer,
+                "narration": answer,
+                "method": "vlm",
+                "latency_ms": round((time.monotonic() - t0) * 1000),
+            }, 200
+        except TimeoutError:
+            return {
+                "action": "question",
+                "label": label,
+                "question": query,
+                "answer": "",
+                "narration": "That took too long. Please try a shorter question.",
+                "method": "vlm_timeout",
+                "latency_ms": round((time.monotonic() - t0) * 1000),
+            }, 504
+        except FileNotFoundError:
+            return {
+                "action": "question",
+                "label": label,
+                "question": query,
+                "answer": "",
+                "narration": f"I could not find the image file for {label}.",
+                "method": "vlm",
+                "latency_ms": round((time.monotonic() - t0) * 1000),
+            }, 404
+        except Exception as exc:
+            _log.warning({
+                "event": "item_ask_question_vlm_error",
+                "label": label,
+                "error": str(exc),
+            })
+            return {
+                "action": "question",
+                "label": label,
+                "question": query,
+                "answer": "",
+                "narration": "I could not answer that question about this item right now.",
+                "method": "vlm_error",
+                "latency_ms": round((time.monotonic() - t0) * 1000),
+            }, 200
+
+    if resolved_intent == "ocr_question":
+        rows = db.get_items_metadata(label=label)
+        ocr_text = rows[0]["ocr_text"] if rows else ""
+
+        if not ocr_text:
+            return {
+                "action": "ocr_question",
+                "label": label,
+                "question": query,
+                "ocr_text": "",
+                "answer": "",
+                "narration": f"There is no stored text for {label}.",
+            }, 200
+
+        normalized = ocr_text.strip()
+        if re.search(r"\b(total|amount|how much)\b", query, re.IGNORECASE):
+            amount_match = re.search(r"(?:(?:USD|EUR|GBP)\s*)?(?:\$\s?)?\d+(?:[\.,]\d{2})?", normalized, re.IGNORECASE)
+            if amount_match:
+                answer = amount_match.group(0)
+                return {
+                    "action": "ocr_question",
+                    "label": label,
+                    "question": query,
+                    "ocr_text": normalized,
+                    "answer": answer,
+                    "narration": f"The amount is {answer}.",
+                }, 200
+
+        if re.search(r"\bdate\b", query, re.IGNORECASE):
+            date_match = re.search(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b", normalized)
+            if date_match:
+                answer = date_match.group(0)
+                return {
+                    "action": "ocr_question",
+                    "label": label,
+                    "question": query,
+                    "ocr_text": normalized,
+                    "answer": answer,
+                    "narration": f"The date is {answer}.",
+                }, 200
+
+        return {
+            "action": "ocr_question",
+            "label": label,
+            "question": query,
+            "ocr_text": normalized,
+            "answer": normalized,
+            "narration": f"The text says: {normalized}",
         }, 200
 
     if resolved_intent == "rename":
