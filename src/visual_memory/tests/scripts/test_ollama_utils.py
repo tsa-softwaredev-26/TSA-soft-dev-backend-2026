@@ -59,6 +59,24 @@ def test_extract_search_term_empty_string():
     assert result is None
 
 
+def test_extract_search_term_falls_back_to_jsonish_regex():
+    with patch.object(_ou, "_chat_raw", return_value='result: {"term":"wallet"} done'):
+        result = _ou.extract_search_term("where is my wallet")
+    assert result == "wallet"
+
+
+def test_extract_search_term_falls_back_to_keyword_extraction_when_llm_none():
+    with patch.object(_ou, "_chat_raw", return_value=None):
+        result = _ou.extract_search_term("where is my wallet")
+    assert result == "wallet"
+
+
+def test_extract_search_term_leniently_truncates_overlong_llm_term():
+    with patch.object(_ou, "_chat_raw", return_value='{"term":"where is my black backpack in the office"}'):
+        result = _ou.extract_search_term("where is my black backpack in the office")
+    assert result == "where is my black"
+
+
 def test_extract_search_term_prompt_includes_known_items_and_examples():
     captured = {}
     def _capture(prompt, max_retries=None, json_mode=False):
@@ -205,6 +223,9 @@ for name, fn in [
     ("ollama:extract_search_term_malformed_json", test_extract_search_term_malformed_json),
     ("ollama:extract_search_term_missing_key", test_extract_search_term_missing_key),
     ("ollama:extract_search_term_empty_string", test_extract_search_term_empty_string),
+    ("ollama:extract_search_term_jsonish_fallback", test_extract_search_term_falls_back_to_jsonish_regex),
+    ("ollama:extract_search_term_keyword_fallback", test_extract_search_term_falls_back_to_keyword_extraction_when_llm_none),
+    ("ollama:extract_search_term_lenient_truncate", test_extract_search_term_leniently_truncates_overlong_llm_term),
     ("ollama:extract_search_term_prompt_has_context", test_extract_search_term_prompt_includes_known_items_and_examples),
     ("ollama:intent_valid_intents", test_extract_item_intent_valid_intents),
     ("ollama:intent_invalid_returns_none", test_extract_item_intent_invalid_returns_none),
