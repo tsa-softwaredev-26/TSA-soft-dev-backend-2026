@@ -645,6 +645,16 @@ Structured result of the dispatched action. Use for rendering scan matches, find
 { "type": "item_focus", "data": { "label": "wallet", "narration": "Wallet to your left." } }
 ```
 
+The WebSocket router also emits explicit UI actions:
+
+```json
+{ "type": "open_settings", "data": { "action": "open_settings" } }
+```
+
+```json
+{ "type": "navigate_back", "data": { "action": "navigate_back" } }
+```
+
 #### `control`
 
 Instruction to the frontend to perform an action.
@@ -663,6 +673,24 @@ When `request_image` arrives: activate camera, capture, and send the next `audio
 
 Common codes: `transcription_failed`, `scan_failed`, `remember_failed`, `bad_payload`, `bad_state`.
 
+#### `session_state`
+
+Authoritative state snapshot after connect and after each processed user event.
+
+```json
+{
+  "current_mode": "focused_on_item",
+  "context": {
+    "scan_id": "abc123",
+    "label": "wallet",
+    "item_index": 0,
+    "onboarding_phase": "ask"
+  }
+}
+```
+
+Use this event to mirror frontend UI state and keep command routing context in sync.
+
 ### Session States (server-side)
 
 The server emits `next_state` in each `tts` event so the frontend can update its UI layer, but the server owns the authoritative state.
@@ -676,6 +704,8 @@ The server emits `next_state` in each `tts` event so the frontend can update its
 | `focused_on_item` | Scan results active; item navigation and queries enabled |
 | `onboarding_teach` | First-time: teaching items |
 | `onboarding_await_scan` | First-time: ready for the demo scan |
+
+Voice commands `back`/`home`/`cancel` reset to `idle` and clear scan context. `settings` also returns to `idle` and emits an `open_settings` action result so the frontend can open settings immediately.
 
 ### Hints
 

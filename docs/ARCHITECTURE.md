@@ -758,6 +758,7 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - `test_projection_head.py` passes: identity-at-init, triplet loss, store roundtrip, training convergence
 - ProjectionHead wired into ScanPipeline with auto-scaling blend (`_apply_head`); no-op until weights exist
 - Flask API: all endpoints live (remember, scan, feedback, retrain, settings, user-settings, find, crop, items, sightings, debug)
+- WebSocket voice flow supports onboarding, scan navigation, settings/back actions, and emits session_state snapshots for frontend context sync
 - /retrain is async (threading.Thread); GET /retrain/status for polling
 - /settings and ML setting overrides survive restarts (persisted to `user_state.ml_settings`, restored by `warm_all()`)
 - FeedbackStore migrated to SQLite feedback table; flat .pt file approach removed
@@ -884,4 +885,3 @@ Before merging tuning/performance changes to `main`:
 4. Ensure `PATCH /settings` accepts new tuning params and persists them to `user_state.ml_settings`
 5. Test settings persistence on server: stop core service, load new settings, verify `warm_all()` applies changes
 6. Merge with squash to `main` and tag release with benchmark results
-
