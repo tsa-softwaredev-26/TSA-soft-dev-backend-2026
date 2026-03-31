@@ -1,3 +1,3 @@
-benchmark,context0_passed,context1_passed,dataset,eligible,executed,intent_exact,intent_rate,missing_audio,missing_ids,note,rename_exact,rename_rate,scope,search_term_exact,search_term_rate,ties,total,wins_context0,wins_context1
-ollama_prompt_eval,,,voice_eval_dataset.json,,,68,0.694,,,Current strict exact-match scoring; term metric not normalized for long-tail phrases.,74,0.755,full,0,0.0,,98,,
-whisper_context_bias_eval,0,0,voice_eval_dataset.json,120,119,,,1,v063,Pass criteria too strict (all expected tokens). Need intent-level and fuzzy text metrics.,,,full,,,119,,0,0
+benchmark,context0_passed,context1_passed,dataset,eligible,executed,intent_exact,intent_first_exact,intent_first_rate,intent_rate,missing_audio,missing_ids,note,rename_exact,rename_rate,scope,search_term_exact,search_term_fuzzy,search_term_fuzzy_rate,search_term_rate,ties,total,wins_context0,wins_context1
+ollama_prompt_eval,,,voice_eval_dataset.json,,,68,68,0.694,0.694,,,Current strict exact-match scoring; term metric not normalized for long-tail phrases.,74,0.755,full,0,37,0.378,0.0,,98,,
+whisper_context_bias_eval,0,0,voice_eval_dataset.json,120,119,,,,,1,v063,Pass criteria too strict (all expected tokens). Need intent-level and fuzzy text metrics.,,,full,,,,,119,,0,0
