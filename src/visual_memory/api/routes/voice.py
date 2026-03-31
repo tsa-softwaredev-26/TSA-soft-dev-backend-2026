@@ -20,13 +20,11 @@ from visual_memory.utils.ollama_utils import extract_search_term
 voice_bp = Blueprint("voice", __name__)
 _log = get_logger(__name__)
 _ROOM_PREFIX = re.compile(r"^(in (the|my) |the |my )", re.IGNORECASE)
-<<<<<<< HEAD
 _TEACH_PATTERNS = [
     re.compile(r"\b(?:remember|teach|this is)\b.*?\b(?:as|called|named)\b\s+(.+)", re.IGNORECASE),
     re.compile(r"\b(?:this is my|that's my|it's my)\b\s+(.+)", re.IGNORECASE),
     re.compile(r"\b(?:save this as|store this as|call this)\b\s+(.+)", re.IGNORECASE),
 ]
-=======
 _ALLOWED_REQUEST_TYPES = {
     "ask",
     "find",
@@ -39,8 +37,8 @@ _ALLOWED_REQUEST_TYPES = {
     "describe",
     "set_location",
     "confirm_action",
+    "stop",
 }
->>>>>>> api/whisper-update
 
 
 def _extract_audio_bytes(payload: dict) -> bytes:
@@ -69,35 +67,6 @@ def _extract_audio_bytes(payload: dict) -> bytes:
     return request.data or b""
 
 
-<<<<<<< HEAD
-=======
-def _normalize_command_type(query: str, has_image: bool, has_item_context: bool) -> str:
-    q = (query or "").strip().lower()
-    if not q:
-        return "ask"
-
-    if has_item_context:
-        if any(token in q for token in ("rename", "call this", "name this")):
-            return "rename"
-        if any(token in q for token in ("read", "what does", "text", "says")):
-            return "read_ocr"
-        if any(token in q for token in ("export", "copy", "share", "send")):
-            return "export_ocr"
-        if any(token in q for token in ("describe", "what is this", "looks like")):
-            return "describe"
-
-    if has_image and any(token in q for token in ("remember", "save this", "learn this", "teach", "this is")):
-        return "remember"
-    if has_image and any(token in q for token in ("scan", "what is around", "what do you see", "what's around")):
-        return "scan"
-
-    if any(token in q for token in ("where", "find", "last seen", "location of", "where did i")):
-        return "find"
-
-    return "ask"
-
-
->>>>>>> api/whisper-update
 def _resolve_query_for_find(query: str, label: str) -> str:
     if label:
         return label
@@ -138,7 +107,6 @@ def _extract_state(payload: dict) -> tuple[str, dict]:
     return mode, context
 
 
-<<<<<<< HEAD
 def extract_teach_label(transcription: str) -> str | None:
     text = (transcription or "").strip()
     if not text:
@@ -195,24 +163,6 @@ def classify_command(transcription: str, state: dict) -> dict:
         return {"command": "ask", "query_type": "general"}
 
     return {"command": "ask", "query_type": "unknown"}
-=======
-def _resolve_request_type(
-    forced_type: str,
-    mode: str,
-    command_text: str,
-    has_image: bool,
-    has_item_context: bool,
-) -> str:
-    if forced_type:
-        return forced_type
-    if mode == "awaiting_location":
-        return "set_location"
-    if mode == "focused_on_item" and has_item_context:
-        return "item_ask"
-    if mode == "awaiting_confirmation":
-        return "confirm_action"
-    return _normalize_command_type(command_text, has_image=has_image, has_item_context=has_item_context)
->>>>>>> api/whisper-update
 
 
 def _process_set_location_request(label: str, location_text: str) -> tuple[dict, int]:
@@ -222,10 +172,6 @@ def _process_set_location_request(label: str, location_text: str) -> tuple[dict,
         return {"error": "missing field: state.context.label"}, 400
     if not room_name:
         return {"error": "missing room name"}, 400
-<<<<<<< HEAD
-
-    get_database().add_sighting(label=label, room_name=room_name)
-=======
     if not get_database().get_items_metadata(label=label):
         return {"error": "unknown label in state context"}, 404
 
@@ -233,7 +179,6 @@ def _process_set_location_request(label: str, location_text: str) -> tuple[dict,
         get_database().add_sighting(label=label, room_name=room_name)
     except Exception as exc:
         return {"error": "failed to save location", "detail": str(exc)}, 500
->>>>>>> api/whisper-update
     return {
         "action": "set_location",
         "label": label,
@@ -308,11 +253,9 @@ def voice():
     mode, state_context = _extract_state(payload)
 
     forced_type = (payload.get("request_type") or request.form.get("request_type", "")).strip().lower()
-<<<<<<< HEAD
-=======
     if forced_type and forced_type not in _ALLOWED_REQUEST_TYPES:
         return jsonify({"error": "invalid request_type", "request_type": forced_type}), 400
->>>>>>> api/whisper-update
+
     provided_text = (payload.get("text") or request.form.get("text", "")).strip()
     scan_id = (payload.get("scan_id") or request.form.get("scan_id", "") or state_context.get("scan_id", "")).strip()
     label = (payload.get("label") or request.form.get("label", "") or state_context.get("label", "")).strip()
@@ -320,12 +263,8 @@ def voice():
     transcription = {"text": provided_text, "source": "client", "context_used": False}
     status = 200
 
-<<<<<<< HEAD
-    if not provided_text:
-=======
     should_transcribe = not provided_text and forced_type not in {"remember", "scan"}
     if should_transcribe:
->>>>>>> api/whisper-update
         audio_bytes = _extract_audio_bytes(payload)
         transcription, status = transcribe_audio_bytes(audio_bytes, use_context=use_context)
         if status != 200:
@@ -333,7 +272,6 @@ def voice():
         transcription["source"] = "whisper"
 
     command_text = (transcription.get("text") or "").strip()
-<<<<<<< HEAD
     if forced_type:
         classification = {"command": forced_type}
     elif mode == "awaiting_confirmation":
@@ -347,78 +285,35 @@ def voice():
     if request_type in {"rename", "read_ocr", "export_ocr", "describe", "item_ask"}:
         intent = classification.get("intent")
         result, status = process_item_ask_request(scan_id=scan_id, label=label, query=command_text, intent=intent)
-=======
-    has_image = request.files.get("image") is not None
-    has_item_context = bool(scan_id and label)
-
-    request_type = _resolve_request_type(
-        forced_type=forced_type,
-        mode=mode,
-        command_text=command_text,
-        has_image=has_image,
-        has_item_context=has_item_context,
-    )
-    next_state = None
-
-    if request_type in {"rename", "read_ocr", "export_ocr", "describe", "item_ask"}:
-        result, status = process_item_ask_request(scan_id=scan_id, label=label, query=command_text)
->>>>>>> api/whisper-update
         request_type = "item_ask"
     elif request_type == "remember":
         image_file = request.files.get("image")
         image_files = request.files.getlist("images[]")
-<<<<<<< HEAD
-        prompt = (
-            request.form.get("prompt")
-            or classification.get("label")
-            or _resolve_query_for_find(command_text, "")
-        ).strip()
-=======
-        prompt = (request.form.get("prompt") or _resolve_query_for_find(command_text, "")).strip()
->>>>>>> api/whisper-update
+        prompt = (request.form.get("prompt") or classification.get("label") or _resolve_query_for_find(command_text, "")).strip()
         result, status = process_remember_request(prompt=prompt, image_file=image_file, image_files=image_files)
         if status == 200 and isinstance(result, dict) and result.get("success"):
             next_state = "awaiting_location"
     elif request_type == "scan":
-<<<<<<< HEAD
         result, status = process_scan_request(
             image_file=request.files.get("image"),
             focal_length_raw=request.form.get("focal_length_px", ""),
         )
     elif request_type == "find":
-        result, status = _process_find_request(
-            query=classification.get("query", command_text),
-            label=label,
-        )
+        result, status = _process_find_request(query=classification.get("query", command_text), label=label)
     elif request_type == "set_location":
-        result, status = _process_set_location_request(
-            label=label,
-            location_text=classification.get("location", command_text),
-        )
-=======
-        image_file = request.files.get("image")
-        focal_length_raw = request.form.get("focal_length_px", "")
-        result, status = process_scan_request(image_file=image_file, focal_length_raw=focal_length_raw)
-    elif request_type == "find":
-        result, status = _process_find_request(command_text, label)
-    elif request_type == "set_location":
-        result, status = _process_set_location_request(label=label, location_text=command_text)
->>>>>>> api/whisper-update
+        result, status = _process_set_location_request(label=label, location_text=classification.get("location", command_text))
         if status == 200:
             next_state = "idle"
     elif request_type == "confirm_action":
         result, status = _process_confirm_action_request(command_text=command_text, context=state_context)
         if status == 200:
             next_state = "idle"
-<<<<<<< HEAD
     elif request_type == "stop":
         result, status = {
             "action": "stop",
             "stopped": True,
             "narration": "Okay, stopping.",
         }, 200
-=======
->>>>>>> api/whisper-update
     else:
         result, status = process_ask_query(command_text)
         request_type = "ask"
@@ -428,20 +323,15 @@ def voice():
         "request_type": request_type,
         "transcription": command_text,
         "transcription_meta": transcription,
-<<<<<<< HEAD
         "classification": classification,
-=======
->>>>>>> api/whisper-update
         "result": result,
         "narration": narration,
         "next_state": next_state,
         "latency_ms": round((time.monotonic() - t0) * 1000),
     }
-<<<<<<< HEAD
     if classification.get("intent"):
         response["intent"] = classification["intent"]
-=======
->>>>>>> api/whisper-update
+
     _log.info({
         "event": "voice_dispatch",
         "request_type": request_type,
