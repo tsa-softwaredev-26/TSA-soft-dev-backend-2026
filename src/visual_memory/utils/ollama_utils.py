@@ -33,6 +33,7 @@ _cb_state: dict = {"failures": 0, "opened_at": None}
 
 _WS_RE = re.compile(r"\s+")
 _SAFE_TEXT_RE = re.compile(r"[^a-zA-Z0-9\s\-']")
+_TERM_FROM_JSONISH_RE = re.compile(r'"term"\s*:\s*"([^"]+)"', re.IGNORECASE)
 _DISALLOWED_PATTERNS = [
     re.compile(r"\b(ignore|override)\b.{0,30}\b(instruction|system|prompt|policy)\b", re.IGNORECASE),
     re.compile(r"\b(system prompt|developer message|jailbreak|do anything now)\b", re.IGNORECASE),
@@ -134,6 +135,62 @@ def _sanitize_phrase(
     return cleaned.lower() if lowercase else cleaned
 
 
+def _sanitize_search_term_lenient(text: str) -> str | None:
+    """Sanitize search terms while gracefully truncating overlong phrases."""
+    cleaned = _SAFE_TEXT_RE.sub(" ", text).strip()
+    cleaned = _WS_RE.sub(" ", cleaned)
+    if not cleaned:
+        return None
+    if _contains_disallowed_content(cleaned):
+        return None
+    words = cleaned.split(" ")
+    if len(words) > _MAX_SEARCH_TERM_WORDS:
+        words = words[:_MAX_SEARCH_TERM_WORDS]
+    clipped = " ".join(words)[:_MAX_SEARCH_TERM_CHARS].strip()
+    if not clipped:
+        return None
+    return clipped.lower()
+
+
+_SEARCH_PREFIX_PATTERNS = [
+    re.compile(r"^\s*(?:please\s+)?(?:can you\s+|could you\s+)?(?:help me\s+)?where\s+(?:did\s+i\s+)?(?:put|leave|is|are)\s+", re.IGNORECASE),
+    re.compile(r"^\s*(?:please\s+)?(?:can you\s+|could you\s+)?(?:help me\s+)?(?:find|locate|search for|look for)\s+", re.IGNORECASE),
+    re.compile(r"^\s*(?:please\s+)?(?:can you\s+|could you\s+)?(?:help me\s+)?have you seen\s+", re.IGNORECASE),
+    re.compile(r"^\s*i\s+(?:need to find|am looking for|m looking for)\s+", re.IGNORECASE),
+    re.compile(r"^\s*what room are\s+", re.IGNORECASE),
+]
+
+_SEARCH_STOPWORDS = {
+    "a", "an", "and", "are", "can", "could", "did", "do", "find", "for",
+    "have", "help", "i", "in", "is", "it", "leave", "left", "locate", "look",
+    "looking", "me", "my", "of", "on", "please", "put", "room", "search",
+    "seen", "the", "this", "to", "was", "were", "what", "where", "with", "you",
+}
+
+
+def _extract_search_term_keyword(query: str) -> str | None:
+    if not query:
+        return None
+    lowered = _WS_RE.sub(" ", _SAFE_TEXT_RE.sub(" ", query)).strip().lower()
+    if not lowered or _contains_disallowed_content(lowered):
+        return None
+
+    candidate = lowered
+    matched_prefix = False
+    for pattern in _SEARCH_PREFIX_PATTERNS:
+        if pattern.search(candidate):
+            matched_prefix = True
+            candidate = pattern.sub("", candidate).strip()
+
+    if not matched_prefix:
+        return None
+
+    tokens = [tok for tok in candidate.split(" ") if tok and tok not in _SEARCH_STOPWORDS]
+    if not tokens:
+        return None
+    return _sanitize_search_term_lenient(" ".join(tokens))
+
+
 def _build_known_items_context(known_labels: list[str] | None) -> str:
     if not known_labels:
         return ""
@@ -208,6 +265,9 @@ def extract_search_term(query: str, known_labels: list[str] | None = None) -> st
 
     Returns None if Ollama is unavailable; caller should search with the raw query.
     """
+    if _contains_disallowed_content(query):
+        return None
+
     context = _build_known_items_context(known_labels)
     prompt = (
         "Extract the object or item the user is looking for.\n"
@@ -227,19 +287,30 @@ def extract_search_term(query: str, known_labels: list[str] | None = None) -> st
         f"Query: {json.dumps(query)}"
     )
     raw = _chat_raw(prompt, json_mode=True)
-    if not raw:
-        return None
-    try:
-        data = json.loads(raw)
-        term = str(data.get("term", "")).strip()
-        return _sanitize_phrase(
-            term,
-            max_words=_MAX_SEARCH_TERM_WORDS,
-            max_chars=_MAX_SEARCH_TERM_CHARS,
-            lowercase=True,
-        )
-    except (json.JSONDecodeError, AttributeError, TypeError):
-        return None
+    if raw:
+        term: str | None = None
+        try:
+            data = json.loads(raw)
+            term = str(data.get("term", "")).strip()
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            match = _TERM_FROM_JSONISH_RE.search(raw)
+            if match:
+                term = match.group(1).strip()
+
+        if term:
+            sanitized = _sanitize_phrase(
+                term,
+                max_words=_MAX_SEARCH_TERM_WORDS,
+                max_chars=_MAX_SEARCH_TERM_CHARS,
+                lowercase=True,
+            )
+            if sanitized:
+                return sanitized
+            relaxed = _sanitize_search_term_lenient(term)
+            if relaxed:
+                return relaxed
+
+    return _extract_search_term_keyword(query)
 
 
 def extract_item_intent(query: str, known_labels: list[str] | None = None) -> str | None:
