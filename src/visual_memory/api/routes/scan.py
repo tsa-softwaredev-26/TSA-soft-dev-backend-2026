@@ -11,33 +11,29 @@ scan_bp = Blueprint("scan", __name__)
 _SCANS_DIR = Path(__file__).resolve().parents[4] / "scans"
 
 
-@scan_bp.post("/scan")
-def scan():
-    if "image" not in request.files:
-        return jsonify({"error": "missing field: image"}), 400
+def process_scan_request(image_file, focal_length_raw: str) -> tuple[dict, int]:
+    if image_file is None:
+        return {"error": "missing field: image"}, 400
 
     focal_length_px = 0.0
-    raw = request.form.get("focal_length_px", "")
+    raw = (focal_length_raw or "").strip()
     if raw:
         try:
             focal_length_px = float(raw)
         except ValueError:
-            return jsonify({"error": "focal_length_px must be a float"}), 400
+            return {"error": "focal_length_px must be a float"}, 400
 
     pipeline = get_scan_pipeline()
-
-    image_file = request.files["image"]
     try:
         image = Image.open(image_file.stream).convert("RGB")
     except Exception as exc:
-        return jsonify({"error": f"could not open image: {exc}"}), 400
+        return {"error": f"could not open image: {exc}"}, 400
 
     scan_id = uuid4().hex
-
     try:
         result = pipeline.run(image, scan_id=scan_id, focal_length_px=focal_length_px)
     except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+        return {"error": str(exc)}, 500
 
     db = get_database()
     for i, match in enumerate(result.get("matches", [])):
@@ -56,4 +52,13 @@ def scan():
         )
 
     result["scan_id"] = scan_id
-    return jsonify(result)
+    return result, 200
+
+
+@scan_bp.post("/scan")
+def scan():
+    result, status = process_scan_request(
+        image_file=request.files.get("image"),
+        focal_length_raw=request.form.get("focal_length_px", ""),
+    )
+    return jsonify(result), status

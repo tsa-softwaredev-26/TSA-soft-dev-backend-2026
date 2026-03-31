@@ -735,9 +735,10 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - Text embedder: CLIP text encoder only (`openai/clip-vit-base-patch32`, 512-dim, ~180MB)
 - Deployment: `deploy/install.sh` installs systemd units from templates; primary units are `deploy/spaitra-core.service` and `deploy/spaitra-ocr.service`
  - Debug endpoints: /debug/state, /debug/echo, /debug/image, /debug/db, /debug/logs, /debug/perf, /debug/test-remember, /debug/test-scan, /debug/wipe (selective), /debug/config (live settings patch)
- - Ask Mode: POST /ask (NL query -> embedding search -> narration), POST /item/ask (item-context dispatcher: read_ocr, export_ocr, rename, find, describe)
- - Voice transcription: POST /transcribe (Whisper Turbo) with optional context bias from known item labels and room names
- - Ollama integration: per-mode model routing via `ollama_utils.py` (`llama3.2:1b` balanced, `phi3:mini` accurate, disabled in fast mode); structured JSON output (format="json"); circuit breaker (3-strike, 60 s cooldown); configurable timeout via OLLAMA_TIMEOUT_SECONDS; OLLAMA_HOST env for non-localhost daemon
+ - Ask Mode: POST /ask remains available, and POST /voice adds state-aware command routing across ask, find, item, scan, and remember flows
+ - Voice transcription: POST /transcribe remains available, and /voice can invoke the same transcription pipeline before routing
+ - Voice state management: /voice validates commands against `current_mode` and returns `command_unavailable` with `available_commands` when the command does not fit the current state
+ - Ollama integration: llama3.2:1b via `ollama_utils.py`; structured JSON output (format="json"); circuit breaker (3-strike, 60 s cooldown); configurable timeout via OLLAMA_TIMEOUT_SECONDS; OLLAMA_HOST env for non-localhost daemon
  - Jailbreak resistance: `/ask` now applies an unsafe-query gate before retrieval. Queries with prompt-injection or harmful markers are blocked with `400` (`blocked: true`, `reason: "unsafe_query"`) instead of running fuzzy search.
 - OCR pre-embedding: `add_to_database()` embeds OCR text at teach time and stores in `items.ocr_embedding`; `/ask` OCR content match uses stored embedding, re-embeds only for legacy items
 
@@ -758,12 +759,9 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 ### Testing
 - [x] Refactor test_ask_mode.py, test_projection_head.py, test_scan_batching.py to use `TestRunner` instead of module-level print statements so exit codes integrate with run_all.
 - [x] Overhaul test runner to exercise all features via HTTP endpoints (Flask test client) rather than calling pipeline code directly. Added stress and pentest suites with route-level coverage and report artifacts.
-- [x] Validate Ollama prompts against a 20-case eval dataset with per-case known-label context and model comparison harness. Audio files are still pending for voice comparison coverage.
+- [ ] Validate Ollama prompts (extract_search_term, extract_item_intent, extract_rename_target) against 20+ real voice queries to confirm extraction reliability.
 - [ ] Add Whisper transcription quality test set (20+ real voice queries) and track exact-query and intent-success rates across noise, accent, and speaking-speed variants.
 - [ ] Add Whisper context-bias A/B tests (`context=0` vs `context=1`) against user-specific labels and room names; report wins and regressions before tuning defaults.
-- [ ] Implement `/item/ask` `describe` intent with a real VLM backend (currently returns `deferred: true`); define latency budget and fallback narration when VLM is unavailable.
-- [ ] Add teach-voice phrase support validation (`"remember this as ..."`, `"this is my ..."`) end-to-end from `/transcribe` output to remember/rename flows, including conflict handling.
-- [ ] Add voice command router contract tests for non-query utterances (`"scan"`, `"find"`, `"ask"`, `"settings"`) so transcription output maps deterministically to frontend actions.
 - [x] Continue prompt-injection hardening for Ollama parsing and `/ask` retrieval. Added pentest suites for ask/find/item/transcribe/settings payload abuse and unsafe-query assertions.
 
 ### Learning / Personalization
@@ -799,7 +797,7 @@ All server-transition items are complete as of March 2026.
 
 - **Input Enhancement in Remember Mode** - [x] Wired as third-pass Ollama fallback in `_detect_with_fallback()`. After all `_SECOND_PASS_TEMPLATES` fail, Ollama (llama3.2:1b) suggests `ollama_detection_retries` alternative phrasings; each is tried with GroundingDINO. Degrades silently if Ollama unavailable. Logged as `remember_third_pass_ollama`.
 - **OCR content pre-embedding** - [x] `add_to_database()` now embeds OCR text via CLIP at teach time and stores in `items.ocr_embedding`. `_ocr_content_match()` in `find.py` uses the stored embedding instead of re-embedding N items per query. Backward compatible: items without stored embedding are re-embedded on the fly.
-- **Vision-Language Model for item description** - `POST /item/ask` with `describe` intent returns `deferred: true`. Needs LLaVA or similar VLM via Ollama. Separate spike: confirm model fits memory with SAVE_VRAM=1.
+- **Voice-state command policy** - [x] /voice command classifier now enforces mode-specific availability and returns deterministic navigation actions (`navigate_back`, `navigate_next`, `navigate_previous`, `open_settings`, `stop`) for frontend state machines.
 - **Bloat Prevention** - Duplicate entry detection, pruning unused entries, user confirmation before overwriting similar embeddings.
 - **HNSW index** - Marginal benefit below ~10k entries; defer until scale requires it.
 - **Pipeline batching** - ScanPipeline can call `batch_embed()` and `detect_all_batch()` instead of per-crop loops for full GPU utilization on the server.

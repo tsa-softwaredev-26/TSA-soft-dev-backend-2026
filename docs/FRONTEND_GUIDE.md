@@ -85,6 +85,7 @@ the OCR service unreachable, the OCR microservice is down (core API still works 
 | POST | /remember | User teaches a new object |
 | POST | /sightings | User names the room after teach or scan |
 | POST | /scan | User scans the room |
+| POST | /voice | State-aware command routing and narration |
 | GET | /crop | User focuses on a specific scan match |
 | POST | /feedback | User confirms or denies a scan match |
 | POST | /transcribe | Convert short voice clip to query text |
@@ -519,6 +520,23 @@ Content-Type: application/json
 ---
 
 ## Ask Mode
+
+### State-aware voice routing: POST /voice
+
+`/voice` supports mode-aware command execution with frontend state.
+
+Request includes:
+- `state.current_mode`
+- optional `state.context` (`scan_id`, `label`, pending action)
+
+When a command is not valid in the current mode, response includes:
+- `error: "command_unavailable"`
+- `requested_command`
+- `current_mode`
+- `available_commands`
+- narration guidance
+
+This allows the frontend state machine to guide users without guessing.
 
 ### Voice transcription: POST /transcribe
 

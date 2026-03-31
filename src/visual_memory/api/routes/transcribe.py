@@ -16,16 +16,13 @@ _log = get_logger(__name__)
 transcribe_bp = Blueprint("transcribe", __name__)
 
 
-@transcribe_bp.post("/transcribe")
-def transcribe():
+def transcribe_audio_bytes(audio_bytes: bytes, use_context: bool = True) -> tuple[dict, int]:
     t0 = time.monotonic()
     settings = get_settings()
 
-    audio_bytes = request.data
     if not audio_bytes:
-        return jsonify({"error": "missing audio data"}), 400
+        return {"error": "missing audio data"}, 400
 
-    use_context = request.args.get("context", "1") != "0"
     _log.info({
         "event": "transcribe_request",
         "tag": LogTag.API,
@@ -37,16 +34,16 @@ def transcribe():
         audio_array, sample_rate = load_audio_bytes(audio_bytes, target_sr=settings.whisper_sample_rate)
     except ValueError as exc:
         _, fmt = validate_audio_format(audio_bytes)
-        return jsonify({
+        return {
             "error": "invalid audio format",
             "detail": str(exc),
             "format_detected": fmt,
-        }), 400
+        }, 400
     except RuntimeError as exc:
-        return jsonify({
+        return {
             "error": "audio decoder unavailable",
             "detail": str(exc),
-        }), 500
+        }, 500
 
     context_prompt = None
     recognizer = registry.get_whisper_recognizer()
@@ -66,7 +63,7 @@ def transcribe():
             "tag": LogTag.API,
             "error": str(exc),
         })
-        return jsonify({"error": "transcription failed", "detail": str(exc)}), 500
+        return {"error": "transcription failed", "detail": str(exc)}, 500
     finally:
         registry.prepare_after_voice()
 
@@ -89,5 +86,12 @@ def transcribe():
         "audio_duration_s": round(audio_duration_s, 2),
         "context_used": bool(context_prompt),
     })
-    return jsonify(response)
+    return response, 200
 
+
+@transcribe_bp.post("/transcribe")
+def transcribe():
+    audio_bytes = request.data
+    use_context = request.args.get("context", "1") != "0"
+    response, status = transcribe_audio_bytes(audio_bytes, use_context=use_context)
+    return jsonify(response), status

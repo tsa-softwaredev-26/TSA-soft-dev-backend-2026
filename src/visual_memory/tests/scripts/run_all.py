@@ -47,6 +47,7 @@ _API_TESTS = [
     ("test_remember_route",   "api",  ["remember"]),
     ("test_scan_route",       "api",  ["scan"]),
     ("test_transcribe_route", "api",  ["voice", "transcribe"]),
+    ("test_voice_router",     "api",  ["voice", "router"]),
     ("test_feedback_retrain", "api",  ["feedback", "retrain", "learning"]),
     ("test_items_crud",       "api",  ["items"]),
     ("test_sightings_route",  "api",  ["sightings"]),

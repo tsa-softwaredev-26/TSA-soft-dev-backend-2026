@@ -107,121 +107,122 @@ def item_ask():
         }
     """
     data = request.get_json(silent=True) or {}
-    scan_id = (data.get("scan_id") or "").strip()
-    label = (data.get("label") or "").strip()
-    query = (data.get("query") or "").strip()
+    result, status = process_item_ask_request(
+        scan_id=data.get("scan_id"),
+        label=data.get("label"),
+        query=data.get("query"),
+    )
+    return jsonify(result), status
+
+
+def process_item_ask_request(scan_id: str, label: str, query: str, intent: str | None = None) -> tuple[dict, int]:
+    scan_id = (scan_id or "").strip()
+    label = (label or "").strip()
+    query = (query or "").strip()
 
     if not scan_id:
-        return jsonify({"error": "missing field: scan_id"}), 400
+        return {"error": "missing field: scan_id"}, 400
     if not label:
-        return jsonify({"error": "missing field: label"}), 400
+        return {"error": "missing field: label"}, 400
     if not query:
-        return jsonify({"error": "missing field: query"}), 400
+        return {"error": "missing field: query"}, 400
 
-    # Resolve intent: keywords first, Ollama for ambiguous cases only
-    # Keywords are unambiguous signals; use them as the primary classifier.
-    # Ollama supplements only when no keyword pattern fires.
-    intent = _keyword_intent(query)
+    resolved_intent = intent
     ollama_used = False
-    db = get_database()
-    known_labels = db.get_known_labels()
-    if intent is None and get_settings().llm_query_fallback_enabled:
-        intent = extract_item_intent(query, known_labels=known_labels[:20])
-        if intent is not None:
-            ollama_used = True
-    if intent is None:
-        intent = "read_ocr"  # safest default for an unknown voice command
+    if resolved_intent is None:
+        resolved_intent = _keyword_intent(query)
+        if resolved_intent is None and get_settings().llm_query_fallback_enabled:
+            resolved_intent = extract_item_intent(query)
+            if resolved_intent is not None:
+                ollama_used = True
+        if resolved_intent is None:
+            resolved_intent = "read_ocr"
 
     _log.info({
         "event": "item_ask",
         "label": label,
-        "intent": intent,
+        "intent": resolved_intent,
         "ollama_used": ollama_used,
         "query": query,
     })
 
-    # read_ocr / export_ocr
-    if intent in ("read_ocr", "export_ocr"):
+    db = get_database()
+
+    if resolved_intent in ("read_ocr", "export_ocr"):
         rows = db.get_items_metadata(label=label)
         ocr_text = rows[0]["ocr_text"] if rows else ""
 
         if not ocr_text:
-            return jsonify({
-                "action": intent,
+            return {
+                "action": resolved_intent,
                 "label": label,
                 "ocr_text": "",
                 "narration": f"There's no text stored for {label}.",
-                "export": intent == "export_ocr",
-            })
+                "export": resolved_intent == "export_ocr",
+            }, 200
 
-        return jsonify({
-            "action": intent,
+        return {
+            "action": resolved_intent,
             "label": label,
             "ocr_text": ocr_text,
             "narration": f"The text says: {ocr_text}",
-            "export": intent == "export_ocr",
-        })
+            "export": resolved_intent == "export_ocr",
+        }, 200
 
-    # rename
-    if intent == "rename":
-        # Keyword extraction first (deterministic), Ollama as fallback
+    if resolved_intent == "rename":
         new_label = _extract_rename_target_keyword(query)
         if new_label is None and get_settings().llm_query_fallback_enabled:
-            new_label = extract_rename_target(query, known_labels=known_labels[:20])
+            new_label = extract_rename_target(query)
         if not new_label:
-            return jsonify({
+            return {
                 "action": "rename",
                 "narration": "I couldn't understand the new name. Try saying: rename this to [name].",
                 "error": "new_label_not_found",
-            }), 400
+            }, 400
 
         new_label = new_label.strip()
 
         if new_label.lower() == label.lower():
-            return jsonify({
+            return {
                 "action": "rename",
                 "narration": f"That's already called {label}.",
                 "unchanged": True,
-            })
+            }, 200
 
         result = db.rename_label(label, new_label)
-        # Reload scan pipeline DB so the rename is immediately visible in scans
         get_scan_pipeline().reload_database()
 
-        return jsonify({
+        return {
             "action": "rename",
             "old_label": label,
             "new_label": new_label,
             "narration": f"Renamed to {new_label}.",
             "replaced_existing": result["replaced"] > 0,
-        })
+        }, 200
 
-    # find
-    if intent == "find":
+    if resolved_intent == "find":
         row = db.get_last_sighting(label)
         if row is None:
-            return jsonify({
+            return {
                 "action": "find",
                 "label": label,
                 "found": False,
                 "narration": f"I haven't seen {label} in any known location yet.",
-            })
+            }, 200
         sighting = _format_sighting(row)
-        return jsonify({
+        return {
             "action": "find",
             "label": label,
             "found": True,
             "narration": build_narration(label, sighting),
             "last_sighting": sighting,
-        })
+        }, 200
 
-    # describe (deferred)
-    if intent == "describe":
-        return jsonify({
+    if resolved_intent == "describe":
+        return {
             "action": "describe",
             "narration": "Visual description is not available yet.",
             "deferred": True,
-        })
+        }, 200
 
-    # Unreachable but defensive
-    return jsonify({"error": f"unknown intent: {intent}"}), 400
+    return {"error": f"unknown intent: {resolved_intent}"}, 400
