@@ -17,7 +17,7 @@ _TESTS_DIR = _SCRIPTS_DIR.parent                 # tests/
 INPUT_IMAGES_DIR = _TESTS_DIR / "input_images"
 FOCAL_LENGTH_PX_IPHONE15 = 3094.0
 
-# ── Configure your tests here ────────────────────────────────────────────────
+# Configure your tests here.
 # (image_path, prompt, ground_truth_ft)
 # ground_truth_ft is the actual measured distance; used to compute error %
 # Set to None if you just want to see the narration without error checking
@@ -28,7 +28,6 @@ TESTS = [
     (INPUT_IMAGES_DIR / "wallet_1ft_table.jpg", "wallet", 1.0),
     (INPUT_IMAGES_DIR / "wallet_3ft_table.jpg", "wallet", 3.0),
 ]
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def main():

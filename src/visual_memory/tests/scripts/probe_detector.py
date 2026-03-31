@@ -162,7 +162,7 @@ def batch_run(preset: str, prompt: str, settings: Settings, processor, model, de
             path, prompt, settings, processor, model, device
         )
 
-        print(f"{filename:30} → {detected}")
+        print(f"{filename:30} -> {detected}")
 
     print("=" * 50)
 
@@ -202,7 +202,7 @@ def main():
 
     if args.detector == "yoloe":
         score, detected = run_yoloe(args.image, settings)
-        print(f"YOLOE → score={score:.4f}, detected={detected}")
+        print(f"YOLOE -> score={score:.4f}, detected={detected}")
         return
 
     if not args.prompt:
