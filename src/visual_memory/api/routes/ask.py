@@ -22,54 +22,21 @@ _log = get_logger(__name__)
 ask_bp = Blueprint("ask", __name__)
 
 
-@ask_bp.post("/ask")
-def ask():
-    """Open-ended natural language memory search.
-
-    Body (JSON):
-        query  (str, required) - the user's raw spoken query
-
-    Response (found):
-        {
-          "query": "where did I put my money",
-          "search_term": "money",          -- extracted by Ollama, or raw query if unavailable
-          "ollama_used": true,
-          "found": true,
-          "matched_label": "wallet",
-          "matched_by": "fuzzy_label",     -- "exact" | "fuzzy_label" | "ocr_semantic" | fallback variants
-          "document_query": false,
-          "strategies_tried": ["llm_extraction", "exact", "fuzzy_label"],
-          "narration": "Your wallet is in the kitchen, to your left. Last seen 5 minutes ago.",
-          "last_sighting": { ... },
-          "sightings": [ ... ]
-        }
-
-    Response (not found):
-        {
-          "query": "...",
-          "search_term": "...",
-          "ollama_used": bool,
-          "found": false,
-          "strategies_tried": [ ... ],
-          "narration": "I couldn't find anything matching that in your memory."
-        }
-    """
-    data = request.get_json(silent=True) or {}
-    raw_query = data.get("query")
+def process_ask_query(raw_query) -> tuple[dict, int]:
     if raw_query is None:
-        return jsonify({"error": "missing field: query"}), 400
+        return {"error": "missing field: query"}, 400
     if not isinstance(raw_query, str):
-        return jsonify({"error": "query must be a string"}), 400
+        return {"error": "query must be a string"}, 400
     query = raw_query.strip()
     if not query:
-        return jsonify({"error": "missing field: query"}), 400
+        return {"error": "missing field: query"}, 400
 
     if is_unsafe_query(query):
         _log.warning({
             "event": "ask_blocked_unsafe_query",
             "query": query,
         })
-        return jsonify({
+        return {
             "query": query,
             "search_term": None,
             "ollama_used": False,
@@ -77,7 +44,7 @@ def ask():
             "blocked": True,
             "reason": "unsafe_query",
             "narration": "I can only help with memory-related object lookup requests.",
-        }), 400
+        }, 400
 
     settings = get_settings()
     db = get_database()
@@ -160,14 +127,14 @@ def ask():
             "primary_strategy": primary_strategy,
             "strategies_tried": strategies_tried,
         })
-        return jsonify({
+        return {
             "query": query,
             "search_term": search_term,
             "ollama_used": ollama_used,
             "found": False,
             "strategies_tried": strategies_tried,
             "narration": "I couldn't find anything matching that in your memory.",
-        })
+        }, 200
 
     sightings = [_format_sighting(r) for r in rows]
     narration = build_narration(matched_label, sightings[0])
@@ -181,7 +148,7 @@ def ask():
         "strategies_tried": strategies_tried,
     })
 
-    return jsonify({
+    return {
         "query": query,
         "search_term": search_term,
         "ollama_used": ollama_used,
@@ -193,4 +160,11 @@ def ask():
         "narration": narration,
         "last_sighting": sightings[0],
         "sightings": sightings,
-    })
+    }, 200
+
+
+@ask_bp.post("/ask")
+def ask():
+    data = request.get_json(silent=True) or {}
+    result, status = process_ask_query(data.get("query"))
+    return jsonify(result), status
