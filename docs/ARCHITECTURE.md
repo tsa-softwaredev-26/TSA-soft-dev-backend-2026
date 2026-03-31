@@ -12,9 +12,9 @@ Blind users cannot quickly visually re-scan their environment the way sighted pe
 Spaitra restores this ability by creating a personal, spatial memory of the user’s physical world.
 
 
-## Core Modes
+## Core Actions
 
-### Teach Mode
+### Teach 
 
 > “These are my house keys on the dining room table.”
 
@@ -29,7 +29,7 @@ The user can confirm or correct detections to improve personalization.
 
 ---
 
-### Scan Mode
+### Scan 
 
 Recognizes previously taught objects in the current scene.
 
@@ -41,7 +41,7 @@ Example narration:
 
 ---
 
-### Ask Mode
+### Ask 
 
 > “Where did I leave my wallet?”  
 > “What’s the receipt that has my office chair on it?”
@@ -505,7 +505,7 @@ benchmarks/CAPTURE_GUIDE.md -- personal capture + run guide (gitignored)
 
 **10 objects x 12 conditions = 120 images.**
 Conditions: 3 distances (1ft/3ft/6ft) x 2 lighting (bright/dim) x 2 backgrounds (clean/messy).
-Objects: wallet_a, wallet_b, book_a, book_b, sunglasses_a, sunglasses_b, receipt_a, receipt_b, keys_a, keys_b.
+Objects: wallet_a, wallet_b, bottle_a, bottle_b, sunglasses_a, sunglasses_b, receipt_a, receipt_b, keys_a, keys_b.
 Labels are per-instance (wallet_a vs wallet_b) to test instance-level discrimination.
 
 ### Phases
@@ -795,13 +795,8 @@ All server-transition items are complete as of March 2026.
 
 ## Future Plans
 
-- **Input Enhancement in Remember Mode** - [x] Wired as third-pass Ollama fallback in `_detect_with_fallback()`. After all `_SECOND_PASS_TEMPLATES` fail, Ollama (llama3.2:1b) suggests `ollama_detection_retries` alternative phrasings; each is tried with GroundingDINO. Degrades silently if Ollama unavailable. Logged as `remember_third_pass_ollama`.
-- **OCR content pre-embedding** - [x] `add_to_database()` now embeds OCR text via CLIP at teach time and stores in `items.ocr_embedding`. `_ocr_content_match()` in `find.py` uses the stored embedding instead of re-embedding N items per query. Backward compatible: items without stored embedding are re-embedded on the fly.
-- **Ask strategy transparency** - [x] `/ask` responses now include `document_query`, `matched_by`, and `strategies_tried` so frontend and tests can verify retrieval-path behavior.
 - **Bloat Prevention** - Duplicate entry detection, pruning unused entries, user confirmation before overwriting similar embeddings.
 - **HNSW index** - Marginal benefit below ~10k entries; defer until scale requires it.
-- **Pipeline batching** - ScanPipeline can call `batch_embed()` and `detect_all_batch()` instead of per-crop loops for full GPU utilization on the server.
-
 ---
 
 ## Design Decisions
