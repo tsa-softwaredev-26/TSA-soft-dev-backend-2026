@@ -52,9 +52,12 @@ class Settings:
 
     # OCR text pre-check: normalized edge density threshold below which OCR is
     # skipped entirely on a crop. 0.0 = always run OCR, 1.0 = never run.
-    # Range 0.0-1.0; 0.10 skips smooth/plain-colored crops while catching
-    # most product labels, packaging, and text-bearing surfaces.
-    ocr_text_likelihood_threshold: float = 0.10
+    # Range 0.0-1.0. Tuned to 0.30 via benchmarks/text_likelihood_sweep.json
+    # (48 text + 192 textless images, 1-6ft distances, multiple lighting conditions).
+    # Minimizes false positives on textless objects (wallets, keys, bottles, glasses):
+    # at 0.30: 18/192 FP (9.4% FP rate), 8/48 TP (16.7% recall). Previous 0.10 had
+    # 192/192 FP (100% FP rate), running unnecessary OCR on all textless images.
+    ocr_text_likelihood_threshold: float = 0.30
 
     # OCR (text recognition)
     ocr_backend: str = "http"
