@@ -181,12 +181,12 @@ deactivate
 
 The core backend uses two gated HuggingFace models. Before downloading:
 
-1. Accept the license for `facebook/dinov3-vits16-pretrain-lvd1689m` at
-   `https://huggingface.co/facebook/dinov3-vits16-pretrain-lvd1689m`
+1. Accept the license for `facebook/dinov3-vitl16-pretrain-lvd1689m` at
+   `https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m`
 2. Accept the license for `IDEA-Research/grounding-dino-base` at
    `https://huggingface.co/IDEA-Research/grounding-dino-base`
 
-Then authenticate and download (~4.3 GB total):
+Then authenticate and download (~5.3 GB total):
 
 ```bash
 source $REPO/venv-core/bin/activate

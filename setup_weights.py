@@ -7,7 +7,7 @@ Downloads:
   - depth_pro.pt (~2GB)           -> checkpoints/
   - yoloe-26l-seg-pf.pt (~80MB)   -> src/visual_memory/engine/object_detection/
   - CLIP text encoder (~180MB)     -> HuggingFace cache
-  - DINOv3 ViT-S/16 (~1.2GB)      -> HuggingFace cache  [requires HF login]
+  - DINOv3 ViT-L/16 (~1.2GB)      -> HuggingFace cache  [requires HF login]
   - GroundingDINO base (~900MB)    -> HuggingFace cache  [requires HF login]
   - llama3.2:1b (~1.3GB)          -> Ollama model store  [requires Ollama daemon]
 
@@ -35,7 +35,7 @@ YOLOE_FILE = "yoloe-26l-seg-pf.pt"
 
 # Must match settings.py
 CLIP_MODEL = "openai/clip-vit-base-patch32"
-DINOV3_MODEL = "facebook/dinov3-vits16-pretrain-lvd1689m"
+DINOV3_MODEL = "facebook/dinov3-vitl16-pretrain-lvd1689m"
 GDINO_MODEL = "IDEA-Research/grounding-dino-base"
 OLLAMA_MODEL = "llama3.2:1b"
 
