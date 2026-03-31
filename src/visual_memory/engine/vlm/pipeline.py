@@ -36,19 +36,19 @@ class VLMPipeline:
             self._model = self._model.to(get_device())
         return self._model, self._tokenizer
 
-    def _infer(self, image_path: Path) -> str:
+    def _infer(self, image_path: Path, question: str) -> str:
         model, tokenizer = self._get_model()
         with Image.open(image_path) as image_obj:
             image = image_obj.convert("RGB")
 
         if hasattr(model, "query"):
-            response = model.query(image, "Describe this object in one short sentence.")
+            response = model.query(image, question)
             return str((response or {}).get("answer", "")).strip()
 
         encoded = model.encode_image(image)
         answer = model.answer_question(
             encoded,
-            "Describe this object in one short sentence.",
+            question,
             tokenizer=tokenizer,
         )
         return str(answer or "").strip()
@@ -59,7 +59,8 @@ class VLMPipeline:
             raise FileNotFoundError(f"image not found: {path}")
 
         timeout = max(float(timeout), 0.1)
-        future = self._executor.submit(self._infer, path)
+        question = "Describe this object in one short sentence."
+        future = self._executor.submit(self._infer, path, question)
         try:
             result = future.result(timeout=timeout)
         except FuturesTimeoutError as exc:
@@ -72,6 +73,35 @@ class VLMPipeline:
         result = (result or "").strip()
         if not result:
             raise RuntimeError("empty VLM description")
+        return result
+
+    def answer(self, image_path: str | Path, question: str, timeout: float) -> str:
+        path = Path(image_path)
+        if not path.exists():
+            raise FileNotFoundError(f"image not found: {path}")
+
+        prompt = (question or "").strip()
+        if not prompt:
+            raise ValueError("question is required")
+
+        timeout = max(float(timeout), 0.1)
+        future = self._executor.submit(self._infer, path, prompt)
+        try:
+            result = future.result(timeout=timeout)
+        except FuturesTimeoutError as exc:
+            future.cancel()
+            raise TimeoutError("vlm inference timed out") from exc
+        except Exception:
+            _log.exception({
+                "event": "vlm_answer_failed",
+                "image_path": str(path),
+                "question": prompt,
+            })
+            raise
+
+        result = (result or "").strip()
+        if not result:
+            raise RuntimeError("empty VLM answer")
         return result
 
 
