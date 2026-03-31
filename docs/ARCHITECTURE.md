@@ -176,8 +176,9 @@ src/visual_memory/
 │   ├── settings.py                     # All ML tuning thresholds
 │   └── user_settings.py                # User preferences: PerformanceMode, UserSettings (JSON-persisted)
 ├── api/
-│   ├── app.py                          # create_app() factory - blueprints, auth, upload cap
+│   ├── app.py                          # create_app() factory - blueprints, SocketIO init, auth, upload cap
 │   ├── pipelines.py                    # Lazy singletons: get_remember_pipeline(), get_scan_pipeline(), get_feedback_store(), get_user_settings(), warm_all()
+│   ├── voice_session.py                # VoiceSession dataclass + per-connection session dict; get_session() / clear_session()
 │   ├── run.py                          # Compatibility shim; prefer services/core/run.py
 │   └── routes/
 │       ├── health.py                   # GET /health
@@ -191,6 +192,7 @@ src/visual_memory/
 │       ├── items.py                    # GET /items, DELETE /items/<label>, POST /items/<label>/rename
 │       ├── sightings.py               # POST /sightings - user-confirmed location update
 │       ├── crop.py                    # GET /crop - fetch cropped image from cached scan
+│       ├── voice_ws.py                # WebSocket voice session: connect/disconnect/audio/navigate events; register_events(sio)
 │       └── debug.py                   # GET /debug/state, POST /debug/echo, POST /debug/image, GET /debug/db, GET /debug/logs, GET /debug/perf, GET /debug/test-remember, GET /debug/test-scan, POST /debug/wipe, PATCH /debug/config
 └── tests/                             # Test scripts + test data
     ├── scripts/                        # Runnable .py test scripts
@@ -413,6 +415,31 @@ Multi-image (POST /remember with `images[]`):
 - `get_depth_at_bbox(depth_map, bbox) -> float` -mean depth in feet, inner 50% of bbox
 - `get_direction(bbox, img_w) -> str` -5-zone direction string
 - `build_narration(label, direction, distance_ft, similarity, bbox=None, img_h=None) -> str | None` -final narration; prepends "look down," or "look up," when object is in the bottom 40% or top 25% of frame
+
+### `api/voice_session.py` - `VoiceSession`
+- `VoiceSession(sid, state, context)` - per-connection dataclass; state drives dispatch in voice_ws.py
+- `get_session(sid) -> VoiceSession` - returns existing or creates new session
+- `clear_session(sid)` - removes session on disconnect
+- States: `idle`, `awaiting_image`, `awaiting_location`, `awaiting_confirmation`, `focused_on_item`, `onboarding_teach`, `onboarding_await_scan`
+- `context` keys used across handlers: `pending_action`, `label`, `scan_id`, `scan_matches`, `item_index`, `current_label`, `onboarding_phase`, `scan_count`, `teach_count`, `hints_given`
+- In-process dict (single gunicorn worker - no Redis needed)
+
+### `api/routes/voice_ws.py` - WebSocket event handlers
+- `register_events(sio: SocketIO)` - attaches all handlers to the SocketIO instance
+- Events handled: `connect`, `disconnect`, `audio`, `navigate`
+- `connect`: auth check via `X-API-Key` header or `?key=` param; emits onboarding TTS or "Ready." based on DB item count
+- `audio`: decodes audio bytes + optional image, calls `transcribe_audio_bytes()`, emits `transcription`, then dispatches via `_dispatch()`
+- `navigate`: advances/retreats `item_index` in session context, emits `tts` narration for that item and `action_result: item_focus`
+- `_dispatch()`: state machine router; delegates to `_handle_scan`, `_handle_remember`, `_handle_location`, `_handle_confirmation`, `_handle_item_query`, `_handle_feedback`, `_run_find`, `process_ask_query`
+- Hint system: `_get_hint(session)` fires deferred feature hints at usage milestones (scan_count, teach_count); appended to TTS narration
+- `_BytesFileStorage`: minimal FileStorage-compatible wrapper so image bytes can pass into `process_scan_request` / `process_remember_request` without an active Flask request context
+
+Server-to-client events emitted:
+- `tts` - `{narration: str, next_state: str}` - primary output; read aloud by client TTS
+- `transcription` - `{text: str, context_used: bool}` - intermediate; for UI feedback
+- `action_result` - `{type: str, data: dict}` - structured pipeline result
+- `control` - `{action: "request_image", context?: str}` - instructs frontend to activate camera
+- `error` - `{code: str, message: str}`
 
 ---
 
