@@ -406,6 +406,15 @@ Multi-image (POST /remember with `images[]`):
 - `find_match(query, database, threshold)` - `(path, score)` or `(None, 0.0)`
 - `deduplicate_matches(matches, iou_threshold)` - filtered list
 
+### `utils/memory_monitor.py`
+- Proactive OOM prevention helper for RAM, swap, and VRAM pressure checks
+- `check_memory()` returns usage percentages and MB totals
+- `is_oom_risk(threshold=0.85)` checks combined RAM+swap pressure
+- `cleanup_zombies(max_age_hours=2)` removes old zombie processes owned by the current user
+- `suggest_throttle()` recommends slowdowns under memory pressure
+- Integrations: benchmark phase guards in `benchmarks/full_benchmark.py` and request middleware in `api/app.py`
+- CLI: `python -m visual_memory.utils.memory_monitor --check` and `--cleanup`
+
 ### `engine/depth/estimator.py` - `DepthEstimator`
 - Model: Apple Depth Pro
 - `__init__(focal_length_px=None)` -loads model once

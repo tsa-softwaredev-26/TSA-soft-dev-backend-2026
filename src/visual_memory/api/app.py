@@ -21,9 +21,11 @@ from visual_memory.api.routes.transcribe import transcribe_bp
 from visual_memory.api.routes.user_settings_route import user_settings_bp
 from visual_memory.api.routes.voice import voice_bp
 from visual_memory.utils.logger import get_logger, setup_crash_handler
+from visual_memory.utils.memory_monitor import MemoryMonitor
 
 _API_KEY = os.environ.get("API_KEY", "")
 _logger = get_logger(__name__)
+_memory_monitor = MemoryMonitor()
 
 socketio = SocketIO()
 
@@ -53,6 +55,17 @@ def create_app():
 
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
+
+    @app.before_request
+    def _check_memory_pressure():
+        if _memory_monitor.is_oom_risk(threshold=0.90):
+            _memory_monitor.log_memory_state(level="critical")
+            return jsonify({
+                "error": "server_overloaded",
+                "message": "Memory exhausted, try again later",
+            }), 503
+        if _memory_monitor.suggest_throttle():
+            _memory_monitor.log_memory_state(level="warning")
 
     @app.before_request
     def _check_api_key():
