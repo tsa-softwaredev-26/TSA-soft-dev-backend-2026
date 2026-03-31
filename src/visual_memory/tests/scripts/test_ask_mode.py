@@ -17,7 +17,9 @@ from visual_memory.tests.scripts.test_harness import (
     seed_item,
 )
 from visual_memory.api.routes.find import find_bp, build_narration, _normalize_room
+from visual_memory.api.routes.find import is_document_query
 from visual_memory.api.routes.ask import ask_bp
+import visual_memory.api.routes.ask as _ask_route
 from visual_memory.api.routes.item_ask import item_ask_bp
 import visual_memory.api.pipelines as _pm
 
@@ -63,6 +65,13 @@ def test_normalize_room():
         assert got == expected, f"{raw!r} -> {got!r}, expected {expected!r}"
 
 
+def test_document_query_classifier_word_boundaries():
+    assert is_document_query("show me the receipt") is True
+    assert is_document_query("please read the text") is True
+    assert is_document_query("find my notebook") is False
+    assert is_document_query("where is my labelmaker") is False
+
+
 def test_find_exact_label():
     resp = client.get("/find?label=wallet")
     assert_status(resp, 200)
@@ -99,6 +108,8 @@ def test_ask_exact_match():
     data = resp.get_json()
     assert data.get("found") is True
     assert data.get("matched_label") == "wallet"
+    assert data.get("matched_by") == "exact"
+    assert "exact" in data.get("strategies_tried", [])
     assert_narration_present(resp)
 
 
@@ -107,6 +118,7 @@ def test_ask_not_found():
     assert_status(resp, 200)
     data = resp.get_json()
     assert data.get("found") is False
+    assert "exact" in data.get("strategies_tried", [])
     assert_narration_present(resp)
 
 
@@ -121,6 +133,52 @@ def test_ask_blocks_unsafe_query():
     data = resp.get_json()
     assert data.get("blocked") is True
     assert data.get("reason") == "unsafe_query"
+
+
+def test_ask_document_primary_fallback_to_fuzzy():
+    settings = _pm.get_settings()
+    old_llm = settings.llm_query_fallback_enabled
+    old_fuzzy = _ask_route._fuzzy_label_match
+    old_ocr = _ask_route._ocr_content_match
+    try:
+        settings.llm_query_fallback_enabled = False
+        _ask_route._ocr_content_match = lambda query, threshold: None
+        _ask_route._fuzzy_label_match = lambda query, threshold: ["receipt"]
+        resp = client.post("/ask", json={"query": "document with office chair"})
+        assert_status(resp, 200)
+        data = resp.get_json()
+        assert data.get("found") is True
+        assert data.get("document_query") is True
+        assert data.get("matched_label") == "receipt"
+        assert data.get("matched_by") == "fuzzy_label_fallback"
+        assert data.get("strategies_tried") == ["exact", "ocr_semantic", "fuzzy_label"]
+    finally:
+        settings.llm_query_fallback_enabled = old_llm
+        _ask_route._fuzzy_label_match = old_fuzzy
+        _ask_route._ocr_content_match = old_ocr
+
+
+def test_ask_item_primary_fallback_to_ocr():
+    settings = _pm.get_settings()
+    old_llm = settings.llm_query_fallback_enabled
+    old_fuzzy = _ask_route._fuzzy_label_match
+    old_ocr = _ask_route._ocr_content_match
+    try:
+        settings.llm_query_fallback_enabled = False
+        _ask_route._fuzzy_label_match = lambda query, threshold: []
+        _ask_route._ocr_content_match = lambda query, threshold: "wallet"
+        resp = client.post("/ask", json={"query": "where is my billfold"})
+        assert_status(resp, 200)
+        data = resp.get_json()
+        assert data.get("found") is True
+        assert data.get("document_query") is False
+        assert data.get("matched_label") == "wallet"
+        assert data.get("matched_by") == "ocr_semantic_fallback"
+        assert data.get("strategies_tried") == ["exact", "fuzzy_label", "ocr_semantic"]
+    finally:
+        settings.llm_query_fallback_enabled = old_llm
+        _ask_route._fuzzy_label_match = old_fuzzy
+        _ask_route._ocr_content_match = old_ocr
 
 
 def test_item_ask_read_ocr():
@@ -199,6 +257,7 @@ for name, fn in [
     ("ask_mode:build_narration_full", test_build_narration_full),
     ("ask_mode:build_narration_minimal", test_build_narration_minimal),
     ("ask_mode:normalize_room", test_normalize_room),
+    ("ask_mode:document_query_classifier_word_boundaries", test_document_query_classifier_word_boundaries),
     ("ask_mode:find_exact_label", test_find_exact_label),
     ("ask_mode:find_room_query", test_find_room_query),
     ("ask_mode:find_room_normalized_param", test_find_room_normalized_param),
@@ -207,6 +266,8 @@ for name, fn in [
     ("ask_mode:ask_not_found", test_ask_not_found),
     ("ask_mode:ask_missing_query", test_ask_missing_query),
     ("ask_mode:ask_blocks_unsafe_query", test_ask_blocks_unsafe_query),
+    ("ask_mode:ask_document_primary_fallback_to_fuzzy", test_ask_document_primary_fallback_to_fuzzy),
+    ("ask_mode:ask_item_primary_fallback_to_ocr", test_ask_item_primary_fallback_to_ocr),
     ("ask_mode:item_read_ocr", test_item_ask_read_ocr),
     ("ask_mode:item_read_ocr_empty", test_item_ask_read_ocr_empty),
     ("ask_mode:item_find", test_item_ask_find),
