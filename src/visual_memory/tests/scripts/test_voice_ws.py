@@ -25,7 +25,7 @@ from visual_memory.engine.model_registry import registry
 _runner = TestRunner("voice_ws")
 
 
-def _make_ws_test_app(seed_fn=None, empty_db: bool = False):
+def _make_ws_test_app(seed_fn=None, empty_db: bool = False, ws_headers: dict | None = None):
     """Create a Flask app with SocketIO + stubs, return (sio_client, db, cleanup)."""
     import numpy as np
     import shutil
@@ -37,6 +37,7 @@ def _make_ws_test_app(seed_fn=None, empty_db: bool = False):
     from visual_memory.learning.feedback_store import FeedbackStore
     import visual_memory.api.pipelines as _pm
     from visual_memory.api.routes.voice_ws import register_events
+    from visual_memory.api.voice_session import _sessions
 
     tmp_dir = tempfile.mkdtemp()
     db_path = str(Path(tmp_dir) / "test.db")
@@ -80,12 +81,14 @@ def _make_ws_test_app(seed_fn=None, empty_db: bool = False):
     sio = SocketIO(app, async_mode="threading")
     register_events(sio)
 
-    client = sio.test_client(app)
+    client = sio.test_client(app, headers=ws_headers)
 
     def cleanup():
-        client.disconnect()
+        if client.is_connected():
+            client.disconnect()
         _tr.load_audio_bytes = original_loader
         registry._whisper_recognizer = original_recognizer
+        _sessions.clear()
         _pm._database = None
         _pm._scan_pipeline = None
         _pm._remember_pipeline = None
@@ -111,6 +114,13 @@ def _ogg_audio() -> str:
     """Return base64-encoded minimal OGG-magic-byte audio payload."""
     import base64
     return base64.b64encode(b"OggS" + b"\x00" * 60).decode()
+
+
+def _client_sid(client) -> str:
+    from visual_memory.api.voice_session import _sessions
+    if len(_sessions) == 1:
+        return next(iter(_sessions.keys()))
+    raise RuntimeError(f"Expected exactly one active voice session, got {len(_sessions)}")
 
 
 # Tests
@@ -153,17 +163,16 @@ def test_connect_bad_api_key_rejected():
         orig_key = _vws._API_KEY
         _vws._API_KEY = "a" * 32
 
-        client, sio, db, stub, cleanup = _make_ws_test_app(seed_fn=_seed_items)
+        client, sio, db, stub, cleanup = _make_ws_test_app(
+            seed_fn=_seed_items,
+            ws_headers={"X-API-Key": "wrong" * 8},
+        )
         try:
-            result = client.connect(headers={"X-API-Key": "wrong" * 8})
-            # test_client returns False / raises on rejected connect
-            received = client.get_received()
-            tts_events = [e for e in received if e["name"] == "tts"]
-            # Either connection was rejected outright OR no welcome was emitted
-            assert not tts_events or True  # lenient: if accepted, still harmless
+            # Connection should be rejected when bad key is provided.
+            assert not client.is_connected()
         finally:
-            cleanup()
             _vws._API_KEY = orig_key
+            cleanup()
     finally:
         if orig:
             os.environ["API_KEY"] = orig
@@ -285,7 +294,7 @@ def test_awaiting_location_transitions_to_idle():
         client.get_received()
 
         # Fake the session into awaiting_location via remember
-        sid = client.sid
+        sid = _client_sid(client)
         if sid in _sessions:
             session = _sessions[sid]
             session.state = "awaiting_location"
@@ -314,7 +323,7 @@ def test_navigate_advances_item_index():
         client.get_received()
 
         # Seed scan results into the session
-        sid = client.sid
+        sid = _client_sid(client)
         if sid in _sessions:
             session = _sessions[sid]
             session.state = "focused_on_item"
@@ -367,7 +376,7 @@ def test_disconnect_clears_session():
     client, sio, db, stub, cleanup = _make_ws_test_app(seed_fn=_seed_items)
     try:
         client.connect()
-        sid = client.sid
+        sid = _client_sid(client)
         assert sid in _sessions, "session not created on connect"
         client.disconnect()
         assert sid not in _sessions, "session not removed on disconnect"
@@ -393,6 +402,211 @@ def test_bad_audio_returns_error():
         cleanup()
 
 
+def test_onboarding_happy_path_end_to_end():
+    """Empty DB flow completes teach->scan->navigate->ask onboarding sequence."""
+    import base64
+    import io
+    from PIL import Image
+    import visual_memory.api.pipelines as _pm
+
+    client, sio, db, stub, cleanup = _make_ws_test_app(empty_db=True)
+    try:
+        client.connect()
+        connect_tts = _get_events(client, "tts")
+        assert connect_tts and connect_tts[0].get("next_state") == "onboarding_teach"
+
+        remember_stub: StubRememberPipeline = _pm._remember_pipeline
+        remember_stub._success = True
+        scan_stub: StubScanPipeline = _pm._scan_pipeline
+        scan_stub.run = lambda image, scan_id="", focal_length_px=0.0: {
+            "matches": [
+                {"label": "wallet", "narration": "Wallet to your left.", "similarity": 0.8},
+                {"label": "keys", "narration": "Keys ahead.", "similarity": 0.79},
+            ],
+            "count": 2,
+            "scan_id": scan_id,
+            "is_dark": False,
+            "darkness_level": 100.0,
+        }
+
+        img = Image.new("RGB", (64, 64), color=(140, 140, 140))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        img_b64 = base64.b64encode(buf.getvalue()).decode()
+
+        stub.set_result("teach my wallet")
+        client.emit("audio", {"audio": _ogg_audio(), "image": img_b64})
+        tts_events = _get_events(client, "tts")
+        assert tts_events and tts_events[-1].get("next_state") == "awaiting_location"
+
+        stub.set_result("kitchen")
+        client.emit("audio", {"audio": _ogg_audio()})
+        tts_events = _get_events(client, "tts")
+        assert tts_events and tts_events[-1].get("next_state") == "onboarding_teach"
+
+        stub.set_result("teach my keys")
+        client.emit("audio", {"audio": _ogg_audio(), "image": img_b64})
+        tts_events = _get_events(client, "tts")
+        assert tts_events and tts_events[-1].get("next_state") == "awaiting_location"
+
+        stub.set_result("bedroom")
+        client.emit("audio", {"audio": _ogg_audio()})
+        tts_events = _get_events(client, "tts")
+        assert tts_events and tts_events[-1].get("next_state") == "onboarding_await_scan"
+
+        stub.set_result("scan")
+        client.emit("audio", {"audio": _ogg_audio(), "image": img_b64})
+        tts_events = _get_events(client, "tts")
+        assert tts_events and tts_events[-1].get("next_state") == "focused_on_item"
+
+        client.emit("navigate", {"direction": "next"})
+        tts_events = _get_events(client, "tts")
+        assert tts_events, "missing navigate tts"
+        assert "now ask me where you left your" in tts_events[-1].get("narration", "").lower()
+
+        stub.set_result("where is my wallet")
+        client.emit("audio", {"audio": _ogg_audio()})
+        tts_events = _get_events(client, "tts")
+        assert tts_events and tts_events[-1].get("next_state") == "idle"
+        assert "you are all set" in tts_events[-1].get("narration", "").lower()
+    finally:
+        cleanup()
+
+
+def test_hints_non_repeat_and_trigger_order():
+    """Hints fire in configured order and are not repeated once emitted."""
+    from visual_memory.api.voice_session import _sessions
+    import visual_memory.api.pipelines as _pm
+
+    client, sio, db, stub, cleanup = _make_ws_test_app(seed_fn=_seed_items)
+    try:
+        client.connect()
+        client.get_received()
+
+        sid = _client_sid(client)
+        session = _sessions[sid]
+        session.state = "focused_on_item"
+        session.context["scan_matches"] = [{"label": "wallet", "narration": "Wallet to your left."}]
+        session.context["item_index"] = 0
+        session.context["current_label"] = "wallet"
+        session.context["scan_id"] = "scan-1"
+        session.context["scan_count"] = 0
+        session.context["teach_count"] = 0
+        session.context["hints_given"] = set()
+
+        scan_stub: StubScanPipeline = _pm._scan_pipeline
+        scan_stub.run = lambda image, scan_id="", focal_length_px=0.0: {
+            "matches": [{"label": "wallet", "narration": "Wallet to your left.", "similarity": 0.8}],
+            "count": 1,
+            "scan_id": scan_id,
+            "is_dark": False,
+            "darkness_level": 100.0,
+        }
+
+        def _expect_hint_after_scan(scan_count: int, expected_hint: str | None):
+            stub.set_result("scan")
+            client.emit("audio", {"audio": _ogg_audio(), "image": _tiny_jpeg_b64()})
+            tts = _get_events(client, "tts")
+            assert tts, f"missing tts after scan_count {scan_count}"
+            narration = tts[-1].get("narration", "").lower()
+            if expected_hint is None:
+                assert "swipe right to browse each detected item one at a time." not in narration
+                assert "if a detection was wrong, just say wrong." not in narration
+                assert "double tap to save a location while browsing items." not in narration
+            else:
+                assert expected_hint in narration, f"expected hint {expected_hint!r} in {narration!r}"
+            assert narration.count("swipe right to browse each detected item one at a time.") <= 1
+            assert narration.count("if a detection was wrong, just say wrong.") <= 1
+            assert narration.count("double tap to save a location while browsing items.") <= 1
+
+        _expect_hint_after_scan(1, "swipe right to browse each detected item one at a time.")
+        _expect_hint_after_scan(2, "if a detection was wrong, just say wrong.")
+        _expect_hint_after_scan(3, None)
+        _expect_hint_after_scan(4, None)
+        _expect_hint_after_scan(5, "double tap to save a location while browsing items.")
+        _expect_hint_after_scan(6, None)
+
+        # Trigger teach-based hints in order
+        remember_stub: StubRememberPipeline = _pm._remember_pipeline
+        remember_stub._success = True
+
+        def _expect_hint_after_teach(room: str, expected_hint: str | None):
+            stub.set_result("teach my book")
+            client.emit("audio", {"audio": _ogg_audio(), "image": _tiny_jpeg_b64()})
+            tts = _get_events(client, "tts")
+            assert tts and tts[-1].get("next_state") == "awaiting_location"
+            stub.set_result(room)
+            client.emit("audio", {"audio": _ogg_audio()})
+            tts = _get_events(client, "tts")
+            assert tts, "missing tts after location save"
+            narration = tts[-1].get("narration", "").lower()
+            if expected_hint is None:
+                assert "you can ask questions about your items, like what is in a receipt." not in narration
+                assert "try saying export this when looking at a document." not in narration
+            else:
+                assert expected_hint in narration, f"expected hint {expected_hint!r} in {narration!r}"
+
+        _expect_hint_after_teach("office", None)
+        _expect_hint_after_teach("hallway", "you can ask questions about your items, like what is in a receipt.")
+        _expect_hint_after_teach("garage", "try saying export this when looking at a document.")
+
+        # No repeats after all hints are delivered
+        stub.set_result("scan")
+        client.emit("audio", {"audio": _ogg_audio(), "image": _tiny_jpeg_b64()})
+        narration = _get_events(client, "tts")[-1].get("narration", "").lower()
+        assert "swipe right to browse each detected item one at a time." not in narration
+        assert "if a detection was wrong, just say wrong." not in narration
+        assert "double tap to save a location while browsing items." not in narration
+        assert "you can ask questions about your items, like what is in a receipt." not in narration
+        assert "try saying export this when looking at a document." not in narration
+    finally:
+        cleanup()
+
+
+def _tiny_jpeg_b64() -> str:
+    import base64
+    import io
+    from PIL import Image
+    img = Image.new("RGB", (32, 32), color=(120, 120, 120))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG")
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def test_audio_invalid_image_payload_returns_bad_payload():
+    """Malformed image payload is rejected before dispatch."""
+    client, sio, db, stub, cleanup = _make_ws_test_app(seed_fn=_seed_items)
+    try:
+        client.connect()
+        client.get_received()
+        stub.set_result("scan")
+        client.emit("audio", {"audio": _ogg_audio(), "image": "not-base64!!!"})
+        errors = _get_events(client, "error")
+        assert errors, "expected bad_payload error"
+        assert errors[-1].get("code") == "bad_payload"
+        assert "invalid image payload" in errors[-1].get("message", "").lower()
+    finally:
+        cleanup()
+
+
+def test_audio_oversize_image_payload_returns_bad_payload():
+    """Image bytes over 50MB are rejected with bad_payload."""
+    import base64
+    client, sio, db, stub, cleanup = _make_ws_test_app(seed_fn=_seed_items)
+    try:
+        client.connect()
+        client.get_received()
+        stub.set_result("scan")
+        over = base64.b64encode(b"\x89PNG" + b"\x00" * (50 * 1024 * 1024 + 1)).decode()
+        client.emit("audio", {"audio": _ogg_audio(), "image": over})
+        errors = _get_events(client, "error")
+        assert errors, "expected bad_payload for oversize image"
+        assert errors[-1].get("code") == "bad_payload"
+        assert "50mb limit" in errors[-1].get("message", "").lower()
+    finally:
+        cleanup()
+
+
 for name, fn in [
     ("ws:connect_returning_user", test_connect_returning_user),
     ("ws:connect_onboarding", test_connect_empty_db_triggers_onboarding),
@@ -406,6 +620,10 @@ for name, fn in [
     ("ws:navigate_empty", test_navigate_empty_session_returns_tts),
     ("ws:disconnect_clears_session", test_disconnect_clears_session),
     ("ws:bad_audio_error", test_bad_audio_returns_error),
+    ("ws:onboarding_happy_path", test_onboarding_happy_path_end_to_end),
+    ("ws:hints_order_non_repeat", test_hints_non_repeat_and_trigger_order),
+    ("ws:invalid_image_payload", test_audio_invalid_image_payload_returns_bad_payload),
+    ("ws:oversize_image_payload", test_audio_oversize_image_payload_returns_bad_payload),
 ]:
     _runner.run(name, fn)
 
