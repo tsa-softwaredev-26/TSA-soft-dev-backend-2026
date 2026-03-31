@@ -59,6 +59,23 @@ def test_extract_search_term_empty_string():
     assert result is None
 
 
+def test_extract_search_term_prompt_includes_known_items_and_examples():
+    captured = {}
+    def _capture(prompt, max_retries=None, json_mode=False):
+        captured["prompt"] = prompt
+        captured["json_mode"] = json_mode
+        return '{"term": "wallet"}'
+    labels = ["wallet", "keys", "receipt"]
+    with patch.object(_ou, "_chat_raw", side_effect=_capture):
+        result = _ou.extract_search_term("where did I leave my wallet", known_labels=labels)
+    assert result == "wallet"
+    assert captured.get("json_mode") is True
+    prompt = captured.get("prompt", "")
+    assert "Known items: wallet, keys, receipt" in prompt
+    assert 'Q: "where did I leave my wallet last night?"' in prompt
+    assert "Now extract from the user query." in prompt
+
+
 def test_extract_item_intent_valid_intents():
     valid = ["read_ocr", "export_ocr", "rename", "find", "describe"]
     for intent in valid:
@@ -95,6 +112,26 @@ def test_extract_rename_target_none_on_failure():
     with patch.object(_ou, "_chat_raw", return_value=None):
         result = _ou.extract_rename_target("rename this")
     assert result is None
+
+
+def test_build_known_items_context_limits_to_20():
+    labels = [f"item{i}" for i in range(30)]
+    context = _ou._build_known_items_context(labels)
+    assert "Known items:" in context
+    assert "item19" in context
+    assert "item20" not in context
+
+
+def test_settings_get_ollama_model_per_mode():
+    from visual_memory.config.settings import Settings
+
+    s = Settings(
+        ollama_model_balanced="llama3.2:1b",
+        ollama_model_accurate="phi3:mini",
+    )
+    assert s.get_ollama_model("fast") is None
+    assert s.get_ollama_model("balanced") == "llama3.2:1b"
+    assert s.get_ollama_model("accurate") == "phi3:mini"
 
 
 def test_circuit_breaker_opens_after_threshold():
@@ -168,12 +205,15 @@ for name, fn in [
     ("ollama:extract_search_term_malformed_json", test_extract_search_term_malformed_json),
     ("ollama:extract_search_term_missing_key", test_extract_search_term_missing_key),
     ("ollama:extract_search_term_empty_string", test_extract_search_term_empty_string),
+    ("ollama:extract_search_term_prompt_has_context", test_extract_search_term_prompt_includes_known_items_and_examples),
     ("ollama:intent_valid_intents", test_extract_item_intent_valid_intents),
     ("ollama:intent_invalid_returns_none", test_extract_item_intent_invalid_returns_none),
     ("ollama:intent_none_on_failure", test_extract_item_intent_none_on_failure),
     ("ollama:rename_target_valid", test_extract_rename_target_valid),
     ("ollama:rename_target_null", test_extract_rename_target_null),
     ("ollama:rename_target_none_on_failure", test_extract_rename_target_none_on_failure),
+    ("ollama:known_items_context_limit", test_build_known_items_context_limits_to_20),
+    ("ollama:settings_model_per_mode", test_settings_get_ollama_model_per_mode),
     ("ollama:cb_opens_after_threshold", test_circuit_breaker_opens_after_threshold),
     ("ollama:cb_cooldown_resets", test_circuit_breaker_cooldown_resets),
     ("ollama:cb_success_clears", test_circuit_breaker_success_clears),

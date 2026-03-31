@@ -78,6 +78,7 @@ def ask():
     settings = get_settings()
     db = get_database()
 
+    known_labels = db.get_known_labels()
     # Step 1: exact label match on raw query (skip Ollama if already a known label)
     rows = db.get_sightings(label=query, limit=1)
     matched_label: str | None = None
@@ -89,9 +90,9 @@ def ask():
         matched_label = query
         matched_by = "exact"
 
-    # Step 2: Ollama query extraction (only when enabled and raw query didn't match)
+    # Step 2: Ollama query extraction (only when enabled and raw query did not match)
     if not rows and settings.llm_query_fallback_enabled:
-        extracted = extract_search_term(query)
+        extracted = extract_search_term(query, known_labels=known_labels[:20])
         if extracted and extracted.lower() != query.lower():
             ollama_used = True
             search_term = extracted
