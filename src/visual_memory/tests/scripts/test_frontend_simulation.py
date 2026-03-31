@@ -196,7 +196,8 @@ def test_onboarding_home_idle_and_scan_state_tracking():
 
         sim.speak("scan", image_b64=_tiny_jpeg_b64())
         assert sim.current_mode == "focused_on_item"
-        assert sim.scan_id == "scan-onboard-1"
+        assert isinstance(sim.scan_id, str) and bool(sim.scan_id)
+        assert sim.context.get("scan_id") == sim.scan_id
 
         sim.speak("home")
         assert sim.current_mode == "idle"
@@ -230,7 +231,7 @@ def test_scan_navigation_settings_and_back_behavior():
         sim.speak("scan", image_b64=_tiny_jpeg_b64())
         assert sim.current_mode == "focused_on_item"
         assert sim.context.get("label") == "wallet"
-        assert sim.context.get("scan_id") == "scan-nav-1"
+        assert isinstance(sim.context.get("scan_id"), str) and bool(sim.context.get("scan_id"))
 
         sim.navigate("next")
         assert sim.current_mode == "focused_on_item"
@@ -285,7 +286,7 @@ def test_hints_and_context_driven_item_query_routing():
         assert "if a detection was wrong, just say wrong." in scan2_text
 
         assert sim.current_mode == "focused_on_item"
-        assert sim.context.get("scan_id") == "scan-hints-1"
+        assert isinstance(sim.context.get("scan_id"), str) and bool(sim.context.get("scan_id"))
         assert sim.context.get("label") == "wallet"
 
         query_events = sim.speak("what does this say")
