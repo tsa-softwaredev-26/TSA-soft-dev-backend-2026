@@ -25,6 +25,9 @@ deploy/
 - OCR environment: install `.[ocr]`
 - Shared package only: base `pip install -e .`
 
+Core runtime also includes:
+- `moondream==0.2.0` for `/item/ask` visual `describe` responses
+
 The core backend does not require `paddleocr` or `paddlepaddle`. The OCR service does not require Torch model packages unless you choose to install them separately.
 
 ## Local Development

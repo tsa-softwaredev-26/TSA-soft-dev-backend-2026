@@ -1,5 +1,6 @@
 from __future__ import annotations
 import io
+import json
 import os
 import time
 from pathlib import Path
@@ -40,7 +41,8 @@ class DatabaseStore:
                 ocr_text         TEXT,
                 image_path       TEXT,
                 confidence       REAL,
-                timestamp        REAL
+                timestamp        REAL,
+                visual_attributes TEXT
             );
             -- id is the user ID; hardcoded to 1 for single-user demo.
             -- Multi-user: remove CHECK constraint and pass uid into all user_state methods.
@@ -98,6 +100,12 @@ class DatabaseStore:
         # migrate existing items tables that predate ocr_embedding
         try:
             self._conn.execute("ALTER TABLE items ADD COLUMN ocr_embedding BLOB")
+            self._conn.commit()
+        except Exception:
+            pass  # column already exists
+        # migrate existing items tables that predate visual_attributes
+        try:
+            self._conn.execute("ALTER TABLE items ADD COLUMN visual_attributes TEXT")
             self._conn.commit()
         except Exception:
             pass  # column already exists
@@ -164,6 +172,7 @@ class DatabaseStore:
         timestamp: Optional[float] = None,
         label_embedding: Optional[torch.Tensor] = None,
         ocr_embedding: Optional[torch.Tensor] = None,
+        visual_attributes: Optional[dict] = None,
     ) -> int:
         if timestamp is None:
             timestamp = time.time()
@@ -172,9 +181,19 @@ class DatabaseStore:
         ocr_blob = self._tensor_to_blob(ocr_embedding) if ocr_embedding is not None else None
         cur = self._conn.execute(
             "INSERT INTO items "
-            "(label, combined_embedding, ocr_text, image_path, confidence, timestamp, label_embedding, ocr_embedding) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (label, blob, ocr_text or "", image_path or "", confidence, timestamp, label_blob, ocr_blob),
+            "(label, combined_embedding, ocr_text, image_path, confidence, timestamp, label_embedding, ocr_embedding, visual_attributes) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                label,
+                blob,
+                ocr_text or "",
+                image_path or "",
+                confidence,
+                timestamp,
+                label_blob,
+                ocr_blob,
+                json.dumps(visual_attributes or {}),
+            ),
         )
         self._conn.commit()
         return cur.lastrowid
@@ -197,22 +216,28 @@ class DatabaseStore:
         """Return item rows without embedding blobs - for listing and confirmation UI."""
         if label is not None:
             rows = self._conn.execute(
-                "SELECT id, label, confidence, ocr_text, timestamp FROM items "
+                "SELECT id, label, confidence, ocr_text, image_path, visual_attributes, timestamp FROM items "
                 "WHERE label = ? ORDER BY timestamp DESC",
                 (label,),
             ).fetchall()
         else:
             rows = self._conn.execute(
-                "SELECT id, label, confidence, ocr_text, timestamp FROM items "
+                "SELECT id, label, confidence, ocr_text, image_path, visual_attributes, timestamp FROM items "
                 "ORDER BY timestamp DESC"
             ).fetchall()
         result = []
-        for row_id, lbl, confidence, ocr_text, timestamp in rows:
+        for row_id, lbl, confidence, ocr_text, image_path, visual_attributes, timestamp in rows:
+            try:
+                attrs = json.loads(visual_attributes) if visual_attributes else {}
+            except (json.JSONDecodeError, TypeError):
+                attrs = {}
             result.append({
                 "id": row_id,
                 "label": lbl,
                 "confidence": round(confidence, 4) if confidence else None,
                 "ocr_text": ocr_text or "",
+                "image_path": image_path or "",
+                "visual_attributes": attrs,
                 "timestamp": timestamp,
             })
         return result
@@ -322,7 +347,6 @@ class DatabaseStore:
         return torch.load(buf, map_location="cpu", weights_only=True)
 
     def save_user_settings(self, data: dict) -> None:
-        import json
         self._conn.execute(
             "INSERT INTO user_state (id, user_settings) VALUES (1, ?)"
             " ON CONFLICT(id) DO UPDATE SET user_settings = excluded.user_settings",
@@ -331,7 +355,6 @@ class DatabaseStore:
         self._conn.commit()
 
     def load_user_settings(self) -> Optional[dict]:
-        import json
         row = self._conn.execute(
             "SELECT user_settings FROM user_state WHERE id = 1"
         ).fetchone()
@@ -343,7 +366,6 @@ class DatabaseStore:
             return None
 
     def save_ml_settings(self, data: dict) -> None:
-        import json
         self._conn.execute(
             "INSERT INTO user_state (id, ml_settings) VALUES (1, ?)"
             " ON CONFLICT(id) DO UPDATE SET ml_settings = excluded.ml_settings",
@@ -352,7 +374,6 @@ class DatabaseStore:
         self._conn.commit()
 
     def load_ml_settings(self) -> Optional[dict]:
-        import json
         row = self._conn.execute(
             "SELECT ml_settings FROM user_state WHERE id = 1"
         ).fetchone()
