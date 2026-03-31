@@ -1,1195 +1,238 @@
-# Spaitra API Guide
+# Spaitra Frontend Guide
 
-Integration guide for the Spaitra API. Works for frontend, mobile, and backend developers.
+The frontend is a thin I/O layer. It sends audio and images to the backend via WebSocket. The backend decides what to do, sends back narration and a state update. The frontend speaks the narration and updates its UI state. That is the entire loop.
 
----
-
-## The Experience
-
-Spaitra is a spatial memory aid for blind users. The user teaches the app what their things look like; the app tells them where those things are. For someone who cannot quickly re-scan their environment, this replaces the constant mental load of tracking object locations.
-
-The frontend's job is to make this feel immediate. No mode menus, no confirmation dialogs, no help screens. The user speaks or performs a touch gesture, the app responds, and the item is found. Every design decision follows from keeping that loop as tight as possible, following Steve Job's design philosophy.
-
-The first time someone opens the app, they do not see a tutorial. The app has them experience the product: teach two real items from their environment, scan, and hear the app announce what it found with distance and direction. They already know where they placed those items, so when the app names them back, the result is immediately verifiable and immediately impressive. This is designed to immediatly spark the curiosity so they learn the rest of the features naturally. Little voice hints will be planted to nudge the user to use the more specific features that they haven't tried yet, like "try saying 'export this.'" Since they are blind, voice feedback is a necessity with every user interaction. The plan is to have the user learn the app on their own through the quick demo at the start, and little moments of discovery of new uses for the app. The onboarding emphasizes for the user's experience of those moment so it doesn't feel like a tutorial or lesson, but a seamless addition to their lives. 
+See [UX.md](UX.md) for narration content, onboarding flow phrasing, and hint text.
 
 ---
 
-## Setup
+## Server
 
-### Base URL
+| Environment | URL |
+|---|---|
+| Public (no VPN) | `https://nre5bjw44wddpu2zjg4fe4iehq.srv.us` |
+| Tailscale VPN | `http://100.114.39.23:5000` |
+| Local | `http://127.0.0.1:5000` |
 
-Two ways to reach the server - use whichever works for you:
-
-| Method | URL | When to use |
-|--------|-----|-------------|
-| Public (no VPN) | `https://nre5bjw44wddpu2zjg4fe4iehq.srv.us` | Default for frontend dev |
-| Tailscale (VPN) | `http://100.114.39.23:5000` | Team members on the VPN for dev |
-| Local dev | `http://127.0.0.1:5000` | When running the server on your own machine |
-
-```bash
-# Set once for curl examples below
-BASE="https://nre5bjw44wddpu2zjg4fe4iehq.srv.us"
-KEY="<your-api-key>"
-```
-
-The API key is shared with the team. If you do not have it, ask in the team channel or check
-`/opt/spaitra/.env` on the server (`grep ^API_KEY= /opt/spaitra/.env | cut -d= -f2-`).
-
-### Auth
-
-Every request except `GET /health` requires:
+Every request (HTTP and WebSocket) requires the header or query param:
 ```
 X-API-Key: <key>
 ```
 
-Missing or wrong key -> `401`. Upload cap: 50MB per request.
+---
 
-OCR overload behavior is explicit:
-- `429` with `error: "server_busy"` when OCR worker capacity is full
-- `429` with `error: "rate_limited"` when request budget is exceeded
-- both include `Retry-After` and `retry_after_seconds`; clients should back off and retry
+## Startup (HTTP, run once)
+
+```
+GET /health
+```
+If not 200, show offline state and retry.
+
+```
+GET /user-settings
+```
+Store `voice_speed` (float, 0.5-2.0). Apply it to your TTS engine for the whole session.
+
+Then open the WebSocket.
 
 ---
 
-## Smoke Tests
+## WebSocket
 
-Run these first to confirm the server is up and your key works.
-
-```bash
-# Health check (no auth needed)
-curl "$BASE/health"
-# Expected: {"status": "ok"}
-
-# Confirm auth works
-curl "$BASE/debug/state" -H "X-API-Key: $KEY" | python3 -m json.tool
-# Returns: pipeline load status, OCR health, DB counts, feature flags
-
-# Test remember pipeline end-to-end (uses a built-in test image, no DB write)
-curl "$BASE/debug/test-remember" -H "X-API-Key: $KEY" | python3 -m json.tool
-# Expected: {"detected": true, ...}
-
-# Test scan pipeline end-to-end
-curl "$BASE/debug/test-scan" -H "X-API-Key: $KEY" | python3 -m json.tool
+Connect:
+```
+wss://<host>/socket.io/?key=<api-key>&EIO=4&transport=websocket
 ```
 
-If `detected: false` from `test-remember`, GroundingDINO is not loaded. If `debug/state` shows
-the OCR service unreachable, the OCR microservice is down (core API still works without it).
+The server sends a `tts` event and a `session_state` event immediately on connect. Wait for them before showing any UI.
 
 ---
 
-## Quick Reference
+## Sending Events
 
-| Method | Path | When to call |
-|--------|------|-------------|
-| GET | /health | App launch health check |
-| POST | /sightings | User names the room after teach or scan |
-| GET | /crop | User focuses on a specific scan match |
-| POST | /feedback | User confirms or denies a scan match |
-| POST | /voice | Unified endpoint for voice and command execution |
-| GET | /find | Direct label lookup - "where is my [object]?" |
-| GET | /items | User opens the memory list |
-| DELETE | /items/<label> | User deletes a memory |
-| POST | /items/<label>/rename | User renames a memory |
-| GET | /settings | Read ML/personalization state |
-| PATCH | /settings | Update ML parameters |
-| GET | /user-settings | Read user preferences (call at app launch) |
-| PATCH | /user-settings | Update user preferences |
-| GET | /debug/state | Verify server is healthy |
-| POST | /debug/echo | Diagnose a 400 - mirrors your request back |
-| POST | /debug/image | Check why an image was rejected |
-| GET | /debug/db | Inspect database contents |
-| GET | /debug/logs | Read server log entries |
-| GET | /debug/perf | Read performance summary (perf/vram/runtime counters) |
-| GET | /debug/test-remember | Smoke test remember pipeline |
-| GET | /debug/test-scan | Smoke test scan pipeline |
-| POST | /debug/wipe | Reset test state |
-| PATCH | /debug/config | Patch settings live |
-| POST | /retrain | Immediately retrain for testing |
-| GET | /retrain/status | Poll retraining progress |
+### `chat_start` - user taps the Spaitra button
 
----
-
-### Voice interface note
-
-The primary integration path is the WebSocket voice session (`/socket.io/`).
-
-`POST /voice` is kept for backwards compatibility and fallback clients. Prefer WebSocket for new frontend work.
-
----
-
-## What to Store Client-Side
-
-**`scan_id`** - returned by WebSocket `action_result` events for scan. Store it immediately. Needed for:
-- `GET /crop` - fetch the cropped image of a match
-- `POST /feedback` - tell the backend whether a match was correct
-
-The server caches the last 50 scans. Send feedback during the same scan session before the user navigates away.
-
-**`voice_speed`** - read once from `GET /user-settings` at app launch. Apply to your TTS engine.
-
-**Current match index** - 0-based position in the `matches` array from the last scan. Server-owned in session state, frontend should mirror for UI.
-
----
-
-## First Launch: Onboarding
-
-On app connect, wait for the first `tts` event.
-
-- If `next_state == onboarding_teach`, onboarding starts immediately.
-- If narration is "Ready." and `next_state == idle`, the user is returning and onboarding is skipped.
-
-There is no separate onboarding screen. The onboarding is the first real Teach + Scan + Ask session.
-
-### Phase 1: Teach two items
-
-App says: "I remember where your things are. Grab two items near you, and let's start."
-
-User says "teach my keys". The server requests an image (`control: request_image`). User sends `audio` with `image`, server saves item and asks for room.
-
-On second success: "Good. Place both items somewhere in the room."
-
-Brief pause, then: "Tap or say 'Scan' when ready."
-
-### Phase 2: Scan
-
-User says "scan". The server requests an image if needed, then runs scan and emits `action_result` with `scan_id` and matches.
-
-Read all narration strings in array order. Example: "Wallet, to your left, 2.3 feet. Keys look down, ahead."
-
-After narration, follow server prompts. Do not call `POST /sightings` during onboarding. Room capture is server-driven after teach.
-
-### Phase 3: Swipe introduction
-
-App says: "Swipe right to browse each item."
-
-On swipe, emit `navigate` with `direction` and read the returned `tts`. Narration is interruptible.
-
-After one full cycle: "Swipe left to go back. That is how scan works."
-
-### Phase 4: Ask demo
-
-Return to home listen state. App says: "Now ask me where you left your [label of first item taught], or use specifics about the item or text in it instead."
-
-User asks naturally via WebSocket `audio` event.
-
-Read the narration response. Example: "Your wallet is in the living room, to your left."
-
-Onboarding ends. App says: "You are all set, 'Teach', 'Scan', 'Find', or 'Ask' anything."
-
-Do not collect any feedback during onboarding. 
-
-### Phase 5: Ongoing
-
-Hints are emitted by the backend and appended to normal narration at usage milestones.
-
----
-
-## UX Patterns
-
-### Modes
-
-| Voice command | Action |
-|---|---|
-| "Teach" | Teach mode - app prompts for item label |
-| "Scan" | Trigger scan |
-| "Find" | App asks "What item?" - handled by WebSocket audio dispatch |
-| "Ask" | App asks "What do you want to know?" - handled by WebSocket audio dispatch |
-| "Back" | Return to home from any mode |
-| "Settings" | Open settings |
-
-Scan is triggered by voice ("Scan") or by a tap button on the home screen. The tap zone should cover the full lower half of the screen, not a small target - users cannot see where to tap.
-
-### Haptics
-
-| Event | Haptic | Sound |
-|---|---|---|
-| Command recognized | Single pulse | Beep |
-| Mode entered | Single pulse | Mode prompt |
-| Listening for input | Continuous soft buzz | (none) |
-| Action complete | Double pulse | Confirmation phrase |
-| Scan complete | Double pulse | Narration starts |
-| Error / no match | Long buzz | Error message |
-| Location saved | Double pulse | "Saved to [room]" |
-
-### Scan Mode Gestures
-
-| Gesture | Action |
-|---|---|
-| Tap | Rescan - interrupts narration, new scan immediately |
-| Swipe right | Next detection - re-reads its narration |
-| Swipe left | Previous detection - re-reads its narration |
-| Double-tap | Save location for current detection |
-| Hold ~1 sec | Export current detection |
-
-On swipe, emit `navigate` and read the returned `tts`. Narration is interruptible on the next swipe.
-
-Double-tap and hold are power user gestures. Do not mention or demonstrate them during onboarding.
-
-### Feedback Model
-
-Feedback is opt-in and voice-only. The user never needs to confirm a correct detection.
-
-| Scenario | Action |
-|---|---|
-| Detection is correct | No action. Do not prompt. Do not log. |
-| Detection is wrong | User says "wrong" - call POST /feedback with `"wrong"` |
-
-Do not use gesture-based feedback. Tap is already reserved for rescan. Do not prompt for feedback during onboarding. The backend pairs explicit negatives against known positives for triplet training - clean signal matters more than volume.
-
-### Room Naming
-
-Call POST /sightings when the user explicitly names a room:
-- After a scan, when the app asks "What room is this?"
-- After a double-tap on a scan result and the user speaks a location
-
-Do not call POST /sightings automatically without a user-spoken room name.
-
----
-
-## Teach Mode
-
-The user wants the app to remember a new object: capture -> POST /voice (`request_type=remember`) -> handle signals -> optionally record location.
-
-### Step 1: Capture
-
-Capture 3-5 frames in quick succession (~500ms apart). The backend picks the best frame.
-
-### Step 2: POST /voice (request_type=remember)
-
-```
-POST /voice
-Content-Type: multipart/form-data
-```
-
-| Field | Type | Notes |
-|-------|------|-------|
-| `images[]` | file[] | 2-5 frames from the burst (recommended) |
-| `image` | file | Single frame (fallback) |
-| `prompt` | string | The user's label, e.g. `"wallet"`, `"house keys"` |
-
-**Success response:**
 ```json
-{
-  "success": true,
-  "message": "Object detected and embedded successfully.",
-  "images_tried": 4,
-  "images_with_detection": 3,
-  "result": {
-    "label": "wallet",
-    "confidence": 0.87,
-    "detection_quality": "high",
-    "detection_hint": "Detection confidence is high.",
-    "blur_score": 312.7,
-    "is_blurry": false,
-    "is_dark": false,
-    "darkness_level": 112.4,
-    "replaced_previous": false,
-    "second_pass": false,
-    "second_pass_prompt": null,
-    "text_likelihood": 0.62,
-    "box": [120, 200, 340, 410],
-    "ocr_text": "RFID Blocking",
-    "ocr_confidence": 1.0
-  }
-}
+{}
 ```
 
-`images_tried` and `images_with_detection` only appear when using `images[]`.
+Send when the user taps. The server responds with `listening`. Start recording audio after you receive `listening`.
 
-**Failure - too dark:**
+### `chat_stop` - user cancels before speaking
+
 ```json
-{
-  "success": false,
-  "message": "Image is too dark for detection. Increase lighting or ask me to turn on the flashlight.",
-  "is_dark": true,
-  "darkness_level": 12.4,
-  "blur_score": 5.1,
-  "is_blurry": false,
-  "result": null
-}
+{}
 ```
 
-**Failure - no detection:**
-```json
-{
-  "success": false,
-  "message": "No object detected.",
-  "is_dark": false,
-  "darkness_level": 87.3,
-  "blur_score": 48.2,
-  "is_blurry": true,
-  "result": null
-}
-```
+Send if the user taps again to cancel before sending audio. Do not send `audio`.
 
-### Step 3: Handle the response signals
-
-Check in this order:
-
-**1. `is_dark: true`** - highest priority.
-```
-speak: "Image is too dark. Increase lighting or turn on the flashlight."
-```
-
-**2. `success: false` + `is_dark: false`**
-```
-is_blurry: true  -> "Hold steady and try again"
-is_blurry: false -> "Could not detect - try a different angle, better lighting, or a more specific label"
-```
-
-**3. `success: true`**
-```
-replaced_previous: true  -> say "Updated [label]"
-replaced_previous: false -> say "[label] saved"
-```
-If `detection_quality` is `"low"` or `"medium"`, announce `detection_hint` as a soft warning. Object is saved regardless.
-
-### Step 4: Record location (optional)
-
-```
-POST /sightings
-Content-Type: application/json
-```
-```json
-{
-  "room_name": "kitchen",
-  "sightings": [{ "label": "wallet" }]
-}
-```
-
-`room_name` is normalized server-side ("In The Kitchen" -> "kitchen"). Omit if user did not name the room.
-
-Response: `{ "saved": 1, "labels": ["wallet"], "room_name": "kitchen" }`
-
----
-
-## Scan Mode
-
-Capture -> POST /voice (`request_type=scan`) -> store `scan_id` -> navigate matches -> (optional) crop, feedback, location update.
-
-### Step 1: POST /voice (request_type=scan)
-
-```
-POST /voice
-Content-Type: multipart/form-data
-```
-
-| Field | Type | Notes |
-|-------|------|-------|
-| `image` | file | The scene image |
-| `focal_length_px` | float | Enables calibrated depth. Omit or send `0` to disable. |
-
-**Focal length formula:**
-```
-focal_length_px = (focalLengthMm / sensorWidthMm) * imageWidthPx
-```
-iPhone 15 Plus reference: `f_mm=6.24, sensor_width=8.64mm` -> `focal_length_px = 3094.0`
-
-### Step 2: Check for darkness
-
-Before touching `matches`, check the top-level `is_dark` field:
-```json
-{
-  "matches": [],
-  "count": 0,
-  "is_dark": true,
-  "darkness_level": 8.2,
-  "message": "Image is too dark for detection."
-}
-```
-`is_dark` is at the top level, not inside a match. If true, speak the message and stop.
-
-### Step 3: Store scan_id and navigate matches
+### `audio` - user finished speaking
 
 ```json
 {
-  "scan_id": "a3f9c2b1d4e5f6a7",
-  "count": 2,
-  "matches": [
-    {
-      "label": "wallet",
-      "similarity": 0.72,
-      "confidence": "high",
-      "direction": "to your left",
-      "narration": "Wallet look down, to your left, 2.3 feet away.",
-      "distance_ft": 2.3,
-      "box": [12, 44, 210, 380],
-      "ocr_text": "RFID Blocking"
-    },
-    {
-      "label": "house keys",
-      "similarity": 0.38,
-      "confidence": "medium",
-      "direction": "to your right",
-      "narration": "May be house keys to your right, focus to verify.",
-      "distance_ft": 4.1,
-      "box": [640, 100, 820, 300]
-    }
-  ]
-}
-```
-
-**Store `scan_id` immediately.** `matches` is ordered left-to-right spatially.
-Read `narration` aloud for each match in array order.
-`distance_ft` is only present when depth is enabled.
-
-**Direction zones** (narration already reflects this):
-
-Horizontal (based on object x-position):
-
-| Value | Where in the frame |
-|-------|-------------------|
-| `"to your left"` | Far left (< 25%) |
-| `"slightly left"` | Left of center |
-| `"ahead"` | Center |
-| `"slightly right"` | Right of center |
-| `"to your right"` | Far right (> 75%) |
-
-Vertical gaze cue (prepended to narration when object is not at mid-frame):
-
-| Prefix in narration | Where in the frame |
-|---------------------|-------------------|
-| `"look down,"` | Object center in bottom 40% of frame (ny > 0.60) |
-| `"look up,"` | Object center in top 25% of frame (ny < 0.25) |
-| (none) | Object center in middle 35% - no cue needed |
-
-**Confidence tiers:**
-
-| Value | Similarity range |
-|-------|-----------------|
-| `"high"` | >= 0.35 |
-| `"medium"` | 0.25 - 0.35 |
-| `"low"` | 0.2 - 0.25 |
-
-### Step 4: Fetch a crop (on demand)
-
-```
-GET /crop?scan_id=a3f9c2b1d4e5f6a7&index=0
-```
-
-`index` is the 0-based position in `matches`. Returns raw JPEG.
-Returns `404` if `scan_id` has expired or `index` is out of range.
-
-### Step 5: Collect feedback (optional but important)
-
-```
-POST /feedback
-Content-Type: application/json
-```
-```json
-{
-  "scan_id": "a3f9c2b1d4e5f6a7",
-  "label": "wallet",
-  "feedback": "correct"
-}
-```
-
-`feedback` must be `"correct"` or `"wrong"`.
-
-Response:
-```json
-{
-  "recorded": true,
-  "label": "wallet",
-  "feedback": "correct",
-  "triplets": 12,
-  "min_for_training": 10
-}
-```
-
-`404` means `scan_id` expired. Send feedback before the user does 50 more scans.
-
-### Step 6: Update location (optional)
-
-```
-POST /sightings
-Content-Type: application/json
-```
-```json
-{
-  "room_name": "bedroom",
-  "sightings": [
-    { "label": "wallet",     "direction": "to your left", "distance_ft": 2.3, "similarity": 0.72 },
-    { "label": "house keys", "direction": "to your right", "distance_ft": 4.1, "similarity": 0.38 }
-  ]
-}
-```
-
-`direction`, `distance_ft`, and `similarity` come from the match objects. Do NOT include matches the user gave negative feedback for.
-
----
-
-## WebSocket Voice Session
-
-The primary interface for voice interaction. A single persistent WebSocket connection per user. The server manages the entire conversation state machine. The frontend connects, plays whatever audio narration it receives, sends audio/images when the server requests them, and handles navigation gestures by emitting events.
-
-### Connecting
-
-```
-ws://server/socket.io/
-```
-
-Auth: pass the API key as a query param or header on the upgrade request.
-
-```
-ws://server/socket.io/?key=<API_KEY>
-```
-or
-```
-GET /socket.io/  HTTP/1.1
-X-API-Key: <API_KEY>
-```
-
-On connect, the server immediately sends a `tts` event. If the DB is empty, this is the onboarding welcome. Otherwise it's "Ready."
-
-```json
-{ "narration": "Ready.", "next_state": "idle" }
-```
-
-### Onboarding (empty DB)
-
-```json
-{
-  "narration": "Welcome to Spaitra. I remember where your things are. Grab two items near you and let's start. Say teach, then the name of the first item.",
-  "next_state": "onboarding_teach"
-}
-```
-
-The server drives the full onboarding flow:
-
-1. **Teach item 1** - user says "teach my keys", server asks for photo via `control: request_image`, user sends image, server saves and asks for room
-2. **Location item 1** - user says "the kitchen", server saves sighting, prompts for second item
-3. **Teach item 2** - same flow as item 1
-4. **Location item 2** - server transitions to `onboarding_await_scan`
-5. **Scan** - user says "scan", server asks for photo, user sends it, server announces what it found and introduces swiping
-6. **Swipe intro** - user swipes through items (navigate events), server introduces the ask demo
-7. **Ask demo** - user asks "where is my keys", server answers and completes onboarding
-
-No feedback is collected during onboarding.
-
-### Client to Server Events
-
-#### `audio`
-
-Send after the user finishes speaking (or tap-to-speak gesture). Always include `audio`. Include `image` when the camera is open. Include `focal_length_px` whenever available.
-
-```json
-{
-  "audio": "<base64-encoded webm or ogg>",
-  "image": "<base64-encoded jpeg, optional>",
+  "audio": "<base64 webm or ogg>",
+  "image": "<base64 jpeg, include when camera is open>",
   "focal_length_px": 3094.0
 }
 ```
 
-The server emits `transcription` immediately after processing the audio, then dispatches the result.
+Send when recording ends. Always include `audio`. Include `image` and `focal_length_px` when the camera is active (scan or teach flows).
 
-#### `navigate`
+Focal length formula: `focal_length_px = (focalLengthMm / sensorWidthMm) * imageWidthPx`
 
-Send when the user swipes to browse scan results. The server tracks the current item index and returns the right narration.
+### `navigate` - user swipes through scan results
 
 ```json
 { "direction": "next" }
-```
-
-```json
 { "direction": "prev" }
 ```
 
-Optionally jump to a specific index:
+Send on swipe left/right in the scan results view. The server responds with `tts` narrating the newly focused item.
+
+---
+
+## Receiving Events
+
+Handle all of these. Ignore anything else.
+
+### `tts` -> speak narration
 
 ```json
-{ "direction": "select", "item_index": 2 }
+{ "narration": "...", "next_state": "focused_on_item" }
 ```
 
-### Server to Client Events
+Speak `narration` via TTS at the stored `voice_speed`. If TTS is already playing and the user taps the Spaitra button, stop it and start recording immediately.
 
-#### `tts`
-
-The server's primary output. Read `narration` aloud with the device TTS engine. Apply `voice_speed` from `/user-settings`.
+### `session_state` -> update UI state
 
 ```json
-{ "narration": "Wallet to your left, 2 feet.", "next_state": "focused_on_item" }
+{
+  "current_mode": "focused_on_item",
+  "context": {
+    "scan_id": "abc123",
+    "label": "wallet",
+    "item_index": 0,
+    "onboarding_phase": ""
+  }
+}
 ```
 
-`next_state` is informational - the server already manages state. The frontend can use it to update UI (e.g. show a scan overlay when `focused_on_item`).
+This is your authoritative state. Store `current_mode` and `context`. Update UI based on the mode (see State Machine below). This arrives after every user event and on connect.
 
-#### `transcription`
-
-Emitted immediately after Whisper processes the audio. Use for live UI feedback (show what was heard before the result arrives).
+### `listening` -> show recording UI
 
 ```json
-{ "text": "where is my wallet", "context_used": true }
+{ "state": "idle", "prompt": "Scan, teach something new, or ask me anything." }
 ```
 
-#### `action_result`
+Set recording state to active. Display `prompt` as a listening hint. The prompt is already phrased for the user's current state - show it as-is.
 
-Structured result of the dispatched action. Use for rendering scan matches, find results, etc.
+### `listening_stopped` -> hide recording UI
 
 ```json
-{ "type": "scan", "data": { "matches": [...], "count": 2, "scan_id": "abc123" } }
+{ "state": "idle" }
 ```
 
-```json
-{ "type": "find", "data": { "label": "wallet", "found": true, "last_sighting": { ... } } }
-```
+User canceled. Reset recording UI.
 
-```json
-{ "type": "remember", "data": { "success": true, "result": { "label": "wallet", ... } } }
-```
-
-```json
-{ "type": "set_location", "data": { "label": "wallet", "location": "kitchen" } }
-```
-
-```json
-{ "type": "item_focus", "data": { "label": "wallet", "narration": "Wallet to your left." } }
-```
-
-#### `control`
-
-Instruction to the frontend to perform an action.
+### `control` -> open camera
 
 ```json
 { "action": "request_image", "context": "scan" }
 ```
 
-When `request_image` arrives: activate camera, capture, and send the next `audio` event with the `image` field populated.
+When `action == "request_image"`: activate camera, capture a JPEG frame, include it as `image` in the next `audio` event you send.
 
-#### `error`
+### `action_result` -> update content views
 
 ```json
-{ "code": "transcription_failed", "message": "Transcription failed." }
+{ "type": "scan", "data": { "scan_id": "abc123", "matches": [...] } }
 ```
 
-Common codes: `transcription_failed`, `scan_failed`, `remember_failed`, `bad_payload`, `bad_state`.
+Store `scan_id` from scan results. You need it for `GET /crop`. The narration for scan results comes separately via `tts` - do not read `matches` yourself.
 
-### Session States (server-side)
+Other types: `find`, `remember`, `set_location`, `item_focus`, `open_settings`, `navigate_back`. Route these to the appropriate UI transition.
 
-The server emits `next_state` in each `tts` event so the frontend can update its UI layer, but the server owns the authoritative state.
+### `transcription` -> live display (optional)
 
-| State | What it means |
+```json
+{ "text": "where is my wallet" }
+```
+
+Optionally display what was heard before the result arrives. Cosmetic only.
+
+### `error` -> show error
+
+```json
+{ "code": "transcription_failed", "message": "..." }
+```
+
+Show or speak `message`. Reset recording UI.
+
+---
+
+## State Machine
+
+Track `current_mode` from `session_state`. Show different UI per state.
+
+| State | What to show |
 |---|---|
-| `idle` | Ready for any command |
-| `awaiting_image` | Server waiting for a photo (sent `control: request_image`) |
-| `awaiting_location` | Server waiting for room name after a teach |
-| `awaiting_confirmation` | Server waiting for yes/no |
-| `focused_on_item` | Scan results active; item navigation and queries enabled |
-| `onboarding_teach` | First-time: teaching items |
-| `onboarding_await_scan` | First-time: ready for the demo scan |
+| `idle` | Home screen. Spaitra button visible. |
+| `onboarding_teach` | Home screen. Server is prompting for item teaching. |
+| `onboarding_await_scan` | Home screen with camera hint. |
+| `awaiting_image` | Activate camera. Capture on next audio send. |
+| `awaiting_location` | Listening for room name. No camera needed. |
+| `awaiting_confirmation` | Listening for yes/no. |
+| `focused_on_item` | Scan results overlay. Enable swipe navigation. |
 
-### Hints
-
-The server plants short feature hints in TTS narrations as the user reaches usage milestones:
-
-| Hint | Trigger |
-|---|---|
-| "Swipe right to browse each detected item one at a time." | After first scan |
-| "If a detection was wrong, just say wrong." | After second scan |
-| "You can ask questions about your items, like what is in a receipt." | After second teach |
-| "Try saying export this when looking at a document." | After third teach |
-| "Double tap to save a location while browsing items." | After fifth scan |
-
-Hints appear appended to the normal narration. They are not announced mid-sentence or as separate events.
+The server drives all transitions. You follow `current_mode`.
 
 ---
 
-## Ask Mode
-
-### Legacy HTTP fallback: POST /voice
-
-The HTTP endpoint is kept for backwards compatibility and fallback scenarios. Prefer the WebSocket interface for all new development.
-
-Use `/voice` when you want one endpoint to transcribe audio and route commands.
-Always send frontend state so the backend can disambiguate short follow-ups.
+## Settings Screen (HTTP)
 
 ```
-POST /voice
-Content-Type: multipart/form-data or application/json
+GET /user-settings      -> read current settings
+PATCH /user-settings    -> update one or more fields
 ```
 
-Example request:
+Expose two controls:
+- Performance mode: `fast` / `balanced` / `accurate`
+- Voice speed: 0.5 - 2.0
 
-```json
-{
-  "audio": "<file or base64>",
-  "state": {
-    "current_mode": "focused_on_item",
-    "context": {
-      "scan_id": "s123",
-      "label": "wallet",
-      "last_query_type": "find"
-    }
-  }
-}
-```
-
-Behavior by `state.current_mode`:
-- `awaiting_location`: any transcription is treated as a room/location name
-- `focused_on_item`: query routes to item-context handling using `context.scan_id` and `context.label`
-- `idle`: normal command classification
-
-Example response:
-
-```json
-{
-  "transcription": "kitchen",
-  "request_type": "set_location",
-  "result": { "label": "wallet", "location": "kitchen", "saved": true },
-  "narration": "Got it. Wallet in the kitchen.",
-  "next_state": "idle",
-  "latency_ms": 234
-}
-```
-
-`next_state` drives frontend transitions. Common values are:
-- `"awaiting_location"` after a successful remember flow
-- `"idle"` after location or confirmation is completed
-- `null` when no transition is requested
-
-If you send JSON, include `state` in the body. For multipart form submissions,
-you can also pass state as a JSON string in `state` form field or `X-State`
-header.
-
-### Frontend state management rules
-
-Track and pass state with every `/voice` call:
-- `current_mode`: `idle`, `scanning`, `teaching`, `focused_on_item`, `awaiting_location`, `awaiting_confirmation`
-- `context.scan_id` and `context.label` when focused on a scan item
-- follow-up context like `last_query_type` or a pending action when needed
-
-Update client state from each `/voice` response:
-1. read `next_state`
-2. apply transition immediately
-3. update `context` for the new mode
-4. clear stale context when returning to idle
-
-### Voice request and response model: POST /voice
-
-`/voice` is the main command endpoint. It can transcribe audio, classify intent, execute the action, and return narration in one response.
-
-```
-POST /voice
-Content-Type: application/json or multipart/form-data
-```
-
-Audio request (transcribe and execute):
-
-```json
-{
-  "state": {
-    "current_mode": "idle",
-    "context": {}
-  }
-}
-```
-
-Text request (skip transcription and execute directly):
-
-```json
-{
-  "request_type": "ask",
-  "text": "where is my wallet",
-  "state": {
-    "current_mode": "idle",
-    "context": {}
-  }
-}
-```
-
-Structured response:
-
-```json
-{
-  "request_type": "find",
-  "transcription": "where is my wallet",
-  "result": {
-    "found": true,
-    "matched_label": "wallet",
-    "last_sighting": {
-      "room_name": "kitchen"
-    }
-  },
-  "narration": "Your wallet is in the kitchen.",
-  "next_state": null,
-  "latency_ms": 180
-}
-```
-
-Recommended pattern: use one complete `/voice` response (Option A) for command execution. Use GET endpoints only for explicit follow-up views such as `/crop` or `/items`.
-
-Supported `request_type` values:
-- `remember` (requires image and prompt)
-- `scan` (requires image)
-- `ask`
-- `find`
-- `item_ask` (requires `scan_id` and `label`)
-
-When `request_type` is omitted, backend intent classification picks the action from transcription and state.
-
-**rename response:**
-```json
-{
-  "action": "rename",
-  "old_label": "wallet",
-  "new_label": "my wallet",
-  "narration": "Renamed to my wallet.",
-  "replaced_existing": false
-}
-```
-Rename auto-replaces any existing memory with the same name - no confirmation step. If the new name is the same as the current name:
-```json
-{ "action": "rename", "narration": "That's already called wallet.", "unchanged": true }
-```
-
-**find response:**
-```json
-{
-  "action": "find",
-  "label": "wallet",
-  "found": true,
-  "narration": "Your wallet is in the kitchen, to your left. Last seen 5 minutes ago.",
-  "last_sighting": { ... }
-}
-```
-
-**describe response (not yet available):**
-```json
-{ "action": "describe", "narration": "Visual description is not available yet.", "deferred": true }
-```
-
-**When to call:** user is scrolling through scan results and asks something about the item currently on screen.
+PATCH with only the changed field. Changes apply immediately server-side.
 
 ---
 
-### Direct label lookup: GET /find
+## Memory List Screen (HTTP)
 
 ```
-GET /find?label=wallet
+GET /items              -> list all taught items
+DELETE /items/<label>   -> delete an item
+POST /items/<label>/rename  body: { "new_label": "..." }
 ```
 
-**Found:**
-```json
-{
-  "label": "my wallet",
-  "found": true,
-  "matched_label": "wallet",
-  "matched_by": "fuzzy_label",
-  "narration": "Your wallet is in the kitchen, to your left. Last seen 3 minutes ago.",
-  "last_sighting": {
-    "id": 41,
-    "label": "wallet",
-    "timestamp": 1742860412.3,
-    "last_seen": "3 minutes ago",
-    "direction": "to your left",
-    "distance_ft": 2.3,
-    "similarity": 0.72,
-    "room_name": "kitchen",
-    "crop_path": null
-  },
-  "sightings": [...]
-}
-```
-
-`matched_label` appears only when fuzzy matching was used. `room_name` is null until the user has confirmed a location via `POST /sightings`.
-
-**Not found:** `{ "label": "wallet", "found": false, "sightings": [] }`
-
-**All objects:** `GET /find` (omit `label`) - ordered most-recently-seen first.
-
-**Room query** - all items last seen in a room:
-```
-GET /find?room=kitchen
-```
-```json
-{ "room": "kitchen", "results": [...], "count": 2 }
-```
-Room name is normalized server-side ("In The Kitchen" → "kitchen"). Each result includes a `narration` field.
-
-**Optional filters:** `label` (str), `room` (str), `limit` (int), `since` (Unix timestamp), `before` (Unix timestamp).
+Rename returns 409 if the new name already exists. Resend with `"force": true` to overwrite.
 
 ---
 
-## Managing Memories
-
-### List
+## Scan Image (HTTP)
 
 ```
-GET /items
-GET /items?label=wallet
+GET /crop?scan_id=<id>&index=<0-based>
 ```
 
-```json
-{
-  "items": [
-    { "id": 3, "label": "wallet", "confidence": 0.87, "ocr_text": "RFID Blocking", "timestamp": 1742700000.0 }
-  ],
-  "count": 1
-}
-```
-
-### Delete
-
-```
-DELETE /items/wallet
-```
-```json
-{ "deleted": true, "label": "wallet", "count": 1 }
-```
-
-`count` = rows removed. `404` if label not found.
-
-### Rename (two-step)
-
-**Step 1:**
-```
-POST /items/wallet/rename
-{ "new_label": "My Wallet" }
-```
-
-Success: `{ "renamed": true, "old_label": "wallet", "new_label": "My Wallet", "count": 1, "replaced": 0 }`
-
-Conflict (409): `{ "conflict": true, "message": "...", "existing_count": 1 }`
-
-**Step 2 (if conflict, user confirmed):**
-```json
-{ "new_label": "My Wallet", "force": true }
-```
+Returns raw JPEG of the matched object. Call this only when displaying a cropped scan result. Scans are cached for the last 50 results.
 
 ---
 
-## Settings
-
-### User preferences (persisted, survive restarts)
+## Debug (HTTP, dev only)
 
 ```
-GET /user-settings
-PATCH /user-settings
-```
-
-```json
-{
-  "performance_mode": "balanced",
-  "voice_speed": 1.0,
-  "learning_enabled": true,
-  "button_layout": "default"
-}
-```
-
-| Field | Values | Notes |
-|-------|--------|-------|
-| `performance_mode` | `"fast"` / `"balanced"` / `"accurate"` | fast = no depth + no LLM query fallback, balanced = depth + LLM query fallback, accurate = depth + LLM query fallback |
-| `voice_speed` | 0.5 - 2.0 | Apply to your TTS rate |
-| `learning_enabled` | bool | Propagated to scan pipeline immediately |
-| `button_layout` | `"default"` / `"swapped"` | UI layout preference |
-
-PATCH accepts any subset. `400` on type or range errors.
-
-### ML parameters
-
-```
-GET /settings
-PATCH /settings
-```
-
-```json
-{
-  "enable_learning": true,
-  "min_feedback_for_training": 10,
-  "projection_head_weight": 1.0,
-  "head_trained": false,
-  "triplet_count": 0,
-  "feedback_counts": { "positives": 5, "negatives": 3, "triplets": 3 }
-}
-```
-
-`head_trained` = personalization model has been trained at least once.
-
----
-
-## TTS and Narration
-
-- Read `narration` from scan matches verbatim. It is phrased for a blind user.
-- Apply `voice_speed` from `/user-settings` to your TTS rate.
-- Read matches in array order - they are left-to-right spatially.
-- `"May be a..."` in narration means medium or low confidence. Do not add hedging.
-- `"look down,"` or `"look up,"` in narration is a gaze instruction - read it as-is, do not add or remove it.
-- `ocr_text` is raw extracted text. Read it only if the user specifically asks.
-
----
-
-## Image Tips
-
-- Send JPEG or HEIC. Both supported. EXIF orientation corrected server-side.
-- For `/remember`: 1-3 feet. 6 feet is unreliable.
-- For `/scan`: wider shots work; the pipeline crops detected regions internally.
-
----
-
-## Error Handling
-
-| Status | Meaning |
-|--------|---------|
-| 400 | Missing field, wrong type, or invalid value |
-| 401 | Missing or wrong `X-API-Key` |
-| 404 | Label not found, or `scan_id` expired |
-| 500 | Server error - log and show a generic retry message |
-
-All error responses include `{"error": "..."}`. PATCH routes may return `{"errors": {...}}` with per-field messages.
-
----
-
-## Debug Endpoints
-
-For integration and debugging. Do not call from production code. All require `X-API-Key`.
-
-### Diagnosing a 400
-
-```
-POST /debug/echo
-(same headers and body as the failing request)
-```
-
-Returns exactly what the server received - content-type, field names, file sizes - without running inference. Common issues: field named `"file"` instead of `"image"`, missing `prompt`, wrong content-type.
-
-### System state
-
-```
-GET /debug/state
-```
-
-GPU status, model load status, OCR service reachability, DB counts, feature flags.
-
-### Image quality check
-
-```
-POST /debug/image
-Content-Type: multipart/form-data
-image: <file>
-```
-
-Returns `is_dark`, `is_blurry`, `luminance`, `blur_score` - same values the pipeline uses.
-
-### Pipeline smoke tests
-
-```
+GET /debug/state        -> pipeline health, model load status
 GET /debug/test-remember
 GET /debug/test-scan
+POST /debug/wipe        body: { "confirm": true, "target": "all" }
 ```
 
-Runs pipeline on a built-in test image. No DB write for test-remember.
-
-### Database inspection
-
-```
-GET /debug/db
-```
-
-All taught items, last 20 sightings, feedback counts.
-
-### Reset test state
-
-```
-POST /debug/wipe
-Content-Type: application/json
-{"confirm": true, "target": "all"}
-```
-
-`target` options: `"all"`, `"items"`, `"sightings"`, `"feedback"`, `"weights"`, `"settings"`, `"user-settings"`.
-
-### Log tail
-
-```
-GET /debug/logs?n=50&event=scan_text_match
-```
-
-Useful `event` filters: `remember_ocr`, `scan_text_match`, `text_recognition`.
-
-Use `source=important` for warning and error only logs, or `source=crash` to read crash blocks.
-
-### Performance summary
-
-```
-GET /debug/perf
-```
-
-Use this when tuning scan latency. Key fields include stage timing aggregates (`prepare_ms`, `detect_ms`, `embed_ms`, `ocr_ms`, `match_ms`) and resource peaks (RAM, swap, VRAM, CPU temp).
-
-### Live threshold patch
-
-```
-PATCH /debug/config
-Content-Type: application/json
-{"similarity_threshold": 0.25}
-```
-
-Not persisted across restarts. GET with no body to see all patchable fields.
-
----
-
-## Retraining
-
-```
-POST /retrain
-```
-
-Response:
-```json
-{ "started": true, "triplets": 15 }
-```
-
-If not enough data: `{ "started": false, "reason": "insufficient_data", "triplets": 3, "min_required": 10 }`
-
-Poll for completion:
-```
-GET /retrain/status
-```
-```json
-{
-  "running": false,
-  "last_result": { "trained": true, "triplets": 15, "final_loss": 0.012, "head_weight": 0.3 },
-  "error": null
-}
-```
-
-Poll every 5 seconds until `running: false`.
-
----
-
-## Server Management
-
-For SSH access, full setup steps, and deployment: see [SERVER_ACCESS.md](SERVER_ACCESS.md).
-
-Quick reference for anyone who needs to restart the server:
-
-```bash
-# SSH into the server (Tailscale required)
-ssh dev@100.114.39.23
-
-# Restart after a code change
-cd /opt/spaitra/TSA-soft-dev-backend-2026
-sudo -u spaitra git pull
-sudo systemctl restart spaitra-core
-
-# Check service status
-systemctl status spaitra-core spaitra-ocr
-
-# Follow logs
-journalctl -u spaitra-core -f
-```
-
-Server info:
-- Host: `Spaitra` / Tailscale IP: `100.114.39.23`
-- Public URL: `https://nre5bjw44wddpu2zjg4fe4iehq.srv.us`
-- OS: Debian 13 / GPU: NVIDIA GTX 1060 6 GB
-- Core API: port 5000 (localhost, exposed via srv.us tunnel)
-- OCR service: port 8001 (localhost only)
-
-Environment variables on the server (`/opt/spaitra/.env`):
-```dotenv
-API_KEY=<secret>              # required for all routes except /health
-ENABLE_DEPTH=1                # set to 0 to skip depth estimation (~2 GB VRAM)
-ENABLE_OCR=1                  # set to 0 to skip OCR
-ENABLE_LEARNING=1             # set to 0 to disable projection head
-OCR_SERVICE_URL=http://127.0.0.1:8001/ocr
-SAVE_VRAM=1                   # enabled on this server (6 GB GPU)
-```
+Do not call these from production code.
