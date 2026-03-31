@@ -110,6 +110,12 @@ def _get_events(client, event_type: str) -> list[dict]:
     return [e["args"][0] for e in client.get_received() if e["name"] == event_type]
 
 
+def _last_session_state(events: list[dict]) -> dict:
+    states = [e for e in events if e["name"] == "session_state"]
+    assert states, "missing session_state event"
+    return states[-1]["args"][0]
+
+
 def _ogg_audio() -> str:
     """Return base64-encoded minimal OGG-magic-byte audio payload."""
     import base64
@@ -135,6 +141,8 @@ def test_connect_returning_user():
         assert tts_events, "no tts event on connect"
         narration = tts_events[0]["args"][0].get("narration", "")
         assert "ready" in narration.lower(), f"unexpected narration: {narration!r}"
+        session_state = _last_session_state(received)
+        assert session_state.get("current_mode") == "idle"
     finally:
         cleanup()
 
@@ -150,6 +158,8 @@ def test_connect_empty_db_triggers_onboarding():
         narration = tts_events[0]["args"][0].get("narration", "")
         assert "welcome" in narration.lower(), f"unexpected onboarding narration: {narration!r}"
         assert tts_events[0]["args"][0].get("next_state") == "onboarding_teach"
+        session_state = _last_session_state(received)
+        assert session_state.get("current_mode") == "onboarding_teach"
     finally:
         cleanup()
 
@@ -365,6 +375,59 @@ def test_navigate_empty_session_returns_tts():
         assert tts_events, "expected tts for empty navigate"
         narration = tts_events[0]["args"][0].get("narration", "")
         assert "no scan" in narration.lower() or "navigate" in narration.lower()
+    finally:
+        cleanup()
+
+
+def test_home_back_returns_idle_and_clears_scan_context():
+    from visual_memory.api.voice_session import _sessions
+
+    client, sio, db, stub, cleanup = _make_ws_test_app(seed_fn=_seed_items)
+    try:
+        client.connect()
+        client.get_received()
+
+        sid = _client_sid(client)
+        session = _sessions[sid]
+        session.state = "focused_on_item"
+        session.context["scan_matches"] = [{"label": "wallet", "narration": "Wallet to your left."}]
+        session.context["scan_id"] = "scan-123"
+        session.context["item_index"] = 0
+        session.context["current_label"] = "wallet"
+
+        stub.set_result("go back")
+        client.emit("audio", {"audio": _ogg_audio()})
+        received = client.get_received()
+
+        action = [e for e in received if e["name"] == "action_result"]
+        assert action and action[-1]["args"][0].get("type") == "navigate_back"
+        tts = [e for e in received if e["name"] == "tts"]
+        assert tts and tts[-1]["args"][0].get("next_state") == "idle"
+        state_event = _last_session_state(received)
+        assert state_event.get("current_mode") == "idle"
+        context = state_event.get("context") or {}
+        assert context.get("scan_id", "") == ""
+        assert context.get("label", "") == ""
+    finally:
+        cleanup()
+
+
+def test_settings_command_returns_open_settings_and_idle():
+    client, sio, db, stub, cleanup = _make_ws_test_app(seed_fn=_seed_items)
+    try:
+        client.connect()
+        client.get_received()
+
+        stub.set_result("settings")
+        client.emit("audio", {"audio": _ogg_audio()})
+        received = client.get_received()
+
+        action = [e for e in received if e["name"] == "action_result"]
+        assert action and action[-1]["args"][0].get("type") == "open_settings"
+        tts = [e for e in received if e["name"] == "tts"]
+        assert tts and "opening settings" in tts[-1]["args"][0].get("narration", "").lower()
+        state_event = _last_session_state(received)
+        assert state_event.get("current_mode") == "idle"
     finally:
         cleanup()
 
@@ -618,6 +681,8 @@ for name, fn in [
     ("ws:awaiting_location", test_awaiting_location_transitions_to_idle),
     ("ws:navigate_advance", test_navigate_advances_item_index),
     ("ws:navigate_empty", test_navigate_empty_session_returns_tts),
+    ("ws:home_back_clears_context", test_home_back_returns_idle_and_clears_scan_context),
+    ("ws:settings_action", test_settings_command_returns_open_settings_and_idle),
     ("ws:disconnect_clears_session", test_disconnect_clears_session),
     ("ws:bad_audio_error", test_bad_audio_returns_error),
     ("ws:onboarding_happy_path", test_onboarding_happy_path_end_to_end),

@@ -44,6 +44,26 @@ _HINT_TRIGGERS: dict[str, tuple[str, int]] = {
 
 # Helpers
 
+def _session_state_payload(session: VoiceSession) -> dict:
+    return {
+        "current_mode": session.state,
+        "context": {
+            "scan_id": session.context.get("scan_id", ""),
+            "label": session.context.get("current_label", ""),
+            "item_index": session.context.get("item_index"),
+            "onboarding_phase": session.context.get("onboarding_phase", ""),
+        },
+    }
+
+
+def _emit_session_state(session: VoiceSession) -> None:
+    emit("session_state", _session_state_payload(session))
+
+
+def _clear_focus_context(session: VoiceSession) -> None:
+    for key in ("scan_matches", "scan_id", "item_index", "current_label"):
+        session.context.pop(key, None)
+
 def _increment(session: VoiceSession, key: str) -> None:
     session.context[key] = session.context.get(key, 0) + 1
 
@@ -146,6 +166,10 @@ def _normalize_command_type(query: str, has_image: bool) -> str:
     q = (query or "").strip().lower()
     if not q:
         return "ask"
+    if any(t in q for t in ("settings", "preferences")):
+        return "open_settings"
+    if any(t in q for t in ("go back", "back", "home", "cancel")):
+        return "navigate_back"
     if has_image and any(t in q for t in ("remember", "save", "learn", "teach", "this is")):
         return "remember"
     if any(t in q for t in ("scan", "what is around", "what do you see", "what's around")):
@@ -406,6 +430,20 @@ def _handle_feedback(session: VoiceSession) -> None:
     emit("tts", {"narration": "Got it, noted as incorrect.", "next_state": session.state})
 
 
+def _handle_navigate_back(session: VoiceSession) -> None:
+    _clear_focus_context(session)
+    session.state = "idle"
+    emit("action_result", {"type": "navigate_back", "data": {"action": "navigate_back"}})
+    emit("tts", {"narration": "Going back.", "next_state": "idle"})
+
+
+def _handle_open_settings(session: VoiceSession) -> None:
+    _clear_focus_context(session)
+    session.state = "idle"
+    emit("action_result", {"type": "open_settings", "data": {"action": "open_settings"}})
+    emit("tts", {"narration": "Opening settings.", "next_state": "idle"})
+
+
 # Main dispatch
 
 def _dispatch(
@@ -470,14 +508,27 @@ def _dispatch(
             return
         # Not item-specific - fall through to normal command dispatch
 
-    # onboarding_await_scan: only accept scan commands
+    intent = _normalize_command_type(command_text, has_image=image_bytes is not None)
+
+    # onboarding_await_scan: only accept scan and explicit navigation commands
     if state == "onboarding_await_scan":
-        if "scan" not in command_text.strip().lower():
+        if intent == "navigate_back":
+            _handle_navigate_back(session)
+            return
+        if intent == "open_settings":
+            _handle_open_settings(session)
+            return
+        if intent != "scan":
             emit("tts", {"narration": "Say scan when you're ready.", "next_state": state})
             return
 
     # Normal command dispatch (covers idle, onboarding_teach, focused_on_item fall-through)
-    intent = _normalize_command_type(command_text, has_image=image_bytes is not None)
+    if intent == "navigate_back":
+        _handle_navigate_back(session)
+        return
+    if intent == "open_settings":
+        _handle_open_settings(session)
+        return
 
     if intent == "scan":
         if image_bytes is None:
@@ -572,6 +623,7 @@ def register_events(sio: SocketIO) -> None:
         else:
             session.state = "idle"
             emit("tts", {"narration": "Ready.", "next_state": "idle"})
+        _emit_session_state(session)
 
     @sio.on("disconnect")
     def on_disconnect():
@@ -618,6 +670,7 @@ def register_events(sio: SocketIO) -> None:
         emit("transcription", {"text": command_text, "context_used": transcription.get("context_used", False)})
 
         _dispatch(session, command_text, image_bytes, focal_length)
+        _emit_session_state(session)
 
         _log.info({
             "event": "ws_audio_handled",
@@ -671,9 +724,11 @@ def register_events(sio: SocketIO) -> None:
                 ),
                 "next_state": "focused_on_item",
             })
+            _emit_session_state(session)
             return
 
         emit("tts", {"narration": narration, "next_state": "focused_on_item"})
+        _emit_session_state(session)
 
         _log.info({
             "event": "ws_navigate",
