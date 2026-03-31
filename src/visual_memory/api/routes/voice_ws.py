@@ -19,6 +19,7 @@ from visual_memory.api.routes.transcribe import transcribe_audio_bytes
 from visual_memory.api.voice_session import VoiceSession, clear_session, get_session
 from visual_memory.utils import get_logger
 from visual_memory.utils.logger import LogTag
+from visual_memory.utils.voice_state_context import build_state_contract
 
 _log = get_logger(__name__)
 _API_KEY = os.environ.get("API_KEY", "")
@@ -43,6 +44,52 @@ _HINT_TRIGGERS: dict[str, tuple[str, int]] = {
 
 
 # Helpers
+
+def _session_state_payload(session: VoiceSession) -> dict:
+    return {
+        "current_mode": session.state,
+        "context": {
+            "scan_id": session.context.get("scan_id", ""),
+            "label": session.context.get("current_label", ""),
+            "item_index": session.context.get("item_index"),
+            "onboarding_phase": session.context.get("onboarding_phase", ""),
+        },
+    }
+
+
+def _emit_session_state(session: VoiceSession) -> None:
+    emit("session_state", _session_state_payload(session))
+
+
+def _clear_focus_context(session: VoiceSession) -> None:
+    for key in ("scan_matches", "scan_id", "item_index", "current_label"):
+        session.context.pop(key, None)
+
+
+def _listening_prompt(session: VoiceSession) -> str:
+    """Return a short listening hint appropriate for the current session state.
+
+    Shown or spoken while the user is recording after pressing the Spaitra button.
+    Keeps the user oriented without requiring them to remember available commands.
+    """
+    state = session.state
+    if state == "onboarding_teach":
+        return "Say teach, then the item name."
+    if state == "onboarding_await_scan":
+        return "Say scan when ready."
+    if state == "awaiting_location":
+        return "Which room is this?"
+    if state == "awaiting_image":
+        return "Hold your phone up."
+    if state == "awaiting_confirmation":
+        return "Say yes to confirm, or no to cancel."
+    if state == "focused_on_item":
+        label = session.context.get("current_label", "")
+        if label:
+            return f"Focused on {label}. Ask about it, or say wrong if it was incorrect."
+        return "Ask about the item, or say wrong if the detection was incorrect."
+    return "Scan, teach something new, or ask me anything."
+
 
 def _increment(session: VoiceSession, key: str) -> None:
     session.context[key] = session.context.get(key, 0) + 1
@@ -112,11 +159,11 @@ def _normalize_room_name(text: str) -> str:
     return _ROOM_PREFIX.sub("", (text or "").strip()).strip().lower()
 
 
-def _extract_label(command_text: str) -> str:
+def _extract_label(command_text: str, state_context: dict | None = None) -> str:
     """Extract the item label from a teach/remember command via Ollama or regex."""
     try:
         from visual_memory.utils.ollama_utils import extract_item_intent
-        label = extract_item_intent(command_text)
+        label = extract_item_intent(command_text, state_context=state_context)
         if label:
             return label.strip().lower()
     except Exception:
@@ -131,10 +178,10 @@ def _extract_label(command_text: str) -> str:
     return cleaned.strip().lower() or command_text.strip().lower()
 
 
-def _extract_find_query(command_text: str) -> str:
+def _extract_find_query(command_text: str, state_context: dict | None = None) -> str:
     try:
         from visual_memory.utils.ollama_utils import extract_search_term
-        term = extract_search_term(command_text)
+        term = extract_search_term(command_text, state_context=state_context)
         if term:
             return term.strip()
     except Exception:
@@ -146,6 +193,10 @@ def _normalize_command_type(query: str, has_image: bool) -> str:
     q = (query or "").strip().lower()
     if not q:
         return "ask"
+    if any(t in q for t in ("settings", "preferences")):
+        return "open_settings"
+    if any(t in q for t in ("go back", "back", "home", "cancel")):
+        return "navigate_back"
     if has_image and any(t in q for t in ("remember", "save", "learn", "teach", "this is")):
         return "remember"
     if any(t in q for t in ("scan", "what is around", "what do you see", "what's around")):
@@ -172,10 +223,10 @@ def _run_remember(image_bytes: bytes, label: str) -> tuple[dict, int]:
     return process_remember_request(prompt=label, image_file=image_file, image_files=[])
 
 
-def _run_find(command_text: str) -> tuple[dict, int]:
+def _run_find(command_text: str, state_context: dict | None = None) -> tuple[dict, int]:
     from visual_memory.api.routes.find import _format_sighting, _ocr_content_match, build_narration
     from visual_memory.api.pipelines import get_settings
-    search_label = _extract_find_query(command_text)
+    search_label = _extract_find_query(command_text, state_context=state_context)
     if not search_label:
         return {"error": "could not determine what to find"}, 400
     db = get_database()
@@ -384,7 +435,10 @@ def _handle_item_query(session: VoiceSession, command_text: str) -> None:
     from visual_memory.api.routes.item_ask import process_item_ask_request
     scan_id = session.context.get("scan_id", "")
     label = session.context.get("current_label", "")
-    result, status = process_item_ask_request(scan_id=scan_id, label=label, query=command_text)
+    state_ctx = build_state_contract(mode=session.state, context=session.context)
+    result, status = process_item_ask_request(
+        scan_id=scan_id, label=label, query=command_text, state_context=state_ctx
+    )
     narration = result.get("narration", "") if isinstance(result, dict) else ""
     emit("action_result", {"type": "item_ask", "data": result})
     emit("tts", {"narration": narration or "Done.", "next_state": session.state})
@@ -404,6 +458,20 @@ def _handle_feedback(session: VoiceSession) -> None:
     except Exception as exc:
         _log.warning({"event": "ws_feedback_failed", "tag": LogTag.API, "error": str(exc)})
     emit("tts", {"narration": "Got it, noted as incorrect.", "next_state": session.state})
+
+
+def _handle_navigate_back(session: VoiceSession) -> None:
+    _clear_focus_context(session)
+    session.state = "idle"
+    emit("action_result", {"type": "navigate_back", "data": {"action": "navigate_back"}})
+    emit("tts", {"narration": "Going back.", "next_state": "idle"})
+
+
+def _handle_open_settings(session: VoiceSession) -> None:
+    _clear_focus_context(session)
+    session.state = "idle"
+    emit("action_result", {"type": "open_settings", "data": {"action": "open_settings"}})
+    emit("tts", {"narration": "Opening settings.", "next_state": "idle"})
 
 
 # Main dispatch
@@ -470,14 +538,27 @@ def _dispatch(
             return
         # Not item-specific - fall through to normal command dispatch
 
-    # onboarding_await_scan: only accept scan commands
+    intent = _normalize_command_type(command_text, has_image=image_bytes is not None)
+
+    # onboarding_await_scan: only accept scan and explicit navigation commands
     if state == "onboarding_await_scan":
-        if "scan" not in command_text.strip().lower():
+        if intent == "navigate_back":
+            _handle_navigate_back(session)
+            return
+        if intent == "open_settings":
+            _handle_open_settings(session)
+            return
+        if intent != "scan":
             emit("tts", {"narration": "Say scan when you're ready.", "next_state": state})
             return
 
     # Normal command dispatch (covers idle, onboarding_teach, focused_on_item fall-through)
-    intent = _normalize_command_type(command_text, has_image=image_bytes is not None)
+    if intent == "navigate_back":
+        _handle_navigate_back(session)
+        return
+    if intent == "open_settings":
+        _handle_open_settings(session)
+        return
 
     if intent == "scan":
         if image_bytes is None:
@@ -489,7 +570,8 @@ def _dispatch(
             _handle_scan(session, image_bytes, focal_length)
 
     elif intent == "remember":
-        label = _extract_label(command_text)
+        state_ctx = build_state_contract(mode=session.state, context=session.context)
+        label = _extract_label(command_text, state_context=state_ctx)
         session.context["label"] = label
         if image_bytes is None:
             session.context["pending_action"] = "remember"
@@ -503,7 +585,8 @@ def _dispatch(
             _handle_remember(session, image_bytes, label)
 
     elif intent == "find":
-        result, status = _run_find(command_text)
+        state_ctx = build_state_contract(mode=session.state, context=session.context)
+        result, status = _run_find(command_text, state_context=state_ctx)
         narration = result.get("narration", "") if isinstance(result, dict) else ""
         emit("action_result", {"type": "find", "data": result})
         # Onboarding ask-demo completion
@@ -521,7 +604,8 @@ def _dispatch(
 
     else:
         from visual_memory.api.routes.ask import process_ask_query
-        result, status = process_ask_query(command_text)
+        state_ctx = build_state_contract(mode=session.state, context=session.context)
+        result, status = process_ask_query(command_text, state_context=state_ctx)
         narration = result.get("narration", "") if isinstance(result, dict) else ""
         emit("action_result", {"type": "ask", "data": result})
         if session.context.get("onboarding_phase") == "ask_prompted":
@@ -572,6 +656,7 @@ def register_events(sio: SocketIO) -> None:
         else:
             session.state = "idle"
             emit("tts", {"narration": "Ready.", "next_state": "idle"})
+        _emit_session_state(session)
 
     @sio.on("disconnect")
     def on_disconnect():
@@ -606,7 +691,15 @@ def register_events(sio: SocketIO) -> None:
             except ValueError:
                 focal_length = None
 
-        transcription, t_status = transcribe_audio_bytes(audio_bytes, use_context=True)
+        transcription, t_status = transcribe_audio_bytes(
+            audio_bytes,
+            use_context=True,
+            voice_mode=session.state,
+            voice_context={
+                **session.context,
+                "state_contract": build_state_contract(mode=session.state, context=session.context),
+            },
+        )
         if t_status != 200:
             emit("error", {
                 "code": "transcription_failed",
@@ -615,9 +708,15 @@ def register_events(sio: SocketIO) -> None:
             return
 
         command_text = (transcription.get("text") or "").strip()
-        emit("transcription", {"text": command_text, "context_used": transcription.get("context_used", False)})
+        emit("transcription", {
+            "text": command_text,
+            "context_used": transcription.get("context_used", False),
+            "context_state_id": transcription.get("context_state_id"),
+            "context_policy": transcription.get("context_policy"),
+        })
 
         _dispatch(session, command_text, image_bytes, focal_length)
+        _emit_session_state(session)
 
         _log.info({
             "event": "ws_audio_handled",
@@ -671,9 +770,11 @@ def register_events(sio: SocketIO) -> None:
                 ),
                 "next_state": "focused_on_item",
             })
+            _emit_session_state(session)
             return
 
         emit("tts", {"narration": narration, "next_state": "focused_on_item"})
+        _emit_session_state(session)
 
         _log.info({
             "event": "ws_navigate",
@@ -683,3 +784,28 @@ def register_events(sio: SocketIO) -> None:
             "item_index": new_index,
             "label": match.get("label", ""),
         })
+
+    @sio.on("chat_start")
+    def on_chat_start(data):
+        """User pressed the Spaitra button. Respond with a listening prompt.
+
+        The frontend should start recording audio after receiving this event.
+        When recording ends, send the audio via the audio event as normal.
+        """
+        session = get_session(request.sid)
+        emit("listening", {
+            "state": session.state,
+            "prompt": _listening_prompt(session),
+        })
+        _log.info({
+            "event": "ws_chat_start",
+            "tag": LogTag.API,
+            "sid": request.sid,
+            "state": session.state,
+        })
+
+    @sio.on("chat_stop")
+    def on_chat_stop(data):
+        """User released the Spaitra button without sending audio (canceled)."""
+        session = get_session(request.sid)
+        emit("listening_stopped", {"state": session.state})
