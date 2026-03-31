@@ -146,6 +146,14 @@ def _extract_state(payload: dict) -> tuple[str, dict]:
     return mode, context
 
 
+def _require_string(value: object, field_name: str) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    raise ValueError(f"{field_name} must be a string")
+
+
 def extract_teach_label(transcription: str) -> str | None:
     text = (transcription or "").strip()
     if not text:
@@ -358,13 +366,22 @@ def voice():
     payload = payload or {}
     mode, state_context = _extract_state(payload)
 
-    forced_type = (payload.get("request_type") or request.form.get("request_type", "")).strip().lower()
+    try:
+        forced_type = _require_string(payload.get("request_type") or request.form.get("request_type", ""), "request_type").lower()
+        provided_text = _require_string(payload.get("text") or request.form.get("text", ""), "text")
+        scan_id = _require_string(
+            payload.get("scan_id") or request.form.get("scan_id", "") or state_context.get("scan_id", ""),
+            "scan_id",
+        )
+        label = _require_string(
+            payload.get("label") or request.form.get("label", "") or state_context.get("label", ""),
+            "label",
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
     if forced_type and forced_type not in _ALLOWED_REQUEST_TYPES:
         return jsonify({"error": "invalid request_type", "request_type": forced_type}), 400
-
-    provided_text = (payload.get("text") or request.form.get("text", "")).strip()
-    scan_id = (payload.get("scan_id") or request.form.get("scan_id", "") or state_context.get("scan_id", "")).strip()
-    label = (payload.get("label") or request.form.get("label", "") or state_context.get("label", "")).strip()
 
     transcription = {"text": provided_text, "source": "client", "context_used": False}
     status = 200
