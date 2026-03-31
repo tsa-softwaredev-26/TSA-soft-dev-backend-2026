@@ -296,11 +296,15 @@ def test_hints_and_context_driven_item_query_routing():
         cleanup()
 
 
-for name, fn in [
-    ("frontend_sim:onboarding_home_idle_scan_state", test_onboarding_home_idle_and_scan_state_tracking),
-    ("frontend_sim:scan_navigation_settings_back", test_scan_navigation_settings_and_back_behavior),
-    ("frontend_sim:hints_and_context_routing", test_hints_and_context_driven_item_query_routing),
-]:
-    _runner.run(name, fn)
+def main() -> int:
+    for name, fn in [
+        ("frontend_sim:onboarding_home_idle_scan_state", test_onboarding_home_idle_and_scan_state_tracking),
+        ("frontend_sim:scan_navigation_settings_back", test_scan_navigation_settings_and_back_behavior),
+        ("frontend_sim:hints_and_context_routing", test_hints_and_context_driven_item_query_routing),
+    ]:
+        _runner.run(name, fn)
+    return _runner.summary()
 
-sys.exit(_runner.summary())
+
+if __name__ == "__main__":
+    sys.exit(main())
