@@ -19,6 +19,7 @@ If model IDs or checkpoints change, update this file and `CITATIONS.bib` in the 
 | OCR text embedding | `openai/clip-vit-base-patch32` (text encoder only) | `src/visual_memory/engine/embedding/embed_text.py` | https://github.com/openai/CLIP | https://huggingface.co/openai/clip-vit-base-patch32 | MIT |
 | Depth estimation | `apple/DepthPro` (`depth_pro.pt`) | `src/visual_memory/engine/depth/estimator.py` | https://github.com/apple/ml-depth-pro | https://huggingface.co/apple/DepthPro | Apple Machine Learning Research Model License |
 | Speech recognition | `openai/whisper-large-v3-turbo` | `src/visual_memory/engine/speech_recognition/whisper_recognizer.py` | https://github.com/openai/whisper | https://huggingface.co/openai/whisper-large-v3-turbo | MIT |
+| Vision language model | `vikhyatk/moondream2` | `src/visual_memory/engine/vlm/pipeline.py` | https://github.com/vikhyat/moondream | https://huggingface.co/vikhyatk/moondream2 | Apache-2.0 |
 | OCR service | PaddleOCR runtime models via `paddleocr` | `services/ocr/app.py` | https://github.com/PaddlePaddle/PaddleOCR | https://pypi.org/project/paddleocr/ | Apache-2.0 (framework) |
 | Query parsing LLM | `llama3.2:1b` via Ollama | `src/visual_memory/utils/ollama_utils.py` | https://github.com/ollama/ollama | https://ollama.com/library/llama3.2 | Meta Llama 3.2 license and policy terms |
 
@@ -58,11 +59,17 @@ The BibTeX entries used by this project are in:
 - OpenAI Whisper repo license is MIT.
 - Model card references arXiv:2212.04356.
 
-7) PaddleOCR
+7) Moondream2
+- GitHub repository license is Apache-2.0.
+- Model is maintained at https://github.com/vikhyat/moondream
+- Hugging Face model card: https://huggingface.co/vikhyatk/moondream2
+- No published research paper; see GitHub releases and documentation for technical details.
+
+8) PaddleOCR
 - PaddleOCR repository is Apache-2.0.
 - OCR runtime may fetch model artifacts used by PaddleOCR; verify any model-specific notices when pinning or redistributing OCR weights.
 
-8) Llama 3.2 via Ollama
+9) Llama 3.2 via Ollama
 - Ollama provides packaging and serving.
 - Underlying model terms are governed by Meta Llama license and policy pages:
   - https://www.llama.com/llama3/license/
