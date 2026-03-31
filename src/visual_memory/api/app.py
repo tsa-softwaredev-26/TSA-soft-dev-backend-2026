@@ -2,6 +2,7 @@ import os
 import sys
 
 from flask import Flask, request, jsonify
+from flask_socketio import SocketIO
 from visual_memory.utils.logger import get_logger, setup_crash_handler
 
 from visual_memory.api.routes.health import health_bp
@@ -18,6 +19,9 @@ from visual_memory.api.routes.voice import voice_bp
 
 _API_KEY = os.environ.get("API_KEY", "")
 _logger = get_logger(__name__)
+
+# Module-level SocketIO instance. init_app() is called inside create_app().
+socketio = SocketIO()
 
 
 def _validate_api_key() -> None:
@@ -53,6 +57,18 @@ def create_app():
             return
         if request.headers.get("X-API-Key") != _API_KEY:
             return jsonify({"error": "unauthorized"}), 401
+
+    socketio.init_app(
+        app,
+        async_mode="gevent",
+        cors_allowed_origins="*",
+        max_http_buffer_size=100 * 1024 * 1024,
+        logger=False,
+        engineio_logger=False,
+    )
+
+    from visual_memory.api.routes.voice_ws import register_events
+    register_events(socketio)
 
     app.register_blueprint(health_bp)
     app.register_blueprint(feedback_bp)
