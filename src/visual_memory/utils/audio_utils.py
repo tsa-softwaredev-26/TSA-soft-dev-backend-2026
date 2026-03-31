@@ -18,6 +18,8 @@ def validate_audio_format(audio_bytes: bytes) -> tuple[bool, str]:
         return True, "webm"
     if audio_bytes[:4] == _OGG_MAGIC:
         return True, "ogg"
+    if len(audio_bytes) >= 12 and audio_bytes[4:8] == b"ftyp":
+        return True, "mp4"
     if audio_bytes[:4] == _WAV_MAGIC:
         return False, "wav"
     return False, "unknown"
@@ -26,7 +28,7 @@ def validate_audio_format(audio_bytes: bytes) -> tuple[bool, str]:
 def load_audio_bytes(audio_bytes: bytes, target_sr: int = 16000) -> tuple[np.ndarray, int]:
     is_valid, fmt = validate_audio_format(audio_bytes)
     if not is_valid:
-        raise ValueError(f"unsupported audio format: {fmt}. use webm or ogg with opus codec")
+        raise ValueError(f"unsupported audio format: {fmt}. use webm, ogg, or m4a/mp4 audio")
 
     try:
         import torch
