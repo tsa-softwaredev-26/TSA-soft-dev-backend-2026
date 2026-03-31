@@ -823,3 +823,10 @@ curl -sf http://127.0.0.1:5000/retrain/status -H "X-API-Key: $KEY"
 ├── spaitra-ocr.service
 └── spaitra-tunnel.service
 ```
+
+### Optional memory cleanup cron
+Use the helper script to run zombie cleanup every 30 minutes:
+
+```bash
+*/30 * * * * /opt/spaitra/TSA-soft-dev-backend-2026/deploy/memory_cleanup.sh >> /var/log/spaitra/memory_cleanup.log 2>&1
+```
