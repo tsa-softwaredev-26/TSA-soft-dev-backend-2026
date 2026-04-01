@@ -74,9 +74,9 @@ def _listening_prompt(session: VoiceSession) -> str:
     """
     state = session.state
     if state == "onboarding_teach":
-        return "Say teach, then the item name."
+        return "Hold the top right chat button while talking to me. Say teach, then the item name."
     if state == "onboarding_await_scan":
-        return "Say scan when ready."
+        return "Press anywhere in the bottom area to scan, or hold chat and say scan."
     if state == "awaiting_location":
         return "Which room is this?"
     if state == "awaiting_image":
@@ -556,7 +556,7 @@ def _dispatch(
             _handle_open_settings(session)
             return
         if intent != "scan":
-            emit("tts", {"narration": "Say scan when you're ready.", "next_state": state})
+            emit("tts", {"narration": "Press anywhere in the bottom area to scan, or hold chat and say scan.", "next_state": state})
             return
 
     # Normal command dispatch (covers idle, onboarding_teach, focused_on_item fall-through)

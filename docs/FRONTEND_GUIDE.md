@@ -50,21 +50,21 @@ The server sends a `tts` event and a `session_state` event immediately on connec
 
 ## Sending Events
 
-### `chat_start` - user taps the Spaitra button
+### `chat_start` - user presses and holds the top-right chat button
 
 ```json
 {}
 ```
 
-Send when the user taps. The server responds with `listening`. Start recording audio after you receive `listening`.
+Send when the user presses and holds the dedicated top-right chat button. The server responds with `listening`. Start recording audio after you receive `listening`.
 
-### `chat_stop` - user cancels before speaking
+### `chat_stop` - user releases the chat button or cancels before speaking
 
 ```json
 {}
 ```
 
-Send if the user taps again to cancel before sending audio. Do not send `audio`.
+Send when the user releases the held chat button or cancels before sending audio. Do not send `audio`.
 
 ### `audio` - user finished speaking
 
@@ -101,7 +101,7 @@ Handle all of these. Ignore anything else.
 { "narration": "...", "next_state": "focused_on_item" }
 ```
 
-Speak `narration` via TTS at the stored `voice_speed`. If TTS is already playing and the user taps the Spaitra button, stop it and start recording immediately.
+Speak `narration` via TTS at the stored `voice_speed`. If TTS is already playing and the user presses the top-right chat button, stop it and start recording immediately.
 
 ### `session_state` -> update UI state
 

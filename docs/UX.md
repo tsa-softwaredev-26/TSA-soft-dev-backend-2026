@@ -188,9 +188,9 @@ This section is the editable UX dialogue source. These lines should stay aligned
 ### 2) Listening prompts (`chat_start`)
 
 - In `onboarding_teach`:
-  - "Say teach, then the item name."
+  - "Hold the top right chat button while talking to me. Say teach, then the item name."
 - In `onboarding_await_scan`:
-  - "Say scan when ready."
+  - "Press anywhere in the bottom area to scan, or hold chat and say scan."
 - In `awaiting_location`:
   - "Which room is this?"
 - In `awaiting_image`:
@@ -236,7 +236,7 @@ This section is the editable UX dialogue source. These lines should stay aligned
 - Remember with missing cached label in awaiting_image:
   - "I lost the item name. Please start again."
 - Onboarding scan mode, wrong command:
-  - "Say scan when you're ready."
+  - "Press anywhere in the bottom area to scan, or hold chat and say scan."
 - Teach image guidance:
   - "Point your phone at your {label}."
 - Navigate with no scan cache:
