@@ -56,6 +56,7 @@ class WsRecorder:
         self.client.on("connect", self._make_handler("connect"))
         self.client.on("disconnect", self._make_handler("disconnect"))
         self.client.on("tts", self._make_handler("tts"))
+        self.client.on("session_state", self._make_handler("session_state"))
         self.client.on("transcription", self._make_handler("transcription"))
         self.client.on("action_result", self._make_handler("action_result"))
         self.client.on("control", self._make_handler("control"))
@@ -337,6 +338,7 @@ def _test_onboarding_flow_skeleton(cfg: dict, assets: dict) -> None:
         marker = ws.mark()
         ws.emit_audio(assets["audio_teach_1"], image_bytes=assets["teach_image"])
         assert ws.wait_event("transcription", marker, cfg["event_timeout"]) is not None, "teach_1 missing transcription"
+        assert ws.wait_event("session_state", marker, cfg["event_timeout"]) is not None, "teach_1 missing session_state"
         assert _wait_any_event(ws, marker, cfg["event_timeout"], {"action_result", "control", "error", "tts"}) is not None
         teach_events = ws.collect_since(marker)
         _assert_event_response(teach_events, {"action_result", "control", "error", "tts"}, "teach_1")
@@ -369,6 +371,7 @@ def _test_onboarding_flow_skeleton(cfg: dict, assets: dict) -> None:
         marker = ws.mark()
         ws.emit_audio(assets["audio_scan"], image_bytes=assets["scan_image"])
         assert ws.wait_event("transcription", marker, cfg["event_timeout"]) is not None, "scan missing transcription"
+        assert ws.wait_event("session_state", marker, cfg["event_timeout"]) is not None, "scan missing session_state"
         assert _wait_any_event(ws, marker, cfg["event_timeout"], {"action_result", "control", "error", "tts"}) is not None
         scan_events = ws.collect_since(marker)
         _assert_event_response(scan_events, {"action_result", "control", "error", "tts"}, "scan")

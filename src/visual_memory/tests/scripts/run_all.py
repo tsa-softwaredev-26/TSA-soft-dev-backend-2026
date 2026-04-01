@@ -55,6 +55,7 @@ _API_TESTS = [
     ("test_health_debug",     "api",  ["health", "debug"]),
     ("test_ask_mode",         "api",  ["ask", "find"]),
     ("test_voice_ws",         "api",  ["voice", "ws"]),
+    ("test_websocket_e2e",    "api",  ["voice", "ws", "release-gate"]),
 ]
 
 _SYSTEM_TESTS = [

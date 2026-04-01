@@ -55,7 +55,23 @@ def test_voice_invalid_format():
     assert_status(resp, 400)
     data = resp.get_json()
     assert data.get("error") == "invalid audio format"
+    assert data.get("code") == "stt_invalid_format"
     assert data.get("format_detected") == "wav"
+
+
+def test_voice_too_short_code():
+    import visual_memory.api.routes.transcribe as _tr
+    from visual_memory.utils.audio_utils import AudioTooShortError
+
+    old_loader = _tr.load_audio_bytes
+    _tr.load_audio_bytes = lambda b, target_sr=16000: (_ for _ in ()).throw(AudioTooShortError("test"))
+    try:
+        resp = client.post("/voice", data=b"OggS" + b"x" * 8, content_type="audio/ogg")
+    finally:
+        _tr.load_audio_bytes = old_loader
+    assert_status(resp, 400)
+    data = resp.get_json()
+    assert data.get("code") == "stt_too_short"
 
 
 def test_voice_success_without_context():
@@ -108,11 +124,13 @@ def test_voice_model_failure():
     assert_status(resp, 500)
     data = resp.get_json()
     assert data.get("error") == "transcription failed"
+    assert data.get("code") == "stt_recognizer_failed"
 
 
 for name, fn in [
     ("voice:missing_audio", test_voice_missing_audio),
     ("voice:invalid_format", test_voice_invalid_format),
+    ("voice:too_short", test_voice_too_short_code),
     ("voice:success_no_context", test_voice_success_without_context),
     ("voice:success_with_context", test_voice_success_with_context),
     ("voice:model_failure", test_voice_model_failure),

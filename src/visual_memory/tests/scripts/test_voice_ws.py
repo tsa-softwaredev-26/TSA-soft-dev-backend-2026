@@ -110,6 +110,10 @@ def _get_events(client, event_type: str) -> list[dict]:
     return [e["args"][0] for e in client.get_received() if e["name"] == event_type]
 
 
+def _event_names(received: list[dict]) -> list[str]:
+    return [e.get("name", "") for e in received]
+
+
 def _ogg_audio() -> str:
     """Return base64-encoded minimal OGG-magic-byte audio payload."""
     import base64
@@ -262,6 +266,11 @@ def test_audio_scan_no_image_requests_image():
         control_events = [e for e in received if e["name"] == "control"]
         assert control_events, "no control event"
         assert control_events[0]["args"][0].get("action") == "request_image"
+        names = _event_names(received)
+        assert "transcription" in names, "missing transcription"
+        assert names.index("transcription") < names.index("control"), "transcription should be before control"
+        assert names.index("control") < names.index("tts"), "control should be before tts"
+        assert names.index("tts") < names.index("session_state"), "tts should be before session_state"
     finally:
         cleanup()
 
@@ -304,6 +313,32 @@ def test_audio_scan_with_image_returns_results():
 
         tts_events = [e for e in received if e["name"] == "tts"]
         assert tts_events, "no tts after scan"
+        names = _event_names(received)
+        assert "transcription" in names and "action_result" in names and "tts" in names and "session_state" in names
+        assert names.index("transcription") < names.index("action_result")
+        assert names.index("action_result") < names.index("tts")
+        assert names.index("tts") < names.index("session_state")
+    finally:
+        cleanup()
+
+
+def test_audio_too_short_returns_stable_error_code():
+    client, sio, db, stub, cleanup = _make_ws_test_app(seed_fn=_seed_items)
+    try:
+        client.connect()
+        client.get_received()
+        import visual_memory.api.routes.transcribe as _tr
+        from visual_memory.utils.audio_utils import AudioTooShortError
+
+        original_loader = _tr.load_audio_bytes
+        _tr.load_audio_bytes = lambda b, target_sr=16000: (_ for _ in ()).throw(AudioTooShortError("test"))
+        try:
+            client.emit("audio", {"audio": _ogg_audio()})
+        finally:
+            _tr.load_audio_bytes = original_loader
+        errors = _get_events(client, "error")
+        assert errors, "missing error event"
+        assert errors[-1].get("code") == "stt_too_short"
     finally:
         cleanup()
 
@@ -946,6 +981,7 @@ for name, fn in [
     ("ws:context_policy_by_state", test_transcription_context_policy_varies_by_state),
     ("ws:audio_scan_no_image", test_audio_scan_no_image_requests_image),
     ("ws:audio_scan_with_image", test_audio_scan_with_image_returns_results),
+    ("ws:audio_too_short_code", test_audio_too_short_returns_stable_error_code),
     ("ws:audio_remember_no_image", test_audio_remember_no_image_requests_image),
     ("ws:awaiting_location", test_awaiting_location_transitions_to_idle),
     ("ws:navigate_advance", test_navigate_advances_item_index),

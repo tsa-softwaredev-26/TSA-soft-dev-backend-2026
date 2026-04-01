@@ -24,7 +24,18 @@ from visual_memory.api.narration import (
     ONBOARDING_TEACH_LISTENING_PROMPT,
 )
 from visual_memory.api.routes.transcribe import transcribe_audio_bytes
-from visual_memory.api.voice_session import VoiceSession, clear_session, get_session
+from visual_memory.api.voice_session import (
+    VoiceSession,
+    apply_state_transition,
+    clear_focus,
+    clear_session,
+    focused_label,
+    focused_scan_id,
+    focused_scan_index,
+    get_session,
+    session_state_payload,
+    set_focused_match,
+)
 from visual_memory.engine.model_registry import registry
 from visual_memory.engine.vlm import get_vlm_pipeline
 from visual_memory.utils import get_logger
@@ -75,25 +86,77 @@ def _onboarding_phase_prompt(phase: str) -> str:
         return "Now ask where you left one of those items."
     return "Let's finish onboarding first."
 
-def _session_state_payload(session: VoiceSession) -> dict:
-    return {
-        "current_mode": session.state,
-        "context": {
-            "scan_id": session.context.get("scan_id", ""),
-            "label": session.context.get("current_label", ""),
-            "item_index": session.context.get("item_index"),
-            "onboarding_phase": session.context.get("onboarding_phase", ""),
-        },
-    }
-
-
 def _emit_session_state(session: VoiceSession) -> None:
-    emit("session_state", _session_state_payload(session))
+    emit("session_state", session_state_payload(session))
 
 
 def _clear_focus_context(session: VoiceSession) -> None:
-    for key in ("scan_matches", "scan_id", "item_index", "current_label"):
-        session.context.pop(key, None)
+    clear_focus(session)
+
+
+def _emit_error(code: str, message: str) -> None:
+    _log.warning({"event": "ws_error_emitted", "tag": LogTag.API, "error_code": code, "message": message})
+    emit("error", {"code": code, "message": message})
+
+
+def _emit_turn(
+    session: VoiceSession,
+    *,
+    next_state: str | None = None,
+    context_updates: dict | None = None,
+    clear_keys: tuple[str, ...] = (),
+    action_result: dict | None = None,
+    control: dict | None = None,
+    tts_narration: str | None = None,
+) -> None:
+    apply_state_transition(
+        session,
+        next_state=next_state,
+        context_updates=context_updates,
+        clear_keys=clear_keys,
+    )
+    if action_result is not None:
+        emit("action_result", action_result)
+    if control is not None:
+        emit("control", control)
+        _log.info({
+            "event": "ws_control_request_image",
+            "tag": LogTag.API,
+            "action": control.get("action"),
+            "context": control.get("context"),
+        })
+    if tts_narration is not None:
+        emit("tts", {"narration": tts_narration, "next_state": session.state})
+    _emit_session_state(session)
+
+
+def _focused_context(session: VoiceSession, *, require_match: bool = True) -> tuple[dict | None, str | None]:
+    matches = session.context.get("scan_matches", [])
+    scan_id = focused_scan_id(session)
+    label = focused_label(session)
+    if not scan_id:
+        return None, "no_scan_id"
+    if (not isinstance(matches, list) or not matches) and not require_match and label:
+        return {
+            "scan_id": scan_id,
+            "label": label,
+            "item_index": focused_scan_index(session),
+            "match": {"label": label},
+        }, None
+    if not isinstance(matches, list) or not matches:
+        return None, "no_matches"
+    idx = focused_scan_index(session)
+    if idx < 0 or idx >= len(matches):
+        return None, "index_out_of_bounds"
+    match = matches[idx] if isinstance(matches[idx], dict) else {}
+    if label and match.get("label") and label != match.get("label"):
+        return None, "label_mismatch"
+    return {
+        "scan_id": scan_id,
+        "label": str(match.get("label") or label or ""),
+        "item_index": idx,
+        "match": match,
+    }, None
 
 
 def _listening_prompt(session: VoiceSession) -> str:
@@ -229,51 +292,57 @@ def _describe_image_with_vlm(image: Image.Image, timeout_s: float) -> str:
 
 
 def _handle_idle_describe(session: VoiceSession, image_bytes: bytes, target: str | None) -> None:
-    session.context.pop("pending_action", None)
-    session.context.pop("describe_target", None)
-    session.state = "idle"
+    apply_state_transition(
+        session,
+        next_state="idle",
+        clear_keys=("pending_action", "describe_target"),
+    )
 
     perf_cfg = get_user_settings().get_performance_config()
     if not perf_cfg.vlm_enabled:
-        emit("tts", {
-            "narration": "Visual describe is disabled in fast mode. Switch to balanced or accurate.",
-            "next_state": "idle",
-        })
+        _emit_turn(
+            session,
+            tts_narration="Visual describe is disabled in fast mode. Switch to balanced or accurate.",
+        )
         return
 
     timeout_s = float(perf_cfg.vlm_timeout_seconds)
     try:
         image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     except Exception as exc:
-        emit("error", {"code": "bad_payload", "message": f"Could not decode image: {exc}"})
+        _emit_error("bad_payload", f"Could not decode image: {exc}")
+        _emit_session_state(session)
         return
 
     if target is None:
         try:
             narration = _describe_image_with_vlm(image, timeout_s)
-            emit("action_result", {"type": "ask", "data": {"action": "describe_scene", "target": None}})
-            emit("tts", {"narration": narration, "next_state": "idle"})
+            _emit_turn(
+                session,
+                action_result={"type": "ask", "data": {"action": "describe_scene", "target": None}},
+                tts_narration=narration,
+            )
         except TimeoutError:
-            emit("tts", {"narration": "That took too long. Try again.", "next_state": "idle"})
+            _emit_turn(session, tts_narration="That took too long. Try again.")
         except Exception as exc:
             _log.warning({"event": "ws_describe_scene_failed", "error": str(exc)})
-            emit("tts", {"narration": "I could not describe this view right now.", "next_state": "idle"})
+            _emit_turn(session, tts_narration="I could not describe this view right now.")
         return
 
     try:
         detection = registry.gdino_detector.detect(image, target)
     except Exception as exc:
         _log.warning({"event": "ws_describe_target_detect_failed", "target": target, "error": str(exc)})
-        emit("tts", {"narration": "I could not isolate that object right now.", "next_state": "idle"})
+        _emit_turn(session, tts_narration="I could not isolate that object right now.")
         return
 
     if not detection:
-        emit("tts", {"narration": f"I could not find {target} in this view.", "next_state": "idle"})
+        _emit_turn(session, tts_narration=f"I could not find {target} in this view.")
         return
 
     box = detection.get("box")
     if not isinstance(box, list) or len(box) != 4:
-        emit("tts", {"narration": f"I could not isolate {target} in this view.", "next_state": "idle"})
+        _emit_turn(session, tts_narration=f"I could not isolate {target} in this view.")
         return
 
     x1, y1, x2, y2 = [int(round(float(v))) for v in box]
@@ -285,13 +354,16 @@ def _handle_idle_describe(session: VoiceSession, image_bytes: bytes, target: str
 
     try:
         narration = _describe_image_with_vlm(crop, timeout_s)
-        emit("action_result", {"type": "ask", "data": {"action": "describe_scene", "target": target}})
-        emit("tts", {"narration": narration, "next_state": "idle"})
+        _emit_turn(
+            session,
+            action_result={"type": "ask", "data": {"action": "describe_scene", "target": target}},
+            tts_narration=narration,
+        )
     except TimeoutError:
-        emit("tts", {"narration": "That took too long. Try again.", "next_state": "idle"})
+        _emit_turn(session, tts_narration="That took too long. Try again.")
     except Exception as exc:
         _log.warning({"event": "ws_describe_target_vlm_failed", "target": target, "error": str(exc)})
-        emit("tts", {"narration": "I could not describe that object right now.", "next_state": "idle"})
+        _emit_turn(session, tts_narration="I could not describe that object right now.")
 
 
 def _extract_label(command_text: str, state_context: dict | None = None) -> str:
@@ -400,31 +472,30 @@ def _handle_scan(session: VoiceSession, image_bytes: bytes, focal_length: float 
     onboarding_phase = session.context.get("onboarding_phase", "")
     result, status = _run_scan(image_bytes, focal_length)
     if status != 200:
-        emit("error", {"code": "scan_failed", "message": result.get("error", "Scan failed.")})
+        _emit_error("scan_failed", result.get("error", "Scan failed."))
         return
 
     matches = result.get("matches", [])
     scan_id = result.get("scan_id", "")
     _increment(session, "scan_count")
 
-    emit("action_result", {"type": "scan", "data": result})
-
     if not matches:
         if onboarding_phase == "await_scan":
             narration = "I did not spot either item. Make sure they are in view and try again."
-            session.state = "onboarding_await_scan"
+            next_state = "onboarding_await_scan"
         else:
             narration = "I did not find anything familiar."
-            session.state = "idle"
-        emit("tts", {"narration": narration, "next_state": session.state})
+            next_state = "idle"
+        _emit_turn(
+            session,
+            next_state=next_state,
+            action_result={"type": "scan", "data": result},
+            tts_narration=narration,
+        )
         return
 
-    # Cache matches for navigate and item queries
-    session.context["scan_matches"] = matches
-    session.context["scan_id"] = scan_id
-    session.context["item_index"] = 0
-    session.context["current_label"] = matches[0].get("label", "")
-    session.state = "focused_on_item"
+    set_focused_match(session, matches, 0)
+    apply_state_transition(session, context_updates={"scan_id": scan_id})
 
     narration_parts = [m.get("narration") or m.get("label", "") for m in matches]
     combined = ". ".join(p for p in narration_parts if p)
@@ -432,27 +503,33 @@ def _handle_scan(session: VoiceSession, image_bytes: bytes, focal_length: float 
     if onboarding_phase == "await_scan":
         # Onboarding scan succeeded - move to swipe intro
         ask_label = session.context.get("onboarding_item_1", "") or (matches[0].get("label", "") if matches else "")
-        session.context["onboarding_phase"] = "ask"
-        session.context["onboarding_ask_label"] = ask_label
-        emit("tts", {
-            "narration": f"{combined}. Now swipe right to browse each item.",
-            "next_state": "focused_on_item",
-        })
+        _emit_turn(
+            session,
+            next_state="focused_on_item",
+            context_updates={"onboarding_phase": "ask", "onboarding_ask_label": ask_label},
+            action_result={"type": "scan", "data": result},
+            tts_narration=f"{combined}. Now swipe right to browse each item.",
+        )
         return
 
     hint = _get_hint(session)
     if hint:
         combined = f"{combined}. {hint}"
-    emit("tts", {"narration": combined, "next_state": "focused_on_item"})
+    _emit_turn(
+        session,
+        next_state="focused_on_item",
+        action_result={"type": "scan", "data": result},
+        tts_narration=combined,
+    )
 
 
 def _handle_remember(session: VoiceSession, image_bytes: bytes, label: str) -> None:
     onboarding_phase = session.context.get("onboarding_phase", "")
     result, status = _run_remember(image_bytes, label)
-    emit("action_result", {"type": "remember", "data": result})
 
     if status != 200:
-        emit("error", {"code": "remember_failed", "message": result.get("error", "Remember failed.")})
+        _emit_error("remember_failed", result.get("error", "Remember failed."))
+        _emit_turn(session, action_result={"type": "remember", "data": result})
         return
 
     success = isinstance(result, dict) and result.get("success", False)
@@ -467,30 +544,26 @@ def _handle_remember(session: VoiceSession, image_bytes: bytes, label: str) -> N
             narration = "Hold steady and try again."
         else:
             narration = "Could not detect the item. Try a different angle or better lighting."
-        emit("tts", {"narration": narration, "next_state": session.state})
+        _emit_turn(
+            session,
+            action_result={"type": "remember", "data": result},
+            tts_narration=narration,
+        )
         return
 
     _increment(session, "teach_count")
-    session.context["label"] = label
-    session.state = "awaiting_location"
-
+    updates = {"label": label}
     if onboarding_phase == "teach_1":
-        session.context["onboarding_item_1"] = label
-        emit("tts", {
-            "narration": f"{label.capitalize()} saved. Which room is this?",
-            "next_state": "awaiting_location",
-        })
+        updates["onboarding_item_1"] = label
     elif onboarding_phase == "teach_2":
-        session.context["onboarding_item_2"] = label
-        emit("tts", {
-            "narration": f"{label.capitalize()} saved. Which room is this?",
-            "next_state": "awaiting_location",
-        })
-    else:
-        emit("tts", {
-            "narration": f"{label.capitalize()} saved. Which room is this?",
-            "next_state": "awaiting_location",
-        })
+        updates["onboarding_item_2"] = label
+    _emit_turn(
+        session,
+        next_state="awaiting_location",
+        context_updates=updates,
+        action_result={"type": "remember", "data": result},
+        tts_narration=f"{label.capitalize()} saved. Which room is this?",
+    )
 
 
 def _handle_location(session: VoiceSession, command_text: str) -> None:
@@ -499,13 +572,17 @@ def _handle_location(session: VoiceSession, command_text: str) -> None:
     label = session.context.get("label", "")
     raw = (command_text or "").strip().lower()
     if any(t in raw for t in ("scan", "teach", "remember", "find", "where", "settings", "go back", "home")):
-        emit("tts", {"narration": "Please tell me the room first, like kitchen or bedroom.", "next_state": "awaiting_location"})
+        _emit_turn(
+            session,
+            next_state="awaiting_location",
+            tts_narration="Please tell me the room first, like kitchen or bedroom.",
+        )
         return
 
     location = _normalize_room_name(command_text)
 
     if not location:
-        emit("tts", {"narration": "What room is this?", "next_state": "awaiting_location"})
+        _emit_turn(session, next_state="awaiting_location", tts_narration="What room is this?")
         return
 
     if label:
@@ -516,37 +593,39 @@ def _handle_location(session: VoiceSession, command_text: str) -> None:
         except Exception as exc:
             _log.warning({"event": "ws_sighting_failed", "tag": LogTag.API, "error": str(exc)})
 
-    emit("action_result", {"type": "set_location", "data": {"label": label, "location": location}})
-
     if onboarding_phase == "teach_1":
-        # First item done - now teach second
-        session.state = "onboarding_teach"
-        session.context["onboarding_phase"] = "teach_2"
-        session.context.pop("label", None)
-        emit("tts", {
-            "narration": f"Got it, {label} in the {location}. Now teach me the second item. Say its name.",
-            "next_state": "onboarding_teach",
-        })
+        _emit_turn(
+            session,
+            next_state="onboarding_teach",
+            context_updates={"onboarding_phase": "teach_2"},
+            clear_keys=("label",),
+            action_result={"type": "set_location", "data": {"label": label, "location": location}},
+            tts_narration=f"Got it, {label} in the {location}. Now teach me the second item. Say its name.",
+        )
     elif onboarding_phase == "teach_2":
-        # Second item done - ready to scan
-        session.state = "onboarding_await_scan"
-        session.context["onboarding_phase"] = "await_scan"
-        session.context.pop("label", None)
-        emit("tts", {
-            "narration": (
+        _emit_turn(
+            session,
+            next_state="onboarding_await_scan",
+            context_updates={"onboarding_phase": "await_scan"},
+            clear_keys=("label",),
+            action_result={"type": "set_location", "data": {"label": label, "location": location}},
+            tts_narration=(
                 f"Got it, {label} in the {location}. "
                 "Great. Place both items somewhere in the room, then say scan."
             ),
-            "next_state": "onboarding_await_scan",
-        })
+        )
     else:
-        session.state = "idle"
-        session.context.pop("label", None)
         hint = _get_hint(session)
         narration = f"Got it, {label} in the {location}." if label else f"Got it, {location}."
         if hint:
             narration = f"{narration} {hint}"
-        emit("tts", {"narration": narration, "next_state": "idle"})
+        _emit_turn(
+            session,
+            next_state="idle",
+            clear_keys=("label",),
+            action_result={"type": "set_location", "data": {"label": label, "location": location}},
+            tts_narration=narration,
+        )
 
 
 def _handle_confirmation(session: VoiceSession, command_text: str) -> None:
@@ -554,7 +633,7 @@ def _handle_confirmation(session: VoiceSession, command_text: str) -> None:
     confirmed = any(t in q for t in ("yes", "yeah", "yep", "confirm", "do it", "correct", "sure"))
     denied = any(t in q for t in ("no", "nope", "cancel", "stop", "never mind"))
     pending = session.context.pop("pending_confirmation", None)
-    session.state = "idle"
+    apply_state_transition(session, next_state="idle")
 
     if confirmed and not denied and pending:
         action = pending.get("action")
@@ -564,80 +643,131 @@ def _handle_confirmation(session: VoiceSession, command_text: str) -> None:
                 deleted = get_database().delete_items_by_label(lbl)
                 get_scan_pipeline().reload_database()
                 if deleted > 0:
-                    emit("tts", {"narration": f"{lbl.capitalize()} deleted.", "next_state": "idle"})
+                    _emit_turn(session, tts_narration=f"{lbl.capitalize()} deleted.")
                 else:
-                    emit("tts", {"narration": "I could not find that item to delete.", "next_state": "idle"})
+                    _emit_turn(session, tts_narration="I could not find that item to delete.")
             except Exception:
-                emit("tts", {"narration": "Could not delete the item.", "next_state": "idle"})
+                _emit_turn(session, tts_narration="Could not delete the item.")
         else:
-            emit("tts", {"narration": "Done.", "next_state": "idle"})
+            _emit_turn(session, tts_narration="Done.")
     else:
-        emit("tts", {"narration": "Canceled.", "next_state": "idle"})
+        _emit_turn(session, tts_narration="Canceled.")
 
 
 def _handle_item_query(session: VoiceSession, command_text: str) -> None:
     from visual_memory.api.routes.item_ask import process_item_ask_request
-    scan_id = session.context.get("scan_id", "")
-    label = session.context.get("current_label", "")
+    ctx, reason = _focused_context(session)
+    if ctx is None:
+        _emit_turn(
+            session,
+            next_state="idle",
+            clear_keys=("scan_matches", "scan_id", "item_index", "current_label"),
+            tts_narration="Focused item context expired. Please scan again.",
+        )
+        _log.warning({"event": "ws_focus_fallback", "tag": LogTag.API, "reason": reason})
+        return
+    scan_id = ctx["scan_id"]
+    label = ctx["label"]
     state_ctx = build_state_contract(mode=session.state, context=session.context)
     result, status = process_item_ask_request(
         scan_id=scan_id, label=label, query=command_text, state_context=state_ctx
     )
     narration = result.get("narration", "") if isinstance(result, dict) else ""
-    emit("action_result", {"type": "item_ask", "data": result})
-    emit("tts", {"narration": narration or "Done.", "next_state": session.state})
+    _emit_turn(
+        session,
+        next_state="focused_on_item",
+        action_result={"type": "item_ask", "data": result},
+        tts_narration=narration or "Done.",
+    )
 
 
 def _handle_feedback(session: VoiceSession) -> None:
-    scan_id = session.context.get("scan_id", "")
-    label = session.context.get("current_label", "")
-    if not scan_id or not label:
-        emit("tts", {"narration": "No active scan to give feedback on.", "next_state": session.state})
+    ctx, reason = _focused_context(session, require_match=False)
+    if ctx is None:
+        _emit_turn(session, tts_narration="No active scan to give feedback on.")
+        _log.warning({"event": "ws_focus_fallback", "tag": LogTag.API, "reason": reason})
         return
+    scan_id = ctx["scan_id"]
+    label = ctx["label"]
     try:
         embeddings = get_scan_pipeline().get_cached_embeddings(scan_id, label)
         if isinstance(embeddings, (tuple, list)) and len(embeddings) == 2:
             anchor_emb, query_emb = embeddings
             get_feedback_store().record_negative(anchor_emb, query_emb, label)
         else:
-            emit("error", {"code": "cache_expired", "message": "Feedback expired. Please rescan."})
+            _emit_error("cache_expired", "Feedback expired. Please rescan.")
             return
     except Exception as exc:
         _log.warning({"event": "ws_feedback_failed", "tag": LogTag.API, "error": str(exc)})
-    emit("tts", {"narration": "Got it, noted as incorrect.", "next_state": session.state})
+    _emit_turn(session, tts_narration="Got it, noted as incorrect.")
 
 
 def _handle_positive_feedback(session: VoiceSession) -> None:
-    scan_id = session.context.get("scan_id", "")
-    label = session.context.get("current_label", "")
-    if not scan_id or not label:
-        emit("tts", {"narration": "No active scan to give feedback on.", "next_state": session.state})
+    ctx, reason = _focused_context(session, require_match=False)
+    if ctx is None:
+        _emit_turn(session, tts_narration="No active scan to give feedback on.")
+        _log.warning({"event": "ws_focus_fallback", "tag": LogTag.API, "reason": reason})
         return
+    scan_id = ctx["scan_id"]
+    label = ctx["label"]
     try:
         embeddings = get_scan_pipeline().get_cached_embeddings(scan_id, label)
         if isinstance(embeddings, (tuple, list)) and len(embeddings) == 2:
             anchor_emb, query_emb = embeddings
             get_feedback_store().record_positive(anchor_emb, query_emb, label)
         else:
-            emit("error", {"code": "cache_expired", "message": "Feedback expired. Please rescan."})
+            _emit_error("cache_expired", "Feedback expired. Please rescan.")
             return
     except Exception as exc:
         _log.warning({"event": "ws_positive_feedback_failed", "tag": LogTag.API, "error": str(exc)})
-    emit("tts", {"narration": "Got it, noted as correct.", "next_state": session.state})
+    _emit_turn(session, tts_narration="Got it, noted as correct.")
 
 
 def _handle_navigate_back(session: VoiceSession) -> None:
-    _clear_focus_context(session)
-    session.state = "idle"
-    emit("action_result", {"type": "navigate_back", "data": {"action": "navigate_back"}})
-    emit("tts", {"narration": "Going back.", "next_state": "idle"})
+    _emit_turn(
+        session,
+        next_state="idle",
+        clear_keys=("scan_matches", "scan_id", "item_index", "current_label"),
+        action_result={"type": "navigate_back", "data": {"action": "navigate_back"}},
+        tts_narration="Going back.",
+    )
 
 
 def _handle_open_settings(session: VoiceSession) -> None:
-    _clear_focus_context(session)
-    session.state = "idle"
-    emit("action_result", {"type": "open_settings", "data": {"action": "open_settings"}})
-    emit("tts", {"narration": "Opening settings.", "next_state": "idle"})
+    _emit_turn(
+        session,
+        next_state="idle",
+        clear_keys=("scan_matches", "scan_id", "item_index", "current_label"),
+        action_result={"type": "open_settings", "data": {"action": "open_settings"}},
+        tts_narration="Opening settings.",
+    )
+
+
+def _check_turn_policy(session: VoiceSession, intent: str, onboarding_phase: str, state_contract: dict) -> bool:
+    if onboarding_phase in {"teach_1", "teach_2"} and intent != "remember":
+        _emit_turn(session, tts_narration=_onboarding_phase_prompt(onboarding_phase))
+        return False
+    if onboarding_phase == "await_scan" and intent != "scan":
+        _emit_turn(session, tts_narration=_onboarding_phase_prompt(onboarding_phase))
+        return False
+    if onboarding_phase == "ask":
+        _emit_turn(session, tts_narration=_onboarding_phase_prompt(onboarding_phase))
+        return False
+    if onboarding_phase == "ask_prompted" and intent not in {"find", "ask"}:
+        _emit_turn(session, tts_narration=_onboarding_phase_prompt(onboarding_phase))
+        return False
+    if session.state == "onboarding_await_scan" and intent != "scan":
+        _emit_turn(session, next_state=session.state, tts_narration=ONBOARDING_AWAIT_SCAN_PROMPT)
+        return False
+    if session.state == "focused_on_item" and intent == "remember":
+        guidance = (state_contract.get("guidance") or {}).get("remember")
+        _emit_turn(
+            session,
+            next_state=session.state,
+            tts_narration=guidance or "Return home to teach a new item. Say go back, then teach.",
+        )
+        return False
+    return True
 
 
 # Main dispatch
@@ -663,8 +793,12 @@ def _dispatch(
     # awaiting_image: run the pending action with the supplied image
     if state == "awaiting_image":
         if image_bytes is None:
-            emit("control", {"action": "request_image"})
-            emit("tts", {"narration": "Still waiting for an image.", "next_state": state})
+            _emit_turn(
+                session,
+                next_state="awaiting_image",
+                control={"action": "request_image"},
+                tts_narration="Still waiting for an image.",
+            )
             return
         pending = session.context.get("pending_action")
         if pending == "scan":
@@ -672,8 +806,7 @@ def _dispatch(
         elif pending == "remember":
             label = session.context.get("label", "")
             if not label:
-                session.state = "idle"
-                emit("tts", {"narration": "I lost the item name. Please start again.", "next_state": "idle"})
+                _emit_turn(session, next_state="idle", tts_narration="I lost the item name. Please start again.")
                 return
             _handle_remember(session, image_bytes, label)
         elif pending in {"describe_scene", "describe_target"}:
@@ -682,8 +815,8 @@ def _dispatch(
                 target = None
             _handle_idle_describe(session, image_bytes, target)
         else:
-            session.state = "idle"
-            emit("error", {"code": "bad_state", "message": "Unknown pending action."})
+            apply_state_transition(session, next_state="idle")
+            _emit_error("bad_state", "Unknown pending action.")
         return
 
     # awaiting_location: treat all input as a room name
@@ -700,25 +833,8 @@ def _dispatch(
     state_contract = build_state_contract(mode=session.state, context=session.context)
     onboarding_phase = str(session.context.get("onboarding_phase", "") or "")
 
-    # Strict onboarding progression lock
-    if onboarding_phase in {"teach_1", "teach_2"}:
-        if intent != "remember":
-            emit("tts", {"narration": _onboarding_phase_prompt(onboarding_phase), "next_state": session.state})
-            return
-
-    if onboarding_phase == "await_scan":
-        if intent != "scan":
-            emit("tts", {"narration": _onboarding_phase_prompt(onboarding_phase), "next_state": session.state})
-            return
-
-    if onboarding_phase == "ask":
-        emit("tts", {"narration": _onboarding_phase_prompt(onboarding_phase), "next_state": session.state})
+    if not _check_turn_policy(session, intent, onboarding_phase, state_contract):
         return
-
-    if onboarding_phase == "ask_prompted":
-        if intent not in {"find", "ask"}:
-            emit("tts", {"narration": _onboarding_phase_prompt(onboarding_phase), "next_state": session.state})
-            return
 
     # focused_on_item: intercept item-specific queries and feedback; rest falls through
     if state == "focused_on_item":
@@ -740,29 +856,19 @@ def _dispatch(
         is_describe, describe_target = _extract_idle_describe_target(command_text)
         if is_describe:
             if image_bytes is None:
-                session.context["pending_action"] = "describe_scene" if describe_target is None else "describe_target"
+                updates = {"pending_action": "describe_scene" if describe_target is None else "describe_target"}
                 if describe_target is not None:
-                    session.context["describe_target"] = describe_target
-                session.state = "awaiting_image"
-                emit("control", {"action": "request_image", "context": "describe"})
-                emit("tts", {"narration": "Hold your phone up.", "next_state": "awaiting_image"})
+                    updates["describe_target"] = describe_target
+                _emit_turn(
+                    session,
+                    next_state="awaiting_image",
+                    context_updates=updates,
+                    control={"action": "request_image", "context": "describe"},
+                    tts_narration="Hold your phone up.",
+                )
                 return
             _handle_idle_describe(session, image_bytes, describe_target)
             return
-
-    # onboarding_await_scan: only accept scan and explicit navigation commands
-    if state == "onboarding_await_scan":
-        if intent != "scan":
-            emit("tts", {"narration": ONBOARDING_AWAIT_SCAN_PROMPT, "next_state": state})
-            return
-
-    if state == "focused_on_item" and intent == "remember":
-        guidance = (state_contract.get("guidance") or {}).get("remember")
-        emit("tts", {
-            "narration": guidance or "Return home to teach a new item. Say go back, then teach.",
-            "next_state": state,
-        })
-        return
 
     # Normal command dispatch (covers idle, onboarding_teach, focused_on_item fall-through)
     if intent == "navigate_back":
@@ -774,25 +880,27 @@ def _dispatch(
 
     if intent == "scan":
         if image_bytes is None:
-            session.context["pending_action"] = "scan"
-            session.state = "awaiting_image"
-            emit("control", {"action": "request_image", "context": "scan"})
-            emit("tts", {"narration": "Hold your phone up.", "next_state": "awaiting_image"})
+            _emit_turn(
+                session,
+                next_state="awaiting_image",
+                context_updates={"pending_action": "scan"},
+                control={"action": "request_image", "context": "scan"},
+                tts_narration="Hold your phone up.",
+            )
         else:
             _handle_scan(session, image_bytes, focal_length)
 
     elif intent == "remember":
         state_ctx = build_state_contract(mode=session.state, context=session.context)
         label = _extract_label(command_text, state_context=state_ctx)
-        session.context["label"] = label
         if image_bytes is None:
-            session.context["pending_action"] = "remember"
-            session.state = "awaiting_image"
-            emit("control", {"action": "request_image"})
-            emit("tts", {
-                "narration": f"Point your phone at your {label}.",
-                "next_state": "awaiting_image",
-            })
+            _emit_turn(
+                session,
+                next_state="awaiting_image",
+                context_updates={"pending_action": "remember", "label": label},
+                control={"action": "request_image"},
+                tts_narration=f"Point your phone at your {label}.",
+            )
         else:
             _handle_remember(session, image_bytes, label)
 
@@ -800,37 +908,51 @@ def _dispatch(
         state_ctx = build_state_contract(mode=session.state, context=session.context)
         result, status = _run_find(command_text, state_context=state_ctx)
         narration = result.get("narration", "") if isinstance(result, dict) else ""
-        emit("action_result", {"type": "find", "data": result})
         # Onboarding ask-demo completion
         if session.context.get("onboarding_phase") == "ask_prompted":
-            session.context["onboarding_phase"] = ""
-            session.state = "idle"
             hint = _get_hint(session)
             completion = "You are all set. Say scan, teach, or ask anything."
             if hint:
                 completion = f"{completion} {hint}"
-            emit("tts", {"narration": f"{narration} {completion}".strip(), "next_state": "idle"})
+            _emit_turn(
+                session,
+                next_state="idle",
+                context_updates={"onboarding_phase": ""},
+                action_result={"type": "find", "data": result},
+                tts_narration=f"{narration} {completion}".strip(),
+            )
         else:
-            session.state = "idle"
-            emit("tts", {"narration": narration or "Nothing found.", "next_state": "idle"})
+            _emit_turn(
+                session,
+                next_state="idle",
+                action_result={"type": "find", "data": result},
+                tts_narration=narration or "Nothing found.",
+            )
 
     else:
         from visual_memory.api.routes.ask import process_ask_query
         state_ctx = build_state_contract(mode=session.state, context=session.context)
         result, status = process_ask_query(command_text, state_context=state_ctx)
         narration = result.get("narration", "") if isinstance(result, dict) else ""
-        emit("action_result", {"type": "ask", "data": result})
         if session.context.get("onboarding_phase") == "ask_prompted":
-            session.context["onboarding_phase"] = ""
-            session.state = "idle"
             hint = _get_hint(session)
             completion = "You are all set. Say scan, teach, or ask anything."
             if hint:
                 completion = f"{completion} {hint}"
-            emit("tts", {"narration": f"{narration} {completion}".strip(), "next_state": "idle"})
+            _emit_turn(
+                session,
+                next_state="idle",
+                context_updates={"onboarding_phase": ""},
+                action_result={"type": "ask", "data": result},
+                tts_narration=f"{narration} {completion}".strip(),
+            )
         else:
-            session.state = "idle"
-            emit("tts", {"narration": narration or "Not sure about that.", "next_state": "idle"})
+            _emit_turn(
+                session,
+                next_state="idle",
+                action_result={"type": "ask", "data": result},
+                tts_narration=narration or "Not sure about that.",
+            )
 
 
 # Event registration
@@ -855,30 +977,29 @@ def register_events(sio: SocketIO) -> None:
             item_count = -1
 
         if item_count == 0:
-            session.state = "onboarding_teach"
-            session.context["onboarding_phase"] = "teach_1"
-            emit("tts", {
-                "narration": (
+            _emit_turn(
+                session,
+                next_state="onboarding_teach",
+                context_updates={"onboarding_phase": "teach_1"},
+                tts_narration=(
                     "Welcome to Spaitra. I remember where your things are. "
                     "Grab two items near you and let's start. "
                     "Say teach, then the name of the first item."
                 ),
-                "next_state": "onboarding_teach",
-            })
+            )
         else:
-            session.state = "idle"
-            emit("tts", {"narration": "Ready.", "next_state": "idle"})
-        _emit_session_state(session)
+            _emit_turn(session, next_state="idle", tts_narration="Ready.")
 
     @sio.on("disconnect")
     def on_disconnect():
         _log.info({"event": "ws_disconnect", "tag": LogTag.API, "sid": request.sid})
+        _log.info({"event": "ws_reconnect_rate_probe", "tag": LogTag.PERF, "sid": request.sid})
         clear_session(request.sid)
 
     @sio.on("audio")
     def on_audio(data):
         if not isinstance(data, dict):
-            emit("error", {"code": "bad_payload", "message": "Expected JSON object."})
+            _emit_error("bad_payload", "Expected JSON object.")
             return
 
         session = get_session(request.sid)
@@ -886,18 +1007,18 @@ def register_events(sio: SocketIO) -> None:
 
         audio_bytes, audio_decode_error = _decode_audio(data.get("audio", b""))
         if audio_decode_error is not None:
-            emit("error", {"code": "bad_payload", "message": "Invalid audio payload."})
+            _emit_error("bad_payload", "Invalid audio payload.")
             return
         raw_image = data.get("image")
         image_bytes, image_decode_error = _decode_image(raw_image)
         if image_decode_error is not None:
-            emit("error", {"code": "bad_payload", "message": "Invalid image payload."})
+            _emit_error("bad_payload", "Invalid image payload.")
             return
         if len(audio_bytes) > _MAX_WS_MEDIA_BYTES:
-            emit("error", {"code": "bad_payload", "message": "Audio payload exceeds 50MB limit."})
+            _emit_error("bad_payload", "Audio payload exceeds 50MB limit.")
             return
         if image_bytes is not None and len(image_bytes) > _MAX_WS_MEDIA_BYTES:
-            emit("error", {"code": "bad_payload", "message": "Image payload exceeds 50MB limit."})
+            _emit_error("bad_payload", "Image payload exceeds 50MB limit.")
             return
         focal_length = data.get("focal_length_px")
         if isinstance(focal_length, str):
@@ -916,10 +1037,10 @@ def register_events(sio: SocketIO) -> None:
             },
         )
         if t_status != 200:
-            emit("error", {
-                "code": "transcription_failed",
-                "message": transcription.get("error", "Transcription failed."),
-            })
+            _emit_error(
+                str(transcription.get("code") or "transcription_failed"),
+                transcription.get("message") or transcription.get("error", "Transcription failed."),
+            )
             return
 
         command_text = (transcription.get("text") or "").strip()
@@ -930,28 +1051,44 @@ def register_events(sio: SocketIO) -> None:
             "context_policy": transcription.get("context_policy"),
         })
 
+        if transcription.get("decode_ms") is not None:
+            _log.info({
+                "event": "ws_audio_decode_latency",
+                "tag": LogTag.PERF,
+                "sid": session.sid,
+                "decode_ms": transcription.get("decode_ms"),
+            })
+        if transcription.get("transcription_ms") is not None:
+            _log.info({
+                "event": "ws_transcription_latency",
+                "tag": LogTag.PERF,
+                "sid": session.sid,
+                "transcription_ms": transcription.get("transcription_ms"),
+            })
+
         _dispatch(session, command_text, image_bytes, focal_length)
-        _emit_session_state(session)
 
         _log.info({
             "event": "ws_audio_handled",
             "tag": LogTag.API,
             "sid": session.sid,
             "state_after": session.state,
+            "error_code": None,
             "duration_ms": round((time.monotonic() - t0) * 1000),
+            "turn_total_latency_ms": round((time.monotonic() - t0) * 1000),
         })
 
     @sio.on("navigate")
     def on_navigate(data):
         if not isinstance(data, dict):
-            emit("error", {"code": "bad_payload", "message": "Expected JSON object."})
+            _emit_error("bad_payload", "Expected JSON object.")
             return
 
         session = get_session(request.sid)
         matches = session.context.get("scan_matches", [])
 
         if not matches:
-            emit("tts", {"narration": "No scan results to navigate.", "next_state": session.state})
+            _emit_turn(session, tts_narration="No scan results to navigate.")
             return
 
         direction = (data.get("direction") or "next").lower()
@@ -967,29 +1104,30 @@ def register_events(sio: SocketIO) -> None:
             except (TypeError, ValueError):
                 new_index = current
 
-        session.context["item_index"] = new_index
-        match = matches[new_index]
-        session.context["current_label"] = match.get("label", "")
+        match = set_focused_match(session, matches, new_index)
         narration = match.get("narration") or match.get("label") or "Item."
-
-        emit("action_result", {"type": "item_focus", "data": match})
 
         # Onboarding: after first swipe cycle, prompt the ask demo
         if session.context.get("onboarding_phase") == "ask" and new_index >= len(matches) - 1:
             ask_label = session.context.get("onboarding_ask_label", "")
-            session.context["onboarding_phase"] = "ask_prompted"
-            emit("tts", {
-                "narration": (
+            _emit_turn(
+                session,
+                next_state="focused_on_item",
+                context_updates={"onboarding_phase": "ask_prompted"},
+                action_result={"type": "item_focus", "data": match},
+                tts_narration=(
                     f"{narration}. Swipe left to go back. That is how scan works. "
                     f"Now ask me where you left your {ask_label or 'first item'}."
                 ),
-                "next_state": "focused_on_item",
-            })
-            _emit_session_state(session)
+            )
             return
 
-        emit("tts", {"narration": narration, "next_state": "focused_on_item"})
-        _emit_session_state(session)
+        _emit_turn(
+            session,
+            next_state="focused_on_item",
+            action_result={"type": "item_focus", "data": match},
+            tts_narration=narration,
+        )
 
         _log.info({
             "event": "ws_navigate",
