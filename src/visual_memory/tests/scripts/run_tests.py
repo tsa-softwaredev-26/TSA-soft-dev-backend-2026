@@ -3,7 +3,7 @@ Integration test runner for the visual_memory pipelines.
 
 Flags (env vars, set before running):
     DEPTH=1    load and test DepthEstimator (default off - loads 2GB model)
-    FAST=1     disable scan OCR (2 OCRs total instead of 8, ~10x faster)
+    FAST=1     disable scan OCR (2 OCRs total instead of 9, ~10x faster)
     VERBOSE=1  show OCR text diff and log entries
 
 Run:

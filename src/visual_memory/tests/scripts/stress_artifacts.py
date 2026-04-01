@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Iterable
 
 _ROOT = Path(__file__).resolve().parents[4]
-_ARTIFACT_DIR = _ROOT / "benchmarks" / "baslines" / "stress_tests"
+_ARTIFACT_DIR = _ROOT / "benchmarks" / "baselines" / "stress_tests"
 _RECOMMENDATIONS = _ARTIFACT_DIR / "recommendations.txt"
 _FAILURE_MODES = _ARTIFACT_DIR / "failure_modes_report.json"
 

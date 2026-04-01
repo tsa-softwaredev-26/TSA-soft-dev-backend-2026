@@ -1,8 +1,8 @@
 """
 YOLOE object detection module.
 
-This module provides a wrapper for YOLOE object detection with both prompt-based
-and prompt-free detection modes.
+This module wraps the prompt-free YOLOE detector used by ScanPipeline.
+Prompt-based detection is handled by GroundingDINO in prompt_based.py.
 """
 from __future__ import annotations
 
@@ -25,10 +25,6 @@ class YoloeDetector:
     - prompt-free model: ALL detections with set confidence & iou (intersection) thresholds,
       not very accurate class labels; breadth>accuracy of detections for similarity
       algorithm to handle in depth since its quite fast
-
-    - prompt-based model: (tried to do with "household object" prompt but unused right now)
-      BEST detection only with prompt. Grounding DINO works better for prompt-based,
-      able to handle more abstract concepts
     """
 
     def __init__(

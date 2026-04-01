@@ -168,7 +168,7 @@ src/visual_memory/
 │
 ├── benchmarks/
 │   ├── full_benchmark.py              # multi-stage system benchmark (retrieval, detection, depth)
-│   ├── format_results.py              # reads results.json, writes BENCHMARKS.md at root
+│   ├── format_results.py              # reads results.csv (+ optional results.json metadata), writes BENCHMARKS.md
 │   ├── check_dataset.py               # pre-flight: verify all 120 images are in benchmarks/images/
 │   └── redact_receipt.py              # gitignored - OCR-based receipt redaction (personal tool)
 │
@@ -191,7 +191,7 @@ src/visual_memory/
 │       ├── items.py                    # GET /items, DELETE /items/<label>, POST /items/<label>/rename
 │       ├── sightings.py               # POST /sightings - user-confirmed location update
 │       ├── crop.py                    # GET /crop - fetch cropped image from cached scan
-│       └── debug.py                   # GET /debug/state, POST /debug/echo, POST /debug/image, GET /debug/db, GET /debug/logs, GET /debug/perf, GET /debug/test-remember, GET /debug/test-scan, POST /debug/wipe, PATCH /debug/config
+│       └── debug.py                   # Optional debug endpoints; enabled only when ENABLE_DEBUG_ROUTES=1
 └── tests/                             # Test scripts + test data
     ├── scripts/                        # Runnable .py test scripts
     ├── input_images/                   # Object test images
@@ -316,7 +316,7 @@ Multi-image (POST /remember with `images[]`):
 - Single dataclass, all ML tuning params in one place
 - Detection: `grounding_dino_model`, `box_threshold`, `text_threshold`, `yoloe_confidence`, `yoloe_iou`
 - Embedding: `image_embedder_model` (`dinov3-vitl16`), `embedder_model` (`clip-vit-base-patch32`)
-- Matching: `similarity_threshold` (0.2), `dedup_iou_threshold` (0.5), `narration_high_confidence` (0.6)
+- Matching: `similarity_threshold` (0.14), `dedup_iou_threshold` (0.5), `narration_high_confidence` (0.6)
 - OCR: `ocr_backend` ("http"), `ocr_service_url`, `ocr_health_url` (derived from ocr_service_url if empty), `ocr_timeout_seconds`, `ocr_languages`, `ocr_min_confidence` (0.3), `text_similarity_threshold` (0.4)
 - Toggles (env-overridable): `enable_depth` (`ENABLE_DEPTH`), `enable_ocr` (`ENABLE_OCR`), `enable_dedup` (`ENABLE_DEDUP`)
 - Personalization: `projection_head_path` ("models/projection_head.pt"), `projection_head_dim` (1536)
@@ -397,7 +397,7 @@ Multi-image (POST /remember with `images[]`):
 
 ### `utils/quality_utils.py`
 - `mean_luminance(image: PIL.Image) -> float` - mean grayscale pixel value (0-255); used by both pipelines for darkness detection
-- `estimate_text_likelihood(image: PIL.Image) -> float` - normalized Laplacian edge density on a 128x128 greyscale resize; returns 0.0-1.0; ~2ms; used as OCR pre-check to skip HTTP OCR calls on plain-color crops (threshold `ocr_text_likelihood_threshold=0.10` in settings.py)
+- `estimate_text_likelihood(image: PIL.Image) -> float` - normalized Laplacian edge density on a 128x128 greyscale resize; returns 0.0-1.0; ~2ms; used as OCR pre-check to skip HTTP OCR calls on plain-color crops (threshold `ocr_text_likelihood_threshold=0.30` in settings.py)
 - Pure numpy/PIL - no model loading, no extra deps
 - Shared between RememberPipeline and ScanPipeline via `utils` package export
 
@@ -693,7 +693,7 @@ Single worker is required - model state is process-local.
 
 Models are loaded once at startup via `warm_all()` in `create_app()`. Upload cap: 50MB.
 
-**Endpoints:** GET /health, POST /remember, POST /scan, POST /feedback, POST /retrain, GET /retrain/status, GET /settings, PATCH /settings, GET /user-settings, PATCH /user-settings, GET /find, POST /ask, POST /item/ask, GET /crop, GET /items, DELETE /items/<label>, POST /items/<label>/rename, POST /sightings, GET /debug/state, POST /debug/echo, POST /debug/image, GET /debug/db, GET /debug/logs, GET /debug/perf, GET /debug/test-remember, GET /debug/test-scan, POST /debug/wipe, PATCH /debug/config.
+**Endpoints:** GET /health, POST /remember, POST /scan, POST /feedback, POST /retrain, GET /retrain/status, GET /settings, PATCH /settings, GET /user-settings, PATCH /user-settings, GET /find, POST /ask, POST /item/ask, GET /crop, GET /items, DELETE /items/<label>, POST /items/<label>/rename, POST /sightings. Optional debug endpoints are available only when `ENABLE_DEBUG_ROUTES=1`.
 
 See `UX.md` for current onboarding narration and state-driven UX behavior.
 
@@ -733,7 +733,8 @@ Pipeline uses YOLOE crops before embedding - see pipeline scan test below.
 | crop 2    | 0.3058     |
 | crop 3    | 0.2385     |
 
-All 3 crops above `similarity_threshold=0.2`. Threshold kept at **0.2**.
+All 3 crops above `similarity_threshold=0.2` in this benchmark slice.
+Runtime default is **0.14** in `config/settings.py`.
 
 **Section B - CLIPText similarity on OCR ground truth (text_demo/ images)**
 
@@ -745,7 +746,8 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 
 - Similar-text cluster (marker/pen/pencil/typed): similarity 0.78-0.95
 - Separate cluster (random_printed_notes, malarkey): similarity 0.18-0.30 vs similar-text cluster
-- Threshold 0.2 separates clusters cleanly.
+- Benchmark note: 0.2 separates these clusters cleanly.
+  Runtime default remains 0.14 for broader recall.
 
 ---
 
