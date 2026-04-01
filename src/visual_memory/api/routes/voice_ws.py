@@ -15,6 +15,10 @@ from visual_memory.api.pipelines import (
     get_feedback_store,
     get_scan_pipeline,
 )
+from visual_memory.api.narration import (
+    ONBOARDING_AWAIT_SCAN_PROMPT,
+    ONBOARDING_TEACH_LISTENING_PROMPT,
+)
 from visual_memory.api.routes.transcribe import transcribe_audio_bytes
 from visual_memory.api.voice_session import VoiceSession, clear_session, get_session
 from visual_memory.utils import get_logger
@@ -74,9 +78,9 @@ def _listening_prompt(session: VoiceSession) -> str:
     """
     state = session.state
     if state == "onboarding_teach":
-        return "Hold the top right chat button while talking to me. Say teach, then the item name."
+        return ONBOARDING_TEACH_LISTENING_PROMPT
     if state == "onboarding_await_scan":
-        return "Press anywhere in the bottom area to scan, or hold chat and say scan."
+        return ONBOARDING_AWAIT_SCAN_PROMPT
     if state == "awaiting_location":
         return "Which room is this?"
     if state == "awaiting_image":
@@ -556,7 +560,7 @@ def _dispatch(
             _handle_open_settings(session)
             return
         if intent != "scan":
-            emit("tts", {"narration": "Press anywhere in the bottom area to scan, or hold chat and say scan.", "next_state": state})
+            emit("tts", {"narration": ONBOARDING_AWAIT_SCAN_PROMPT, "next_state": state})
             return
 
     # Normal command dispatch (covers idle, onboarding_teach, focused_on_item fall-through)
