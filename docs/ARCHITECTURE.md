@@ -829,7 +829,7 @@ All server-transition items are complete as of March 2026.
 ## Future Plans
 
 - **Bloat Prevention** - Duplicate entry detection, pruning unused entries, user confirmation before overwriting similar embeddings.
-- **HNSW index** - Marginal benefit below ~10k entries; defer until scale requires it.
+- **HNSW index** - Marginal benefit below ~10k entries; defer unless scale requires it.
 ---
 
 ## Design Decisions
