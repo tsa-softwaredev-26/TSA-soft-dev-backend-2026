@@ -109,6 +109,8 @@ python -m visual_memory.utils.logparse [options]
 
 ## Examples
 
+Prerequisite: logs must already exist in `logs/` (for example, after running the services).
+
 ### View recent errors
 
 ```bash

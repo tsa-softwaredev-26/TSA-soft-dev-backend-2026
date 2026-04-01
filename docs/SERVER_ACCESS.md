@@ -67,7 +67,11 @@ https://nre5bjw44wddpu2zjg4fe4iehq.srv.us
 
 This tunnels to port 5000 on the server. No VPN needed from any device.
 
-### Starting the tunnel manually
+Choose one tunnel mode:
+- Manual tunnel: good for short testing sessions
+- systemd tunnel: recommended for persistent production access
+
+### Option A: start the tunnel manually
 
 ```bash
 ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 \
@@ -78,7 +82,7 @@ ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 \
 > For unattended use (systemd service), generate a passphrase-free key for the
 > `spaitra` service account: `ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519`
 
-### Running the tunnel persistently (systemd)
+### Option B: run the tunnel persistently (systemd)
 
 Write `/etc/systemd/system/spaitra-tunnel.service`:
 

@@ -1,6 +1,6 @@
 # Spaitra Frontend Guide
 
-The frontend is a thin I/O layer. It sends audio and images to the backend via WebSocket. The backend decides what to do, sends back narration and a state update. The frontend speaks the narration and updates its UI state. That is the entire loop.
+The frontend is an I/O layer. It sends audio and images to the backend via WebSocket. The backend decides what to do, sends back narration and a state update. The frontend speaks the narration and updates its UI state. That is the entire loop.
 
 See [UX.md](UX.md) for narration content, onboarding flow phrasing, and hint text.
 
@@ -44,7 +44,12 @@ Connect:
 wss://<host>/socket.io/?key=<api-key>&EIO=4&transport=websocket
 ```
 
-The server sends a `tts` event and a `session_state` event immediately on connect. Wait for them before showing any UI.
+Required query params:
+- `key`: same API key used for HTTP requests
+- `EIO=4`: socket.io protocol version required by this backend
+- `transport=websocket`: force websocket transport
+
+Server sends `tts` and `session_state` immediately on connect. Wait before showing UI.
 
 ---
 
@@ -125,7 +130,7 @@ This is your authoritative state. Store `current_mode` and `context`. Update UI 
 { "state": "idle", "prompt": "Scan, teach something new, or ask me anything." }
 ```
 
-Set recording state to active. Display `prompt` as a listening hint. The prompt is already phrased for the user's current state - show it as-is.
+Set recording state to active. Display `prompt` as a listening hint. Prompt is phrased for current mode; display as-is.
 
 ### `listening_stopped` -> hide recording UI
 
@@ -185,7 +190,7 @@ Track `current_mode` from `session_state`. Show different UI per state.
 | `awaiting_confirmation` | Listening for yes/no. |
 | `focused_on_item` | Scan results overlay. Enable swipe navigation. |
 
-The server drives all transitions. You follow `current_mode`.
+The server drives all transitions. Use `current_mode` exactly as sent in `session_state`; do not remap state names on the client.
 
 ---
 

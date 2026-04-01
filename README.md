@@ -41,12 +41,18 @@ cd TSA-soft-dev-backend-2026
 
 ### 2. Create the core environment
 
+Before setup, accept access for the gated models:
+- https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m
+- https://huggingface.co/IDEA-Research/grounding-dino-base
+
+Then create the environment and download weights:
+
 ```bash
 python3 -m venv .venv-core
 source .venv-core/bin/activate
 pip install -e ".[core]"
-hf auth login
-python setup_weights.py
+hf auth login   # use a read token from https://huggingface.co/settings/tokens
+python setup_weights.py   # downloads model weights (~5.3 GB)
 ```
 
 Use the core environment for the Flask API, model tests, and weight download.
@@ -81,6 +87,8 @@ python -m services.core.run
 ```
 
 Default core address: `http://127.0.0.1:5000`
+
+First startup can take 30-60 seconds while models load.
 
 ### 6. Verify service-to-service communication
 
@@ -138,6 +146,8 @@ Use [DEPLOY.md](docs/DEPLOY.md) for the Debian production setup with:
 ## Architecture
 
 See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for pipeline internals and package structure.
+
+For measured performance and quality baselines, see [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Model attribution and licenses
 

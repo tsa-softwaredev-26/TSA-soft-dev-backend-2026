@@ -1,6 +1,6 @@
 # VisualMemory Backend Architecture
 
-> Reference doc for continuous development.
+> Reference documentation.
 > App context: Navigation aid for blind users. Announces nearby significant objects with distance + direction.
 
 ---
@@ -58,7 +58,7 @@ Semantic memory retrieval.
 ### Main Differentiators
 - Embedding-based semantic search across personal memory
 - Spatial grounding (distance + direction of important objects)
-- Personalized self-training detection (head on top of DINOv3) to improve accuracy with use
+- Personalized detection head (ProjectionHead on DINOv3) to improve accuracy with use
 - Continuous adaptation to the user’s environment
 - Minimalist, voice-based interface
 
@@ -66,12 +66,12 @@ Semantic memory retrieval.
 
 ## UX Design
 
-The interface is voice-first. One core action per screen. There is no tutorial on first launch - the onboarding is the user's first real Teach + Scan + Ask session with actual items in an actual room. They understand the product because they used it, not because they read instructions.
+The interface is voice-first. One core action per screen. There is no tutorial on first launch; onboarding is the user's first Teach + Scan + Ask session with actual items in a real room. They understand the product because they used it, not because they read instructions.
 
 Feedback model decisions that affect the backend:
 - Only explicit negatives are logged as training data. The user says "wrong" to flag a bad detection. Silence is not recorded.
 - No feedback is collected during onboarding. The ProjectionHead does not train until the user has organic sessions with clean, representative data.
-- Implicit acceptance is excluded because unverified positives corrupt triplet training over time.
+- Unconfirmed positives are excluded because they can corrupt triplet training over time.
 
 See [UX.md](UX.md) for the full onboarding flow and UX patterns.
 
@@ -167,7 +167,7 @@ src/visual_memory/
 │   └── feedback_store.py              # FeedbackStore (SQLite-backed via DatabaseStore.feedback table)
 │
 ├── benchmarks/
-│   ├── full_benchmark.py              # 7-phase system benchmark (retrieval, detection, depth)
+│   ├── full_benchmark.py              # multi-stage system benchmark (retrieval, detection, depth)
 │   ├── format_results.py              # reads results.json, writes BENCHMARKS.md at root
 │   ├── check_dataset.py               # pre-flight: verify all 120 images are in benchmarks/images/
 │   └── redact_receipt.py              # gitignored - OCR-based receipt redaction (personal tool)
@@ -412,7 +412,7 @@ Multi-image (POST /remember with `images[]`):
 - `is_oom_risk(threshold=0.85)` checks combined RAM+swap pressure
 - `cleanup_zombies(max_age_hours=2)` removes old zombie processes owned by the current user
 - `suggest_throttle()` recommends slowdowns under memory pressure
-- Integrations: benchmark phase guards in `benchmarks/full_benchmark.py` and request middleware in `api/app.py`
+- Integrations: benchmark stage guards in `benchmarks/full_benchmark.py` and request middleware in `api/app.py`
 - CLI: `python -m visual_memory.utils.memory_monitor --check` and `--cleanup`
 
 ### `engine/depth/estimator.py` - `DepthEstimator`
@@ -517,7 +517,7 @@ Conditions: 3 distances (1ft/3ft/6ft) x 2 lighting (bright/dim) x 2 backgrounds 
 Objects: wallet_a, wallet_b, bottle_a, bottle_b, sunglasses_a, sunglasses_b, receipt_a, receipt_b, keys_a, keys_b.
 Labels are per-instance (wallet_a vs wallet_b) to test instance-level discrimination.
 
-### Phases
+### Stages
 
 1. **Embed** - DINOv3 image embedding + optional OCR-service text embedding for each image.
 2. **Split** - 60/40 train/test per label (seeded RNG).
@@ -549,11 +549,11 @@ python -m visual_memory.benchmarks.full_benchmark \
 # Format into BENCHMARKS.md
 python -m visual_memory.benchmarks.format_results
 
-# Build Phase 6 degradation curves (CSV + figures)
+# Build degradation curves (CSV + figures)
 PYTHONPATH=src python3 -m visual_memory.benchmarks.degradation_curves
 ```
 
-### Phase 6 degradation curves
+### Degradation curves
 
 Degradation curve artifacts are generated under:
 
@@ -749,7 +749,7 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 
 ---
 
-## Current State (March 27, 2026)
+## Current Capabilities
 
 - Core engine complete and tested (depth, detection, embedding, OCR)
 - Both pipelines produce structured JSON dicts; combined 1536-dim embeddings (DINOv3 + CLIP text)
@@ -775,44 +775,6 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - OCR pre-embedding: `add_to_database()` embeds OCR text at teach time and stores in `items.ocr_embedding`; `/ask` OCR content match uses stored embedding, re-embeds only for legacy items
  - Query strategy routing: `/ask` sets `document_query` and routes primary strategy by query type (`ocr_semantic` first for document-like queries, `fuzzy_label` first otherwise) with cross-strategy fallback
 
----
-
-## TODO
-
-### Engine / Architecture
-- [ ] Run full benchmark - 120 images not yet captured (~1-2 hrs). No CAPTURE_GUIDE.md exists yet; manually capture dataset images.
-- [x] Add batched OCR service endpoint support and wire it into pipeline OCR paths to reduce HTTP overhead on multi-crop scans
-- [x] Wire `detect_all_batch()` (in `detect_all.py`) and `detect_batch()` (in `prompt_based.py`) into ScanPipeline and RememberPipeline to avoid per-crop iteration loops
-- [x] `str | Path` type hints in pipeline files require Python 3.10+; `pyproject.toml` allows 3.8+ (pre-existing, low priority)
-- [ ] OCR text likelihood threshold tuning: current default 0.10 was chosen heuristically; calibrate against a labelled set of crops with/without text to confirm false-negative rate is acceptable. See `quality_utils.estimate_text_likelihood()`.
-
-### Database
-- [ ] `DatabaseStore` methods `save_ml_settings` / `load_ml_settings` merge only changed keys on write - currently the PATCH /settings handler saves the full settings snapshot, which is fine for single-user but would need per-user scoping for multi-user.
-
-### Testing
-- [x] Refactor test_ask_mode.py, test_projection_head.py, test_scan_batching.py to use `TestRunner` instead of module-level print statements so exit codes integrate with run_all.
-- [x] Overhaul test runner to exercise all features via HTTP endpoints (Flask test client) rather than calling pipeline code directly. Added stress and pentest suites with route-level coverage and report artifacts.
-- [ ] Validate Ollama prompts (extract_search_term, extract_item_intent, extract_rename_target) against 20+ real voice queries to confirm extraction reliability.
-- [ ] Add Whisper transcription quality test set (20+ real voice queries) and track exact-query and intent-success rates across noise, accent, and speaking-speed variants.
-- [ ] Add Whisper context-bias A/B tests (`context=0` vs `context=1`) against user-specific labels and room names; report wins and regressions before tuning defaults.
-- [x] Continue prompt-injection hardening for Ollama parsing and `/ask` retrieval. Added pentest suites for ask/find/item/transcribe/settings payload abuse and unsafe-query assertions.
-
-### Learning / Personalization
-
-### Deployment
-- [ ] Validate SQLCipher package availability (`libsqlcipher-dev`) and startup behavior when `DB_ENCRYPTION_KEY` is configured.
-- [ ] Keep strict permissions after deploy updates by running `deploy/secure_permissions.sh`.
-
-### API & Logging
-- [x] OCR service health probe - covered by GET /debug/state
-- [x] Have fast mode in settings disable second pass detection in remember mode
-- [x] `PATCH /debug/config` now accepts `persist: true` flag that calls `save_ml_settings()` after applying
-- [x] Add debug GET to query logs - GET /debug/logs supports app/important/crash sources with event, level, tag, contains filters
-- [x] Performance logs include system metrics - RAM, swap, VRAM, CPU temp, duration_ms. See LOGGING.md for schema and logparse CLI. 
-- [x] Add debug GET for performance telemetry summary - GET /debug/perf returns live metrics, perf/vram aggregates, warning/error counts, and crash count
-- [x] Add stage timing breakdown in performance logs - remember_complete and scan_complete now include prepare, detect, embed, OCR, match, dedup, depth, and DB timing fields (as applicable)
-- [x] Optimize scan anchor lookup - use O(1) projected DB map for feedback cache anchor lookup instead of per-match linear scan
-- [x] Expand VRAM layout telemetry - vram_layout logs now include action (applied, noop, skipped), swap_count, and save_vram_enabled for clearer baseline comparisons
 ---
 
 ## Server Transition Notes
@@ -843,7 +805,7 @@ All server-transition items are complete as of March 2026.
 
 ---
 
-## Phase 8: Tuning & Server-Side Optimization
+## Performance Tuning and Server-Side Optimization
 
 ### Server-Only Heavy Workload Policy
 
@@ -874,7 +836,7 @@ When tuning ML parameters on single-GPU systems:
 
 Run all tuning scripts on server after stopping services; results are committed to `benchmarks/` directory for historical tracking.
 
-### Merge-to-Main Integration Workflow
+### Pre-Release Integration Checklist
 
 Before merging tuning/performance changes to `main`:
 

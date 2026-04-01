@@ -5,7 +5,7 @@ This document defines the product UX at a behavioral level:
 - How users move through core flows
 - How narration should guide without overwhelming
 
-It is intentionally high level and avoids implementation detail.
+Intentionally high-level; implementation details are in code.
 
 ## UX Philosophy
 
@@ -30,7 +30,7 @@ It is intentionally high level and avoids implementation detail.
 
 ## Onboarding Flow
 
-On first use (empty memory), onboarding is a real workflow, not a tutorial wall:
+On first use (empty memory), onboarding is a guided session, not a tutorial wall:
 
 1. Welcome and ask for the first item.
 2. Teach item one and capture its room.
@@ -40,7 +40,7 @@ On first use (empty memory), onboarding is a real workflow, not a tutorial wall:
 6. Prompt one ask/find query.
 7. Confirm completion and transition to normal use.
 
-Onboarding should focus on confidence and momentum, not feature depth.
+Focus onboarding on confidence and momentum, not feature breadth.
 
 ## Runtime Flow (High Level)
 

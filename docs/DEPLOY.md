@@ -1,6 +1,6 @@
 # Spaitra Deployment Guide
 
-Target: **Debian 12 or newer**, Python 3.11 or newer, optional NVIDIA GPU.
+Deploy on Debian 12+ with Python 3.11+ and optional NVIDIA GPU.
 
 Two services run on the same host and communicate over localhost:
 
@@ -418,8 +418,12 @@ deactivate
 
 ## 9. Install systemd units
 
-The service files in `deploy/` assume the flat layout (`/opt/spaitra/venv-core`).
-If your venvs are inside the repo subdir, edit the two paths before copying:
+Choose a layout before installing service files:
+- Flat layout (recommended): venvs at `/opt/spaitra/venv-core` and `/opt/spaitra/venv-ocr`
+- Subdirectory layout: venvs at `$REPO/venv-core` and `$REPO/venv-ocr`
+
+The service files in `deploy/` assume flat layout.
+If you use subdirectory layout, edit the paths before copying:
 
 ```bash
 # For subdirectory layout; create adjusted copies:
@@ -852,7 +856,7 @@ Commit results to `benchmarks/`:
 
 ```bash
 git add benchmarks/
-git commit -m "Phase 8: Update ML tuning params (text_likelihood_threshold=X, detection_confidence_min=Y, similarity_threshold=Z)"
+git commit -m "Tune ML thresholds for text likelihood, detection confidence, and similarity"
 ```
 
 Restart services:
