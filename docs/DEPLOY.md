@@ -138,7 +138,7 @@ cd $REPO
 python3 -m venv venv-core
 source venv-core/bin/activate
 pip install --upgrade pip
-pip install -e ".[core]"
+pip install -e ".[core]"   # keep -e so src/visual_memory stays importable
 deactivate
 ```
 
@@ -168,7 +168,7 @@ deactivate
 python3 -m venv venv-ocr
 source venv-ocr/bin/activate
 pip install --upgrade pip
-pip install -e ".[ocr]"
+pip install -e ".[ocr]"    # keep -e for editable source import paths
 deactivate
 ```
 
@@ -713,7 +713,7 @@ Common causes:
 
 | Symptom | Fix |
 |---|---|
-| `ModuleNotFoundError` | Wrong `WorkingDirectory` or venv path in service file |
+| `ModuleNotFoundError` | Reinstall with `pip install -e ".[core]"` in `venv-core`, then verify `WorkingDirectory` and venv path in service file |
 | `No such file: .env` | `/opt/spaitra/.env` missing or wrong path |
 | `401 Unauthorized` from OCR | Missing or wrong `X-API-Key` from core, or key mismatch between `/opt/spaitra/.env` and `/opt/spaitra/.ocr.env` |
 | OCR returns `429` with `server_busy` | Service is throttling by design. Reduce concurrent callers or raise `OCR_MAX_CONCURRENCY` carefully. Respect `Retry-After` on clients. |
@@ -724,7 +724,7 @@ Common causes:
 | `Failed to unlock encrypted database` | `DB_ENCRYPTION_KEY` mismatch; restore the correct key or start with a fresh DB |
 | `PermissionError` on `logs/app.log` during tests or startup | `sudo chown -R spaitra:spaitra $REPO/logs && sudo chmod 750 $REPO/logs && sudo find $REPO/logs -maxdepth 1 -type f -name "*.log" -exec chmod 640 {} \;` |
 | `Permission denied` on model files | `chown -R spaitra:spaitra $REPO/checkpoints` |
-| `CUDA out of memory` | Enable `SAVE_VRAM=1` in `.env` and restart |
+| `CUDA out of memory` | Set `STARTUP_WARM_MODE=voice` (or `none`) and enable `SAVE_VRAM=1` in `.env`, then restart |
 | Source files owned by root | `chown -R spaitra:spaitra $REPO/src $REPO/services` |
 
 ### Service-level memory and restart guardrails (OCR)

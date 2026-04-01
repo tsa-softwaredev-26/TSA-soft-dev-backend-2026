@@ -1,10 +1,14 @@
 """Lazy singleton accessors for pipeline instances.
 
-Models are multi-GB; loaded once at process start and reused across requests.
+Models are multi-GB; loaded once and reused across requests.
 """
+import os
 from visual_memory.config import Settings
+from visual_memory.engine.model_registry import registry
+from visual_memory.utils.logger import get_logger
 
 _settings = Settings()
+_log = get_logger(__name__)
 
 _database = None
 _remember_pipeline = None
@@ -65,21 +69,53 @@ def warm_all():
     get_remember_pipeline()
     get_scan_pipeline()
     get_feedback_store()
-    _apply_persisted_ml_settings()
+    _apply_persisted_ml_settings(load_scan_pipeline=True)
     # When SAVE_VRAM is on, settle into scan-mode VRAM layout after loading everything.
     # This offloads GDino (~900 MB) immediately, leaving scan models warm on GPU.
     if _settings.save_vram:
-        from visual_memory.engine.model_registry import registry
         registry.prepare_for_scan()
 
 
-def _apply_persisted_ml_settings():
+def warm_voice_only():
+    """Warm startup for low-VRAM hosts: keep only voice path warm at boot."""
+    get_database()
+    get_feedback_store()
+    _apply_persisted_ml_settings(load_scan_pipeline=False)
+    registry.get_whisper_recognizer()
+    registry.prepare_for_voice()
+
+
+def warm_startup():
+    """Startup warm strategy controlled by STARTUP_WARM_MODE.
+
+    Supported values:
+    - full: eager remember+scan warmup (previous behavior)
+    - voice: warm only DB/settings/Whisper (default)
+    - none: no model warmup at startup
+    """
+    mode = os.environ.get("STARTUP_WARM_MODE", "voice").strip().lower()
+    if mode == "none":
+        get_database()
+        get_feedback_store()
+        _apply_persisted_ml_settings(load_scan_pipeline=False)
+        _log.info({"event": "startup_warm_mode", "mode": "none"})
+        return
+    if mode == "full":
+        _log.info({"event": "startup_warm_mode", "mode": "full"})
+        warm_all()
+        return
+
+    _log.info({"event": "startup_warm_mode", "mode": "voice"})
+    warm_voice_only()
+
+
+def _apply_persisted_ml_settings(*, load_scan_pipeline: bool):
     """Restore ML settings saved via PATCH /settings from previous runs."""
     saved = get_database().load_ml_settings()
     if not saved:
         return
     s = get_settings()
-    pipeline = get_scan_pipeline()
+    pipeline = get_scan_pipeline() if load_scan_pipeline else None
     _PATCHABLE_TYPES = {
         "enable_learning": bool,
         "min_feedback_for_training": int,
@@ -95,6 +131,9 @@ def _apply_persisted_ml_settings():
         "similarity_threshold_baseline": float,
         "similarity_threshold_personalized": float,
         "similarity_threshold_document": float,
+        "scan_similarity_margin": float,
+        "scan_similarity_margin_document": float,
+        "remember_max_prototypes_per_label": int,
     }
     for key, cast in _PATCHABLE_TYPES.items():
         if key in saved:
@@ -102,9 +141,10 @@ def _apply_persisted_ml_settings():
                 setattr(s, key, cast(saved[key]))
             except (TypeError, ValueError):
                 pass
-    pipeline.set_enable_learning(s.enable_learning)
-    pipeline.set_head_weight(
-        s.projection_head_weight,
-        s.projection_head_ramp_at,
-        s.projection_head_ramp_power,
-    )
+    if pipeline is not None:
+        pipeline.set_enable_learning(s.enable_learning)
+        pipeline.set_head_weight(
+            s.projection_head_weight,
+            s.projection_head_ramp_at,
+            s.projection_head_ramp_power,
+        )

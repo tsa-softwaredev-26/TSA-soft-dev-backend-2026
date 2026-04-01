@@ -103,7 +103,7 @@ def create_app():
     app.register_blueprint(transcribe_bp)
     app.register_blueprint(voice_bp)
 
-    from visual_memory.api.pipelines import warm_all
+    from visual_memory.api.pipelines import warm_startup
 
-    warm_all()
+    warm_startup()
     return app
