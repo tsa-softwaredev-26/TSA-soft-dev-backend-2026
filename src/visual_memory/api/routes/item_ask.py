@@ -24,6 +24,7 @@ from visual_memory.utils.ollama_utils import (
     extract_rename_target,
 )
 from visual_memory.utils import get_logger
+from ._json_utils import read_json_dict
 
 _log = get_logger(__name__)
 
@@ -72,7 +73,10 @@ def _minimal_description(label: str, ocr_text: str) -> str:
 
 @item_ask_bp.post("/item/ask")
 def item_ask():
-    data = request.get_json(silent=True) or {}
+    data, err = read_json_dict(request)
+    if err is not None:
+        body, status = err
+        return jsonify(body), status
     result, status = process_item_ask_request(
         scan_id=data.get("scan_id"),
         label=data.get("label"),
@@ -86,6 +90,7 @@ def process_item_ask_request(
     label: str,
     query: str,
     intent: str | None = None,
+    state_context: dict | None = None,
 ) -> tuple[dict, int]:
     scan_id = (scan_id or "").strip()
     label = (label or "").strip()
@@ -103,7 +108,7 @@ def process_item_ask_request(
     if resolved_intent is None:
         resolved_intent = _keyword_intent(query)
         if resolved_intent is None and get_settings().llm_query_fallback_enabled:
-            resolved_intent = extract_item_intent(query)
+            resolved_intent = extract_item_intent(query, state_context=state_context)
             if resolved_intent is not None:
                 ollama_used = True
         if resolved_intent is None:
@@ -122,7 +127,8 @@ def process_item_ask_request(
     # read_ocr / export_ocr
     if resolved_intent in ("read_ocr", "export_ocr"):
         rows = db.get_items_metadata(label=label)
-        ocr_text = rows[0]["ocr_text"] if rows else ""
+        item = rows[0] if rows else {}
+        ocr_text = item.get("ocr_text", "") if isinstance(item, dict) else ""
 
         if not ocr_text:
             return {
@@ -156,7 +162,8 @@ def process_item_ask_request(
                 "latency_ms": round((time.monotonic() - t0) * 1000),
             }, 404
 
-        image_path = (rows[0].get("image_path") or "").strip()
+        item = rows[0] if rows else {}
+        image_path = (item.get("image_path") or "").strip() if isinstance(item, dict) else ""
         if not image_path:
             return {
                 "action": "question",
@@ -218,7 +225,8 @@ def process_item_ask_request(
 
     if resolved_intent == "ocr_question":
         rows = db.get_items_metadata(label=label)
-        ocr_text = rows[0]["ocr_text"] if rows else ""
+        item = rows[0] if rows else {}
+        ocr_text = item.get("ocr_text", "") if isinstance(item, dict) else ""
 
         if not ocr_text:
             return {
@@ -269,7 +277,7 @@ def process_item_ask_request(
     if resolved_intent == "rename":
         new_label = _extract_rename_target_keyword(query)
         if new_label is None and get_settings().llm_query_fallback_enabled:
-            new_label = extract_rename_target(query)
+            new_label = extract_rename_target(query, state_context=state_context)
         if not new_label:
             return {
                 "action": "rename",
@@ -287,7 +295,15 @@ def process_item_ask_request(
             }, 200
 
         result = db.rename_label(label, new_label)
-        get_scan_pipeline().reload_database()
+        try:
+            get_scan_pipeline().reload_database()
+        except Exception as exc:
+            return {
+                "action": "rename",
+                "error": "database sync failed",
+                "detail": str(exc),
+                "narration": "Renamed, but I could not sync scan state yet.",
+            }, 500
 
         return {
             "action": "rename",

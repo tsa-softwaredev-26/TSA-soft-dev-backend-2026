@@ -421,8 +421,12 @@ def _handle_confirmation(session: VoiceSession, command_text: str) -> None:
         if action == "delete_item":
             lbl = pending.get("label", "")
             try:
-                get_database().delete_item(lbl)
-                emit("tts", {"narration": f"{lbl.capitalize()} deleted.", "next_state": "idle"})
+                deleted = get_database().delete_items_by_label(lbl)
+                get_scan_pipeline().reload_database()
+                if deleted > 0:
+                    emit("tts", {"narration": f"{lbl.capitalize()} deleted.", "next_state": "idle"})
+                else:
+                    emit("tts", {"narration": "I could not find that item to delete.", "next_state": "idle"})
             except Exception:
                 emit("tts", {"narration": "Could not delete the item.", "next_state": "idle"})
         else:
@@ -452,9 +456,12 @@ def _handle_feedback(session: VoiceSession) -> None:
         return
     try:
         embeddings = get_scan_pipeline().get_cached_embeddings(scan_id, label)
-        if embeddings is not None:
+        if isinstance(embeddings, (tuple, list)) and len(embeddings) == 2:
             anchor_emb, query_emb = embeddings
             get_feedback_store().record_negative(anchor_emb, query_emb, label)
+        else:
+            emit("error", {"code": "cache_expired", "message": "Feedback expired. Please rescan."})
+            return
     except Exception as exc:
         _log.warning({"event": "ws_feedback_failed", "tag": LogTag.API, "error": str(exc)})
     emit("tts", {"narration": "Got it, noted as incorrect.", "next_state": session.state})

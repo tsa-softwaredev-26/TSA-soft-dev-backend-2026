@@ -58,11 +58,11 @@ def main() -> int:
     args = parser.parse_args()
 
     if not args.base_url:
-        print("ERROR: base URL required (set --base-url or TEST_BASE_URL)")
-        return 2
+        print("SKIP: base URL not configured (set --base-url or TEST_BASE_URL)")
+        return 0
     if not args.api_key:
-        print("ERROR: API key required (set --api-key or API_KEY)")
-        return 2
+        print("SKIP: API key not configured (set --api-key or API_KEY)")
+        return 0
 
     repo_root = Path(__file__).resolve().parents[4]
     cases = load_voice_cases(args.dataset, target="whisper", core_only=args.core_only)

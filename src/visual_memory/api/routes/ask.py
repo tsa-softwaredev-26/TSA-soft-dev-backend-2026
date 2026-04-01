@@ -16,13 +16,15 @@ from visual_memory.api.routes.find import (
 )
 from visual_memory.utils.ollama_utils import extract_search_term, is_unsafe_query
 from visual_memory.utils import get_logger
+from visual_memory.utils.voice_state_context import build_state_contract
+from ._json_utils import read_json_dict
 
 _log = get_logger(__name__)
 
 ask_bp = Blueprint("ask", __name__)
 
 
-def process_ask_query(raw_query) -> tuple[dict, int]:
+def process_ask_query(raw_query, state_context: dict | None = None) -> tuple[dict, int]:
     if raw_query is None:
         return {"error": "missing field: query"}, 400
     if not isinstance(raw_query, str):
@@ -58,7 +60,7 @@ def process_ask_query(raw_query) -> tuple[dict, int]:
 
     # Step 1: LLM query extraction as preprocessing (when enabled)
     if settings.llm_query_fallback_enabled:
-        extracted = extract_search_term(query)
+        extracted = extract_search_term(query, state_context=state_context)
         if extracted:
             search_term = extracted
             strategies_tried.append("llm_extraction")
@@ -165,6 +167,17 @@ def process_ask_query(raw_query) -> tuple[dict, int]:
 
 @ask_bp.post("/ask")
 def ask():
-    data = request.get_json(silent=True) or {}
-    result, status = process_ask_query(data.get("query"))
+    data, err = read_json_dict(request)
+    if err is not None:
+        body, status = err
+        return jsonify(body), status
+    state = data.get("state") if isinstance(data.get("state"), dict) else {}
+    mode = data.get("current_mode") or data.get("mode")
+    if not mode and isinstance(state, dict):
+        mode = state.get("current_mode") or state.get("mode")
+    context = data.get("context")
+    if not isinstance(context, dict) and isinstance(state, dict):
+        context = state.get("context")
+    state_contract = build_state_contract(mode=mode, context=context)
+    result, status = process_ask_query(data.get("query"), state_context=state_contract)
     return jsonify(result), status

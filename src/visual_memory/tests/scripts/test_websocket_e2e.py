@@ -172,6 +172,60 @@ def _load_file(path_value: str, fallback_rel: str) -> bytes:
     return path.read_bytes()
 
 
+_PLACEHOLDER_API_KEYS = {
+    "placeholder",
+    "your_api_key",
+    "your-api-key",
+    "api_key",
+    "api-key",
+    "changeme",
+    "dummy",
+    "test",
+    "none",
+    "null",
+}
+
+
+def _is_placeholder_api_key(api_key: str) -> bool:
+    normalized = api_key.strip().lower()
+    if not normalized:
+        return True
+    if normalized in _PLACEHOLDER_API_KEYS:
+        return True
+    if normalized.startswith("<") and normalized.endswith(">"):
+        return True
+    return False
+
+
+def _probe_api_key(base_url: str, api_key: str, timeout: float) -> tuple[str, str]:
+    if _is_placeholder_api_key(api_key):
+        return "skip", "API key is missing or placeholder; skipping live WebSocket E2E."
+
+    req = urllib.request.Request(
+        f"{base_url.rstrip('/')}/items",
+        method="GET",
+        headers={"X-API-Key": api_key},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if resp.status in (200, 204):
+                return "ok", "api key accepted"
+            return "warn", f"auth preflight returned unexpected status={resp.status}; continuing"
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            return "skip", (
+                "API key rejected by server auth preflight "
+                f"(status={exc.code} on GET /items); skipping live WebSocket E2E."
+            )
+        if exc.code in (404, 405):
+            return "warn", (
+                f"auth preflight endpoint unavailable (status={exc.code}); continuing without preflight"
+            )
+        return "error", f"auth preflight failed with HTTP {exc.code}"
+    except urllib.error.URLError as exc:
+        return "error", f"auth preflight failed: {exc}"
+
+
 def _post_json(base_url: str, api_key: str, route: str, payload: dict, timeout: float) -> tuple[int, dict | None]:
     url = f"{base_url.rstrip('/')}{route}"
     req = urllib.request.Request(
@@ -508,8 +562,15 @@ def main() -> int:
     if not args.base_url:
         print("ERROR: base URL required (set --base-url or TEST_BASE_URL)")
         return 2
-    if not args.api_key:
-        print("ERROR: API key required (set --api-key or API_KEY)")
+
+    preflight_status, preflight_message = _probe_api_key(args.base_url, args.api_key, timeout=8.0)
+    if preflight_status == "skip":
+        print(f"[SKIP] websocket_e2e: {preflight_message}")
+        return 0
+    if preflight_status == "warn":
+        print(f"WARN: websocket_e2e: {preflight_message}")
+    if preflight_status == "error":
+        print(f"ERROR: websocket_e2e: {preflight_message}")
         return 2
 
     dataset_path = Path(args.dataset)

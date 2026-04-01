@@ -14,7 +14,12 @@ transcribe_bp = Blueprint("transcribe", __name__)
 _log = get_logger(__name__)
 
 
-def transcribe_audio_bytes(audio_bytes: bytes, use_context: bool = True) -> tuple[dict, int]:
+def transcribe_audio_bytes(
+    audio_bytes: bytes,
+    use_context: bool = True,
+    voice_mode: str | None = None,
+    voice_context: dict | None = None,
+) -> tuple[dict, int]:
     t0 = time.monotonic()
     settings = get_settings()
 
@@ -26,6 +31,7 @@ def transcribe_audio_bytes(audio_bytes: bytes, use_context: bool = True) -> tupl
         "tag": LogTag.API,
         "audio_size_bytes": len(audio_bytes),
         "context_requested": use_context,
+        "voice_mode": (voice_mode or "").strip().lower() or None,
     })
 
     try:
@@ -44,9 +50,22 @@ def transcribe_audio_bytes(audio_bytes: bytes, use_context: bool = True) -> tupl
         }, 500
 
     context_prompt = None
+    mode_hint = (voice_mode or "").strip().lower()
     recognizer = registry.get_whisper_recognizer()
     if use_context and settings.whisper_context_enabled:
         context_prompt = recognizer.build_context_prompt(get_database())
+        # Add lightweight state hints when available to reduce ambiguity
+        # for short utterances while keeping prompt compact.
+        if mode_hint:
+            context_prompt = f"{context_prompt} {mode_hint}".strip()
+        if isinstance(voice_context, dict):
+            state_contract = voice_context.get("state_contract")
+            if isinstance(state_contract, dict):
+                known_labels = state_contract.get("known_labels")
+                if isinstance(known_labels, list):
+                    labels = [str(x).strip() for x in known_labels if str(x).strip()][:8]
+                    if labels:
+                        context_prompt = f"{context_prompt} {' '.join(labels)}".strip()
 
     try:
         registry.prepare_for_voice()

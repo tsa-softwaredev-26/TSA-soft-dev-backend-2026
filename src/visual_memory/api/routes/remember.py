@@ -28,7 +28,14 @@ def _remember_single(image_file, prompt: str) -> tuple[dict, int]:
         tmp_path.unlink(missing_ok=True)
 
     if result.get("success"):
-        get_scan_pipeline().reload_database()
+        try:
+            get_scan_pipeline().reload_database()
+        except Exception as exc:
+            return {
+                "error": "database sync failed",
+                "detail": str(exc),
+                "result": result,
+            }, 500
     return result, 200
 
 
@@ -79,7 +86,14 @@ def _remember_multi(image_files, prompt: str) -> tuple[dict, int]:
             p.unlink(missing_ok=True)
 
     if result.get("success"):
-        get_scan_pipeline().reload_database()
+        try:
+            get_scan_pipeline().reload_database()
+        except Exception as exc:
+            return {
+                "error": "database sync failed",
+                "detail": str(exc),
+                "result": result,
+            }, 500
         result["images_tried"] = len(tmp_paths)
         result["images_with_detection"] = detected_count
 

@@ -437,7 +437,38 @@ def _chat(prompt: str, max_retries: int | None = None) -> str | None:
     return _chat_raw(prompt, max_retries, json_mode=False)
 
 
-def extract_search_term(query: str, known_labels: list[str] | None = None) -> str | None:
+def _known_labels_from_state_context(state_context: dict | None) -> list[str] | None:
+    if not isinstance(state_context, dict):
+        return None
+    labels: list[str] = []
+
+    def _add(value: object) -> None:
+        if not isinstance(value, str):
+            return
+        cleaned = value.strip().lower()
+        if cleaned and cleaned not in labels:
+            labels.append(cleaned)
+
+    known = state_context.get("known_labels")
+    if isinstance(known, list):
+        for label in known:
+            _add(label)
+
+    ctx = state_context.get("context")
+    if isinstance(ctx, dict):
+        _add(ctx.get("label"))
+    else:
+        _add(state_context.get("label"))
+
+    return labels or None
+
+
+def extract_search_term(
+    query: str,
+    known_labels: list[str] | None = None,
+    *,
+    state_context: dict | None = None,
+) -> str | None:
     """Extract the core item the user is searching for from a natural language query.
 
     Examples:
@@ -450,7 +481,8 @@ def extract_search_term(query: str, known_labels: list[str] | None = None) -> st
     if _contains_disallowed_content(query):
         return None
 
-    context = _build_known_items_context(known_labels)
+    effective_known_labels = known_labels or _known_labels_from_state_context(state_context)
+    context = _build_known_items_context(effective_known_labels)
     prompt = (
         "Extract the object or item the user is looking for.\n"
         "Examples:\n"
@@ -482,18 +514,18 @@ def extract_search_term(query: str, known_labels: list[str] | None = None) -> st
         if term:
             normalized = _normalize_search_candidate(term)
             if normalized:
-                matched = _match_known_label(normalized, known_labels)
+                matched = _match_known_label(normalized, effective_known_labels)
                 if matched:
                     return matched
                 return normalized
 
-    known_match = _match_label_in_query(query, known_labels)
+    known_match = _match_label_in_query(query, effective_known_labels)
     if known_match:
         return known_match
 
     keyword = _extract_search_term_keyword(query)
     if keyword:
-        matched = _match_known_label(keyword, known_labels)
+        matched = _match_known_label(keyword, effective_known_labels)
         if matched:
             return matched
         return keyword
@@ -511,7 +543,12 @@ def extract_search_term(query: str, known_labels: list[str] | None = None) -> st
     return None
 
 
-def extract_item_intent(query: str, known_labels: list[str] | None = None) -> str | None:
+def extract_item_intent(
+    query: str,
+    known_labels: list[str] | None = None,
+    *,
+    state_context: dict | None = None,
+) -> str | None:
     """Classify the user's intent when asking about a specific focused item.
 
     Returns one of: read_ocr | export_ocr | rename | find | describe | question | ocr_question
@@ -523,7 +560,8 @@ def extract_item_intent(query: str, known_labels: list[str] | None = None) -> st
     if keyword_intent is not None:
         return keyword_intent
 
-    context = _build_known_items_context(known_labels)
+    effective_known_labels = known_labels or _known_labels_from_state_context(state_context)
+    context = _build_known_items_context(effective_known_labels)
     prompt = (
         "Classify the user's request about an item they are looking at. "
         "Respond with JSON only.\n"
@@ -583,7 +621,12 @@ def extract_item_intent(query: str, known_labels: list[str] | None = None) -> st
     return _extract_intent_from_raw(raw_retry)
 
 
-def extract_rename_target(query: str, known_labels: list[str] | None = None) -> str | None:
+def extract_rename_target(
+    query: str,
+    known_labels: list[str] | None = None,
+    *,
+    state_context: dict | None = None,
+) -> str | None:
     """Extract the new name from a rename request.
 
     Examples:
@@ -601,8 +644,9 @@ def extract_rename_target(query: str, known_labels: list[str] | None = None) -> 
             lowercase=False,
         )
         if sanitized:
-            if known_labels:
-                matched = _match_known_label(sanitized, known_labels)
+            effective_known_labels = known_labels or _known_labels_from_state_context(state_context)
+            if effective_known_labels:
+                matched = _match_known_label(sanitized, effective_known_labels)
                 if matched:
                     _log.warning({
                         "event": "rename_target_matches_existing",
@@ -611,7 +655,8 @@ def extract_rename_target(query: str, known_labels: list[str] | None = None) -> 
                     })
             return sanitized
 
-    context = _build_known_items_context(known_labels)
+    effective_known_labels = known_labels or _known_labels_from_state_context(state_context)
+    context = _build_known_items_context(effective_known_labels)
     prompt = (
         "Extract the new name the user wants to give to an item. "
         "Examples:\n"
