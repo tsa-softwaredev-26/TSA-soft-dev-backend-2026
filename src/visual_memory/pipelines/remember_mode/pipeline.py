@@ -2,12 +2,11 @@ from __future__ import annotations
 import time
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple, Union
-import numpy as np
 import pillow_heif
 from PIL import Image
 
 from visual_memory.config import Settings
-from visual_memory.utils import load_image, crop_object, get_logger, mean_luminance, estimate_text_likelihood, collect_system_metrics
+from visual_memory.utils import load_image, crop_object, get_logger, mean_luminance, blur_score, estimate_text_likelihood, should_run_ocr, collect_system_metrics
 from visual_memory.utils.logger import LogTag
 from visual_memory.engine.embedding import make_combined_embedding
 from visual_memory.engine.visual_attributes import extract_visual_attributes
@@ -30,19 +29,6 @@ _SECOND_PASS_TEMPLATES = [
 
 
 # image quality helpers
-
-def _blur_score(image: Image.Image) -> float:
-    """
-    Laplacian variance of the image. Higher = sharper.
-    Uses 4-neighbor discrete Laplacian via numpy; no extra dependencies.
-    """
-    gray = np.array(image.convert("L"), dtype=np.float32)
-    lap = (
-        np.roll(gray, 1, 0) + np.roll(gray, -1, 0) +
-        np.roll(gray, 1, 1) + np.roll(gray, -1, 1) - 4.0 * gray
-    )
-    return float(lap.var())
-
 
 # detection quality helpers
 
@@ -275,7 +261,7 @@ class RememberPipeline:
         image = load_image(str(Path(image_path)))
         lum = mean_luminance(image)
         is_dark = lum < _settings.darkness_threshold
-        blur = _blur_score(image)
+        blur = blur_score(image)
         if is_dark:
             return {
                 "detected": False,
@@ -333,7 +319,7 @@ class RememberPipeline:
                 "message": "Image is too dark for detection. Enable the flashlight and retry.",
                 "is_dark": True,
                 "darkness_level": round(lum, 2),
-                "blur_score": round(_blur_score(image), 2),
+                "blur_score": round(blur_score(image), 2),
                 "is_blurry": False,
                 "result": None,
             }
@@ -389,10 +375,20 @@ class RememberPipeline:
         ocr_confidence = 0.0
         text_embedding = None
         ocr_t0 = time.monotonic()
-        if (
+        ocr_ran = (
             self.ocr_client is not None
-            and _settings.ocr_text_likelihood_threshold <= text_likelihood <= _settings.ocr_text_likelihood_upper_threshold
-        ):
+            and should_run_ocr(
+                text_likelihood,
+                lower_threshold=_settings.ocr_text_likelihood_threshold,
+                upper_threshold=_settings.ocr_text_likelihood_upper_threshold,
+                luminance=lum,
+                blur_score=blur,
+                rescue_threshold=_settings.ocr_text_likelihood_rescue_threshold,
+                rescue_min_luminance=_settings.ocr_text_likelihood_rescue_min_luminance,
+                rescue_min_blur_score=_settings.ocr_text_likelihood_rescue_min_blur_score,
+            )
+        )
+        if ocr_ran:
             ocr_result = self.ocr_client.recognize(cropped)
             ocr_text = ocr_result["text"]
             ocr_confidence = ocr_result["confidence"]
@@ -404,10 +400,9 @@ class RememberPipeline:
             "event": "remember_ocr",
             "label": label,
             "text_likelihood": round(text_likelihood, 3),
-            "ocr_ran": (
-                self.ocr_client is not None
-                and _settings.ocr_text_likelihood_threshold <= text_likelihood <= _settings.ocr_text_likelihood_upper_threshold
-            ),
+            "crop_luminance": round(lum, 2),
+            "crop_blur_score": round(blur, 2),
+            "ocr_ran": ocr_ran,
             "ocr_text_length": len(ocr_text),
             "ocr_confidence": round(ocr_confidence, 4),
             "has_text_embedding": text_embedding is not None,

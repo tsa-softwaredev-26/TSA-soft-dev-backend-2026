@@ -9,7 +9,7 @@ from visual_memory.engine.embedding import make_combined_embedding
 from visual_memory.engine.model_registry import registry
 from visual_memory.engine.text_recognition import TextRecognizer
 from visual_memory.learning import ProjectionHead
-from visual_memory.utils import crop_object, find_match, deduplicate_matches, get_logger, mean_luminance, estimate_text_likelihood, collect_system_metrics
+from visual_memory.utils import crop_object, find_match, deduplicate_matches, get_logger, mean_luminance, blur_score, estimate_text_likelihood, should_run_ocr, collect_system_metrics
 from visual_memory.utils.logger import LogTag
 from visual_memory.database import DatabaseStore
 
@@ -304,6 +304,8 @@ class ScanPipeline:
         ocr_ms = 0.0
         match_ms = 0.0
         text_likelihoods = [estimate_text_likelihood(crop) for crop in crops]
+        crop_luminance = [mean_luminance(crop) for crop in crops]
+        crop_blur_scores = [blur_score(crop) for crop in crops]
         ocr_text_by_index: dict[int, str] = {}
         text_emb_by_index: dict[int, torch.Tensor] = {}
         ocr_conf_by_index: dict[int, float] = {}
@@ -311,7 +313,16 @@ class ScanPipeline:
         if self.ocr_client is not None:
             ocr_indices = [
                 i for i, likelihood in enumerate(text_likelihoods)
-                if _settings.ocr_text_likelihood_threshold <= likelihood <= _settings.ocr_text_likelihood_upper_threshold
+                if should_run_ocr(
+                    likelihood,
+                    lower_threshold=_settings.ocr_text_likelihood_threshold,
+                    upper_threshold=_settings.ocr_text_likelihood_upper_threshold,
+                    luminance=crop_luminance[i],
+                    blur_score=crop_blur_scores[i],
+                    rescue_threshold=_settings.ocr_text_likelihood_rescue_threshold,
+                    rescue_min_luminance=_settings.ocr_text_likelihood_rescue_min_luminance,
+                    rescue_min_blur_score=_settings.ocr_text_likelihood_rescue_min_blur_score,
+                )
             ]
             if ocr_indices:
                 ocr_t0 = time.monotonic()
@@ -362,6 +373,8 @@ class ScanPipeline:
                     "label": matched_label,
                     "similarity": round(similarity, 4),
                     "text_likelihood": round(text_likelihood, 3),
+                    "crop_luminance": round(crop_luminance[i], 2),
+                    "crop_blur_score": round(crop_blur_scores[i], 2),
                     "ocr_text_length": len(ocr_text),
                 })
                 if scan_id is not None:

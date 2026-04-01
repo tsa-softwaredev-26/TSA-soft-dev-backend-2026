@@ -1,4 +1,4 @@
-"""Validation tests for text-likelihood threshold tuning (0.30)."""
+"""Validation tests for text-likelihood threshold tuning (0.30 + rescue path)."""
 from __future__ import annotations
 
 import sys
@@ -34,11 +34,17 @@ def _solid_image(value: int = 150, size: tuple = (128, 128)) -> Image.Image:
     return Image.fromarray(arr, "RGB")
 
 
-def test_threshold_is_030():
-    """Verify threshold setting is 0.30."""
+def test_threshold_and_rescue_defaults():
+    """Verify threshold and rescue defaults are set for production tuning."""
     settings = Settings()
     assert settings.ocr_text_likelihood_threshold == 0.30, \
         f"Expected threshold 0.30, got {settings.ocr_text_likelihood_threshold}"
+    assert settings.ocr_text_likelihood_rescue_threshold == 0.10, \
+        f"Expected rescue threshold 0.10, got {settings.ocr_text_likelihood_rescue_threshold}"
+    assert settings.ocr_text_likelihood_rescue_min_luminance == 40.0, \
+        f"Expected rescue min luminance 40.0, got {settings.ocr_text_likelihood_rescue_min_luminance}"
+    assert settings.ocr_text_likelihood_rescue_min_blur_score == 130.0, \
+        f"Expected rescue min blur score 130.0, got {settings.ocr_text_likelihood_rescue_min_blur_score}"
 
 
 def test_text_like_image_scores_above_threshold():
@@ -75,12 +81,12 @@ def test_settings_file_is_readable():
     content = settings_path.read_text()
     assert "ocr_text_likelihood_threshold" in content, \
         "Settings file should define ocr_text_likelihood_threshold"
-    assert "0.30" in content, \
-        "Settings file should have threshold value 0.30"
+    assert "ocr_text_likelihood_rescue_threshold" in content, \
+        "Settings file should define ocr_text_likelihood_rescue_threshold"
 
 
 for name, fn in [
-    ("text_tuning:threshold_is_030", test_threshold_is_030),
+    ("text_tuning:threshold_and_rescue_defaults", test_threshold_and_rescue_defaults),
     ("text_tuning:text_like_above_threshold", test_text_like_image_scores_above_threshold),
     ("text_tuning:uniform_below_threshold", test_uniform_image_scores_below_threshold),
     ("text_tuning:threshold_is_valid_float", test_threshold_config_is_float),

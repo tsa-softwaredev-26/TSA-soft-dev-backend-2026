@@ -52,12 +52,15 @@ class Settings:
 
     # OCR text pre-check: normalized edge density threshold below which OCR is
     # skipped entirely on a crop. 0.0 = always run OCR, 1.0 = never run.
-    # Range 0.0-1.0. Tuned to 0.30 via benchmarks/text_likelihood_sweep.json
-    # (48 text + 192 textless images, 1-6ft distances, multiple lighting conditions).
-    # Minimizes false positives on textless objects (wallets, keys, bottles, glasses):
-    # at 0.30: 18/192 FP (9.4% FP rate), 8/48 TP (16.7% recall). Previous 0.10 had
-    # 192/192 FP (100% FP rate), running unnecessary OCR on all textless images.
+    # Range 0.0-1.0. Tuned for demo goal: trigger OCR reliably for receipts in
+    # good lighting at 1-3ft while preserving low OCR load on textless objects.
     ocr_text_likelihood_threshold: float = 0.30
+    # Rescue path threshold for bright, sharp crops that are receipt-like but
+    # score below the primary threshold.
+    ocr_text_likelihood_rescue_threshold: float = 0.10
+    # Rescue path minimum brightness and sharpness to avoid broad OCR fallback.
+    ocr_text_likelihood_rescue_min_luminance: float = 40.0
+    ocr_text_likelihood_rescue_min_blur_score: float = 130.0
 
     # OCR (text recognition)
     ocr_backend: str = "http"
@@ -65,7 +68,7 @@ class Settings:
     ocr_min_confidence: float = 0.3
     ocr_service_url: str = field(default_factory=lambda: os.environ.get("OCR_SERVICE_URL", "http://127.0.0.1:8001/ocr"))
     ocr_health_url: str = field(default_factory=lambda: os.environ.get("OCR_HEALTH_URL", ""))
-    ocr_timeout_seconds: float = field(default_factory=lambda: float(os.environ.get("OCR_TIMEOUT_SECONDS", "10.0")))
+    ocr_timeout_seconds: float = field(default_factory=lambda: float(os.environ.get("OCR_TIMEOUT_SECONDS", "3.5")))
     # Upper bound for OCR gating band. OCR runs only when likelihood is within:
     # [ocr_text_likelihood_threshold, ocr_text_likelihood_upper_threshold].
     # Keeps OCR from running on extreme-noise crops while preserving text-like crops.
@@ -75,8 +78,8 @@ class Settings:
     text_similarity_threshold: float = 0.4
     # Combined embedding weighting. Text can be boosted relative to image to
     # improve retrieval for text-heavy objects (receipts, labels).
-    combined_text_weight: float = 1.25
-    combined_text_weight_high_confidence_boost: float = 0.25
+    combined_text_weight: float = 1.10
+    combined_text_weight_high_confidence_boost: float = 0.10
 
     # Pipeline feature toggles - overridable via env vars before pipeline import
     enable_depth: bool = field(default_factory=lambda: os.environ.get("ENABLE_DEPTH", "1") != "0")
@@ -145,7 +148,7 @@ class Settings:
     # Database
     db_path: str = "data/memory.db"
     # Per-scan cache TTL for feedback/crop lookup.
-    scan_cache_ttl_seconds: int = field(default_factory=lambda: int(os.environ.get("SCAN_CACHE_TTL_SECONDS", "300")))
+    scan_cache_ttl_seconds: int = field(default_factory=lambda: int(os.environ.get("SCAN_CACHE_TTL_SECONDS", "600")))
 
     # API server
     api_host: str = field(default_factory=lambda: os.environ.get("API_HOST", "127.0.0.1"))
