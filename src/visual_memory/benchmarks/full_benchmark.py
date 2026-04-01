@@ -491,13 +491,16 @@ def _calibrate_threshold_with_negatives(
     neg_rows: List[dict],
     database: List[Tuple[str, torch.Tensor]],
     head: ProjectionHead,
-    floor: float = 0.20,
-    ceiling: float = 0.85,
+    floor: float = 0.18,
+    ceiling: float = 0.55,
+    target_fpr_pe: float = 0.35,
+    target_fpr_bl: float = 0.35,
+    min_tpr_pe: float = 0.25,
 ) -> float:
     """
     Pick threshold using both test positives and explicit negative samples.
 
-    Objective favors lower false-positive rates over absolute recall.
+    Objective: keep false positives bounded without collapsing retrieval recall.
     """
     if not database or not test_set or not neg_embedded:
         return floor
@@ -540,20 +543,50 @@ def _calibrate_threshold_with_negatives(
     if not pos_pe or not neg_pe:
         return floor
 
-    best_t = floor
-    best_score = -1e9
-    for t in np.arange(floor, ceiling + 1e-9, 0.01):
-        t = float(round(t, 3))
+    def _rates(t: float) -> Tuple[float, float, float, float]:
         tpr_bl = sum(v >= t for v in pos_bl) / max(len(pos_bl), 1)
         tpr_pe = sum(v >= t for v in pos_pe) / max(len(pos_pe), 1)
         fpr_bl = sum(v >= t for v in neg_bl) / max(len(neg_bl), 1)
         fpr_pe = sum(v >= t for v in neg_pe) / max(len(neg_pe), 1)
-        # Strong FP penalty, slight preference to personalized recall.
-        score = (0.45 * tpr_bl + 0.55 * tpr_pe) - (2.0 * fpr_bl + 3.0 * fpr_pe)
-        if score > best_score:
-            best_score = score
-            best_t = t
-    return best_t
+        return tpr_bl, tpr_pe, fpr_bl, fpr_pe
+
+    candidates = sorted(
+        {
+            float(round(t, 3))
+            for t in np.arange(floor, ceiling + 1e-9, 0.005)
+        }
+        | {float(round(v, 3)) for v in (pos_bl + pos_pe + neg_bl + neg_pe)}
+    )
+    candidates = [t for t in candidates if floor <= t <= ceiling]
+    if not candidates:
+        return floor
+
+    feasible: List[Tuple[float, float]] = []
+    fallback: List[Tuple[float, float, float]] = []
+    for t in candidates:
+        tpr_bl, tpr_pe, fpr_bl, fpr_pe = _rates(t)
+        score = (1.0 * tpr_pe + 0.35 * tpr_bl) - (0.60 * fpr_pe + 0.25 * fpr_bl) - (0.05 * t)
+        is_feasible = (
+            fpr_pe <= target_fpr_pe
+            and fpr_bl <= target_fpr_bl
+            and tpr_pe >= min_tpr_pe
+        )
+        if is_feasible:
+            feasible.append((score, t))
+        else:
+            violation = (
+                3.0 * max(0.0, fpr_pe - target_fpr_pe)
+                + 2.0 * max(0.0, fpr_bl - target_fpr_bl)
+                + 2.0 * max(0.0, min_tpr_pe - tpr_pe)
+            )
+            fallback.append((violation, -score, t))
+
+    if feasible:
+        feasible.sort(reverse=True)
+        return feasible[0][1]
+
+    fallback.sort()
+    return fallback[0][2]
 
 
 # phase 6: grounding dino evaluation with full production fallback chain
