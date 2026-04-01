@@ -3,7 +3,9 @@ import io
 import json
 import os
 import time
+from functools import wraps
 from pathlib import Path
+from threading import RLock
 from typing import Optional
 
 import torch
@@ -22,8 +24,17 @@ except Exception:
     _log = None
 
 
+def _synchronized(method):
+    @wraps(method)
+    def _wrapped(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return _wrapped
+
+
 class DatabaseStore:
     def __init__(self, db_path: str | Path):
+        self._lock = RLock()
         self._path = Path(db_path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._set_permissions(self._path.parent, 0o700)
@@ -32,6 +43,7 @@ class DatabaseStore:
         self._create_tables()
         self._set_permissions(self._path, 0o600)
 
+    @_synchronized
     def _create_tables(self):
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS items (
@@ -73,49 +85,31 @@ class DatabaseStore:
             CREATE INDEX IF NOT EXISTS feedback_label
                 ON feedback (label, feedback_type);
         """)
-        # migrate existing DBs that predate the user_settings column
-        try:
-            self._conn.execute("ALTER TABLE user_state ADD COLUMN user_settings TEXT")
-            self._conn.commit()
-        except Exception:
-            pass  # column already exists
-        # migrate existing sightings tables that predate crop_path
-        try:
-            self._conn.execute("ALTER TABLE sightings ADD COLUMN crop_path TEXT")
-            self._conn.commit()
-        except Exception:
-            pass  # column already exists
-        # migrate existing sightings tables that predate room_name
-        try:
-            self._conn.execute("ALTER TABLE sightings ADD COLUMN room_name TEXT")
-            self._conn.commit()
-        except Exception:
-            pass  # column already exists
-        # migrate existing items tables that predate label_embedding
-        try:
-            self._conn.execute("ALTER TABLE items ADD COLUMN label_embedding BLOB")
-            self._conn.commit()
-        except Exception:
-            pass  # column already exists
-        # migrate existing items tables that predate ocr_embedding
-        try:
-            self._conn.execute("ALTER TABLE items ADD COLUMN ocr_embedding BLOB")
-            self._conn.commit()
-        except Exception:
-            pass  # column already exists
-        # migrate existing items tables that predate visual_attributes
-        try:
-            self._conn.execute("ALTER TABLE items ADD COLUMN visual_attributes TEXT")
-            self._conn.commit()
-        except Exception:
-            pass  # column already exists
-        # migrate existing user_state tables that predate ml_settings
-        try:
-            self._conn.execute("ALTER TABLE user_state ADD COLUMN ml_settings TEXT")
-            self._conn.commit()
-        except Exception:
-            pass  # column already exists
+        self._apply_optional_migration("ALTER TABLE user_state ADD COLUMN user_settings TEXT")
+        self._apply_optional_migration("ALTER TABLE sightings ADD COLUMN crop_path TEXT")
+        self._apply_optional_migration("ALTER TABLE sightings ADD COLUMN room_name TEXT")
+        self._apply_optional_migration("ALTER TABLE items ADD COLUMN label_embedding BLOB")
+        self._apply_optional_migration("ALTER TABLE items ADD COLUMN ocr_embedding BLOB")
+        self._apply_optional_migration("ALTER TABLE items ADD COLUMN visual_attributes TEXT")
+        self._apply_optional_migration("ALTER TABLE user_state ADD COLUMN ml_settings TEXT")
 
+    @_synchronized
+    def _apply_optional_migration(self, statement: str) -> None:
+        try:
+            self._conn.execute(statement)
+            self._conn.commit()
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" in str(exc).lower():
+                return
+            if _log is not None:
+                _log.error({"event": "db_migration_failed", "statement": statement, "error": str(exc)})
+            raise
+        except sqlite3.DatabaseError as exc:
+            if _log is not None:
+                _log.error({"event": "db_migration_failed", "statement": statement, "error": str(exc)})
+            raise
+
+    @_synchronized
     def _configure_encryption(self) -> None:
         key = os.environ.get("DB_ENCRYPTION_KEY", "").strip()
         if not key:
@@ -162,6 +156,7 @@ class DatabaseStore:
         buf = io.BytesIO(blob)
         return torch.load(buf, map_location="cpu", weights_only=True)
 
+    @_synchronized
     def add_item(
         self,
         label: str,
@@ -198,6 +193,7 @@ class DatabaseStore:
         self._conn.commit()
         return cur.lastrowid
 
+    @_synchronized
     def get_all_items(self) -> list[dict]:
         rows = self._conn.execute(
             "SELECT id, label, combined_embedding, ocr_text FROM items"
@@ -212,6 +208,7 @@ class DatabaseStore:
             })
         return items
 
+    @_synchronized
     def get_items_metadata(self, label: Optional[str] = None) -> list[dict]:
         """Return item rows without embedding blobs - for listing and confirmation UI."""
         if label is not None:
@@ -242,6 +239,7 @@ class DatabaseStore:
             })
         return result
 
+    @_synchronized
     def get_label_embeddings(self) -> list[dict]:
         """Return one label embedding per unique label (most recent row per label)."""
         rows = self._conn.execute(
@@ -254,6 +252,7 @@ class DatabaseStore:
                 result.append({"label": label, "embedding": self._blob_to_tensor(blob)})
         return result
 
+    @_synchronized
     def get_items_with_ocr(self) -> list[dict]:
         """Return one row per unique label where OCR text is non-empty (most recent teach per label).
 
@@ -273,6 +272,7 @@ class DatabaseStore:
             })
         return result
 
+    @_synchronized
     def get_labels_last_seen_in_room(self, room_name: str) -> list[dict]:
         """Return the most recent sighting per label last seen in the given room."""
         rows = self._conn.execute(
@@ -284,6 +284,7 @@ class DatabaseStore:
         ).fetchall()
         return [self._sighting_row_to_dict(r) for r in rows]
 
+    @_synchronized
     def rename_label(self, old_label: str, new_label: str) -> dict:
         """
         Rename all items and sightings from old_label to new_label.
@@ -306,6 +307,7 @@ class DatabaseStore:
         self._conn.commit()
         return {"renamed": renamed, "replaced": replaced}
 
+    @_synchronized
     def get_label_avg_confidence(self, label: str) -> Optional[float]:
         """Average detection confidence for all previous teaches of this label. None if no history."""
         row = self._conn.execute(
@@ -316,17 +318,20 @@ class DatabaseStore:
             return float(row[0])
         return None
 
+    @_synchronized
     def delete_item(self, item_id: int) -> bool:
         cur = self._conn.execute("DELETE FROM items WHERE id = ?", (item_id,))
         self._conn.commit()
         return cur.rowcount > 0
 
+    @_synchronized
     def delete_items_by_label(self, label: str) -> int:
         """Delete all items with the given label. Returns number of deleted rows."""
         cur = self._conn.execute("DELETE FROM items WHERE label = ?", (label,))
         self._conn.commit()
         return cur.rowcount
 
+    @_synchronized
     def save_projection_head(self, state_dict: dict) -> None:
         buf = io.BytesIO()
         torch.save(state_dict, buf)
@@ -337,6 +342,7 @@ class DatabaseStore:
         )
         self._conn.commit()
 
+    @_synchronized
     def load_projection_head(self) -> Optional[dict]:
         row = self._conn.execute(
             "SELECT projection_head FROM user_state WHERE id = 1"
@@ -346,6 +352,7 @@ class DatabaseStore:
         buf = io.BytesIO(row[0])
         return torch.load(buf, map_location="cpu", weights_only=True)
 
+    @_synchronized
     def save_user_settings(self, data: dict) -> None:
         self._conn.execute(
             "INSERT INTO user_state (id, user_settings) VALUES (1, ?)"
@@ -354,6 +361,7 @@ class DatabaseStore:
         )
         self._conn.commit()
 
+    @_synchronized
     def load_user_settings(self) -> Optional[dict]:
         row = self._conn.execute(
             "SELECT user_settings FROM user_state WHERE id = 1"
@@ -365,6 +373,7 @@ class DatabaseStore:
         except (json.JSONDecodeError, TypeError):
             return None
 
+    @_synchronized
     def save_ml_settings(self, data: dict) -> None:
         self._conn.execute(
             "INSERT INTO user_state (id, ml_settings) VALUES (1, ?)"
@@ -373,6 +382,7 @@ class DatabaseStore:
         )
         self._conn.commit()
 
+    @_synchronized
     def load_ml_settings(self) -> Optional[dict]:
         row = self._conn.execute(
             "SELECT ml_settings FROM user_state WHERE id = 1"
@@ -384,6 +394,7 @@ class DatabaseStore:
         except (json.JSONDecodeError, TypeError):
             return None
 
+    @_synchronized
     def add_feedback(
         self,
         label: str,
@@ -408,6 +419,7 @@ class DatabaseStore:
         self._conn.commit()
         return cur.lastrowid
 
+    @_synchronized
     def load_feedback_triplets(self) -> list:
         """Pair each positive with each negative per label -> (anchor, positive, negative)."""
         rows = self._conn.execute(
@@ -434,6 +446,7 @@ class DatabaseStore:
                     triplets.append((anc_p, q_p, q_n))
         return triplets
 
+    @_synchronized
     def count_feedback(self) -> dict:
         row = self._conn.execute(
             "SELECT "
@@ -457,6 +470,7 @@ class DatabaseStore:
         triplets = sum(p * n for _, p, n in label_rows)
         return {"positives": positives, "negatives": negatives, "triplets": triplets}
 
+    @_synchronized
     def add_sighting(
         self,
         label: str,
@@ -478,6 +492,7 @@ class DatabaseStore:
         self._conn.commit()
         return cur.lastrowid
 
+    @_synchronized
     def get_last_sighting(self, label: str) -> Optional[dict]:
         row = self._conn.execute(
             "SELECT id, label, timestamp, direction, distance_ft, similarity, crop_path, room_name "
@@ -488,6 +503,7 @@ class DatabaseStore:
             return None
         return self._sighting_row_to_dict(row)
 
+    @_synchronized
     def get_sightings(
         self,
         label: Optional[str] = None,
@@ -515,6 +531,7 @@ class DatabaseStore:
         ).fetchall()
         return [self._sighting_row_to_dict(r) for r in rows]
 
+    @_synchronized
     def get_known_labels(self) -> list[str]:
         """Return labels that have at least one sighting, most recently seen first."""
         rows = self._conn.execute(
@@ -522,6 +539,7 @@ class DatabaseStore:
         ).fetchall()
         return [r[0] for r in rows]
 
+    @_synchronized
     def get_known_item_labels(self, limit: int = 64) -> list[str]:
         """Return known labels from items and sightings, newest first."""
         rows = self._conn.execute(
@@ -535,6 +553,7 @@ class DatabaseStore:
         ).fetchall()
         return [str(r[0]) for r in rows if r and r[0]]
 
+    @_synchronized
     def get_recent_room_names(self, limit: int = 24) -> list[str]:
         """Return recently used room names from sightings, newest first."""
         rows = self._conn.execute(
@@ -545,25 +564,30 @@ class DatabaseStore:
         ).fetchall()
         return [str(r[0]) for r in rows if r and r[0]]
 
+    @_synchronized
     def count_sightings(self) -> int:
         row = self._conn.execute("SELECT COUNT(*) FROM sightings").fetchone()
         return row[0] if row else 0
 
+    @_synchronized
     def clear_items(self) -> int:
         cur = self._conn.execute("DELETE FROM items")
         self._conn.commit()
         return cur.rowcount
 
+    @_synchronized
     def clear_sightings(self) -> int:
         cur = self._conn.execute("DELETE FROM sightings")
         self._conn.commit()
         return cur.rowcount
 
+    @_synchronized
     def clear_feedback(self) -> int:
         cur = self._conn.execute("DELETE FROM feedback")
         self._conn.commit()
         return cur.rowcount
 
+    @_synchronized
     def clear_projection_head(self) -> None:
         self._conn.execute(
             "INSERT INTO user_state (id, projection_head) VALUES (1, NULL)"
@@ -571,6 +595,7 @@ class DatabaseStore:
         )
         self._conn.commit()
 
+    @_synchronized
     def reset_ml_settings(self) -> None:
         self._conn.execute(
             "INSERT INTO user_state (id, ml_settings) VALUES (1, NULL)"
@@ -578,6 +603,7 @@ class DatabaseStore:
         )
         self._conn.commit()
 
+    @_synchronized
     def reset_user_settings_db(self) -> None:
         self._conn.execute(
             "INSERT INTO user_state (id, user_settings) VALUES (1, NULL)"
@@ -585,6 +611,7 @@ class DatabaseStore:
         )
         self._conn.commit()
 
+    @_synchronized
     def delete_sighting(self, sighting_id: int) -> bool:
         cur = self._conn.execute("DELETE FROM sightings WHERE id = ?", (sighting_id,))
         self._conn.commit()
@@ -604,5 +631,6 @@ class DatabaseStore:
             "room_name": room_name,
         }
 
+    @_synchronized
     def close(self):
         self._conn.close()

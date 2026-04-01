@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -120,9 +121,16 @@ def run_validation(manifest_path: str, base_url: str) -> int:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--manifest", required=True)
+    parser.add_argument("--manifest", default=os.environ.get("BENCHMARK_MANIFEST", "").strip())
     parser.add_argument("--base-url", default="http://localhost:5050")
     args = parser.parse_args()
+    if not args.manifest:
+        print("SKIP: benchmark manifest not configured (set --manifest or BENCHMARK_MANIFEST)")
+        return 0
+    manifest_path = Path(args.manifest)
+    if not manifest_path.exists():
+        print(f"SKIP: benchmark manifest not found: {manifest_path}")
+        return 0
     sys.exit(run_validation(args.manifest, args.base_url))
 
 

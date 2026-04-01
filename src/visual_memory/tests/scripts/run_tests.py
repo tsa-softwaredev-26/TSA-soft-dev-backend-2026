@@ -143,6 +143,7 @@ if FAST:
 
 from visual_memory.pipelines.scan_mode.pipeline import ScanPipeline
 
+scan = None
 try:
     scan = ScanPipeline(focal_length_px=FOCAL_PX)
     r2 = scan.run(load_image(str(WALLET_3FT)))
@@ -154,7 +155,11 @@ try:
         _fail("scan:match", "count=0")
 
 except Exception as exc:
-    _fail("scan:match", str(exc))
+    msg = str(exc)
+    if isinstance(exc, FileNotFoundError) or "Model file not found" in msg:
+        _skip("scan:match", f"external dependency unavailable ({msg})")
+    else:
+        _fail("scan:match", msg)
 
 if VERBOSE:
     for _e in tail_logs(since_line=_mark2): print(f"       {json.dumps(_e)}")
@@ -166,6 +171,8 @@ _section("[3] estimator")
 _mark3 = log_mark()
 if not DEPTH:
     _skip("estimator:load", "DEPTH=0 (set DEPTH=1 to enable)")
+elif scan is None:
+    _skip("estimator:load", "scan pipeline unavailable")
 else:
     try:
         estimator = scan.estimator
@@ -186,13 +193,13 @@ _section("[4] text_recognition + embedding - magnesium.heic")
 _mark4 = log_mark()
 
 # FAST mode: scan had OCR disabled, so create a temporary OCR client for this test.
-if FAST and scan.ocr_client is None:
+if FAST and (scan is None or scan.ocr_client is None):
     from visual_memory.engine.text_recognition import TextRecognizer
     _recognizer = TextRecognizer()
-    _embedder   = remember.text_embedder
+    _embedder = remember.text_embedder
 else:
-    _recognizer = scan.ocr_client
-    _embedder   = scan.text_embedder
+    _recognizer = scan.ocr_client if scan is not None else None
+    _embedder = scan.text_embedder if scan is not None else remember.text_embedder
 
 if _recognizer is None:
     _skip("text_recognition:recognizer", "ENABLE_OCR=0")
@@ -215,12 +222,15 @@ else:
             if gt:
                 _show_text_diff(ocr["text"], gt)
 
-        sample_text = ocr["text"] if ocr["text"] else "test document"
-        emb = _embedder.embed_text(sample_text)
-        if emb.shape == (1, 512):
-            _pass("text_recognition:embedder", f"shape={list(emb.shape)}")
+        if _embedder is None:
+            _skip("text_recognition:embedder", "embedder unavailable")
         else:
-            _fail("text_recognition:embedder", f"unexpected shape={list(emb.shape)}")
+            sample_text = ocr["text"] if ocr["text"] else "test document"
+            emb = _embedder.embed_text(sample_text)
+            if emb.shape == (1, 512):
+                _pass("text_recognition:embedder", f"shape={list(emb.shape)}")
+            else:
+                _fail("text_recognition:embedder", f"unexpected shape={list(emb.shape)}")
 
     except Exception as exc:
         _fail("text_recognition:recognizer", str(exc))

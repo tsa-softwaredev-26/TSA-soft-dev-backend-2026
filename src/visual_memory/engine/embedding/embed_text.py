@@ -2,7 +2,7 @@
 from typing import Optional, List
 import torch
 import torch.nn.functional as F
-from transformers import CLIPTextModelWithProjection, CLIPTokenizer
+from transformers import CLIPTextConfig, CLIPTextModelWithProjection, CLIPTokenizer
 
 from visual_memory.config import Settings
 from visual_memory.utils import get_logger
@@ -27,7 +27,10 @@ class CLIPTextEmbedder:
     ) -> None:
         self.device = torch.device(device if device else get_device())
         self.tokenizer = CLIPTokenizer.from_pretrained(model_name)
-        self.model = CLIPTextModelWithProjection.from_pretrained(model_name).to(self.device).eval()
+        text_config = CLIPTextConfig.from_pretrained(model_name)
+        self.model = CLIPTextModelWithProjection.from_pretrained(
+            model_name, config=text_config
+        ).to(self.device).eval()
 
     def to_cpu(self) -> None:
         """Move model weights to CPU RAM."""

@@ -484,6 +484,78 @@ def _calibrate_threshold(
     return float(round(proposed, 3))
 
 
+def _calibrate_threshold_with_negatives(
+    test_set: List[str],
+    embedded: Dict[str, dict],
+    neg_embedded: Dict[str, dict],
+    neg_rows: List[dict],
+    database: List[Tuple[str, torch.Tensor]],
+    head: ProjectionHead,
+    floor: float = 0.20,
+    ceiling: float = 0.85,
+) -> float:
+    """
+    Pick threshold using both test positives and explicit negative samples.
+
+    Objective favors lower false-positive rates over absolute recall.
+    """
+    if not database or not test_set or not neg_embedded:
+        return floor
+
+    projected_db = [(lbl, head.project(emb)) for (lbl, emb) in database]
+    labels = sorted({lbl for lbl, _ in database})
+    row_by_image = {r["image"]: r for r in neg_rows}
+
+    pos_bl: List[float] = []
+    pos_pe: List[float] = []
+    for fname in test_set:
+        row = embedded[fname]
+        q = row["embedding"]
+        true_label = row["label"]
+        bl_same = [float(cosine_similarity(q, emb).item()) for (lbl, emb) in database if lbl == true_label]
+        pe_same = [
+            float(cosine_similarity(head.project(q), pemb).item())
+            for (lbl, pemb) in projected_db
+            if lbl == true_label
+        ]
+        if bl_same:
+            pos_bl.append(max(bl_same))
+        if pe_same:
+            pos_pe.append(max(pe_same))
+
+    neg_bl: List[float] = []
+    neg_pe: List[float] = []
+    for fname, row in neg_embedded.items():
+        note = str(row_by_image.get(fname, {}).get("note", ""))
+        excluded = _parse_negative_excluded_labels(note, labels)
+        db_filtered = [(lbl, emb) for (lbl, emb) in database if lbl not in excluded]
+        pdb_filtered = [(lbl, emb) for (lbl, emb) in projected_db if lbl not in excluded]
+        q = row["embedding"]
+        if db_filtered:
+            neg_bl.append(max(float(cosine_similarity(q, emb).item()) for _, emb in db_filtered))
+        if pdb_filtered:
+            qh = head.project(q)
+            neg_pe.append(max(float(cosine_similarity(qh, emb).item()) for _, emb in pdb_filtered))
+
+    if not pos_pe or not neg_pe:
+        return floor
+
+    best_t = floor
+    best_score = -1e9
+    for t in np.arange(floor, ceiling + 1e-9, 0.01):
+        t = float(round(t, 3))
+        tpr_bl = sum(v >= t for v in pos_bl) / max(len(pos_bl), 1)
+        tpr_pe = sum(v >= t for v in pos_pe) / max(len(pos_pe), 1)
+        fpr_bl = sum(v >= t for v in neg_bl) / max(len(neg_bl), 1)
+        fpr_pe = sum(v >= t for v in neg_pe) / max(len(neg_pe), 1)
+        # Strong FP penalty, slight preference to personalized recall.
+        score = (0.45 * tpr_bl + 0.55 * tpr_pe) - (2.0 * fpr_bl + 3.0 * fpr_pe)
+        if score > best_score:
+            best_score = score
+            best_t = t
+    return best_t
+
+
 # phase 6: grounding dino evaluation with full production fallback chain
 
 def _detect_with_fallback(
@@ -1065,6 +1137,26 @@ def main() -> None:
         threshold = _calibrate_threshold(train_set, embedded, database, test_set)
         print(f"  auto-calibrated similarity threshold (post-train): {threshold:.3f}")
 
+    # Prepare negative embeddings before retrieval so threshold can use negatives.
+    neg_rows: List[dict] = []
+    neg_embedded: Dict[str, dict] = {}
+    if args.negative_dataset.exists():
+        neg_rows = _load_negative_dataset(args.negative_dataset)
+        if neg_rows:
+            _enforce_memory_guard(monitor, "negative pre-embed")
+            neg_embedded = _embed_rows(neg_rows, args.images_neg, args.no_ocr, settings, monitor=monitor)
+
+    if args.similarity_threshold is None and neg_embedded:
+        threshold = _calibrate_threshold_with_negatives(
+            test_set=test_set,
+            embedded=embedded,
+            neg_embedded=neg_embedded,
+            neg_rows=neg_rows,
+            database=database,
+            head=head,
+        )
+        print(f"  auto-calibrated similarity threshold (with negatives): {threshold:.3f}")
+
     # Phase 5: Retrieval
     _enforce_memory_guard(monitor, "phase 5")
     print("\n[5/7] Evaluating retrieval (3ft/6ft test set against 1ft_bright_clean DB)...")
@@ -1085,9 +1177,6 @@ def main() -> None:
     neg_results: List[dict] = []
     if args.negative_dataset.exists():
         print("\n[neg] Evaluating false positive rate on negative images...")
-        neg_rows = _load_negative_dataset(args.negative_dataset)
-        _enforce_memory_guard(monitor, "negative evaluation")
-        neg_embedded = _embed_rows(neg_rows, args.images_neg, args.no_ocr, settings, monitor=monitor)
         if neg_embedded:
             neg_results = _eval_negatives_strict(neg_embedded, neg_rows, database, head, threshold)
             print(f"  {len(neg_results)} negative images evaluated")
