@@ -98,7 +98,8 @@ def create_app():
     app.register_blueprint(item_ask_bp)
     app.register_blueprint(items_bp)
     app.register_blueprint(sightings_bp)
-    app.register_blueprint(debug_bp)
+    if os.environ.get("ENABLE_DEBUG_ROUTES", "0") == "1":
+        app.register_blueprint(debug_bp)
     app.register_blueprint(transcribe_bp)
     app.register_blueprint(voice_bp)
 
