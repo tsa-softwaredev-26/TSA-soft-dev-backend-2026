@@ -37,11 +37,7 @@ def _validate_api_key() -> None:
     if len(_API_KEY) < 32:
         _logger.error({"event": "api_key_weak", "reason": "too_short", "length": len(_API_KEY)})
         raise SystemExit("API_KEY must be at least 32 characters. Generate with: openssl rand -hex 32")
-    weak_patterns = ("password", "test", "demo", "admin", "12345", "changeme")
     lowered = _API_KEY.lower()
-    if any(token in lowered for token in weak_patterns):
-        _logger.error({"event": "api_key_weak", "reason": "weak_pattern"})
-        raise SystemExit("API_KEY appears weak. Generate with: openssl rand -hex 32")
     _logger.info({"event": "api_key_valid", "length": len(_API_KEY)})
 
 
