@@ -468,7 +468,7 @@ def _test_transcription_metadata(cfg: dict, assets: dict) -> None:
         assert context_policy, "transcription.context_policy missing"
         assert context_state_id, "transcription.context_state_id missing"
         # In idle state (initial connection), expect idle_home policy
-        assert context_policy == "idle_home" or context_policy in ["focused_item", "awaiting_location"], \
+        assert context_policy == "idle_home" or context_policy in ["focused_item_scan_browse", "awaiting_location_capture"], \
             f"unexpected context_policy: {context_policy}"
         assert context_state_id in ["idle", "focused_on_item", "awaiting_location"], \
             f"unexpected context_state_id: {context_state_id}"

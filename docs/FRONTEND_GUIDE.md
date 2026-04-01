@@ -186,6 +186,18 @@ Route by `type`, not by assumptions about current mode.
 
 `context_used`, `context_policy`, and `context_state_id` are diagnostics only (safe to ignore in UI logic).
 
+Current policy ids you may see in diagnostics include:
+- `idle_home`
+- `focused_item_scan_browse`
+- `awaiting_location_capture`
+- `awaiting_confirmation_binary`
+- `onboarding_teach_step`
+- `onboarding_scan_step`
+- `awaiting_image_scan`
+- `awaiting_image_remember`
+- `awaiting_image_describe`
+- `awaiting_image_generic`
+
 ### `error` -> show error
 
 ```json
@@ -212,6 +224,15 @@ Track `current_mode` from `session_state`. Show different UI per state.
 
 The server drives all transitions. Use `current_mode` exactly as sent in `session_state`; do not remap state names on the client.
 
+During onboarding, also track `context.onboarding_phase` and treat it as authoritative progression:
+- `teach_1`: first teach step only
+- `teach_2`: second teach step only
+- `await_scan`: scan step only
+- `ask`: swipe guidance step
+- `ask_prompted`: final ask/find completion step
+
+Do not bypass onboarding steps client-side. The backend enforces order and will keep users in-step with narration prompts.
+
 ---
 
 ## Frontend behavior in focused item mode
@@ -224,6 +245,7 @@ Expected voice examples in focused mode include:
 - `wrong` (negative feedback)
 - `right` or `correct` (positive feedback)
 - item ask commands like read/export/describe/rename/find
+- if user says teach/remember while focused, backend will guide them to return home first
 
 No special client parsing is required. Just send `audio` and render returned events.
 

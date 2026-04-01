@@ -225,7 +225,7 @@ class StubSpeechRecognizer:
             "confidence": self._confidence,
         }
 
-    def build_context_prompt(self, db_store) -> str:
+    def build_context_prompt(self, db_store, **kwargs) -> str:
         labels = db_store.get_known_item_labels(limit=8)
         rooms = db_store.get_recent_room_names(limit=8)
         return " ".join(labels + rooms + ["where", "find", "last", "seen"])[:256]

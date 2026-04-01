@@ -71,6 +71,19 @@ Whisper context biasing is always enabled by default and should be treated as mo
 
 UX requirement: context bias should differ by situation so command likelihood matches user intent by mode.
 
+Canonical policy buckets used at runtime:
+
+- `idle_home`
+- `focused_item_scan_browse`
+- `awaiting_location_capture`
+- `awaiting_confirmation_binary`
+- `onboarding_teach_step`
+- `onboarding_scan_step`
+- `awaiting_image_scan`
+- `awaiting_image_remember`
+- `awaiting_image_describe`
+- `awaiting_image_generic`
+
 ## Full Action Tree
 
 ### 1) Connect
@@ -185,6 +198,10 @@ Context available: `scan_id`, `scan_matches`, `item_index`, `current_label`.
   - Falls through to normal command handling (scan/remember/find/ask/settings/back).
   - If command changes flow, state transitions accordingly.
 
+- Teach while focused:
+  - User is guided to return home first (for example: "Return home to teach a new item. Say go back, then teach.")
+  - No implicit auto-navigation to home is performed.
+
 Important focused-mode UX behavior:
 
 - Holding chat while browsing detections is item-scoped first, global second.
@@ -196,15 +213,21 @@ Important focused-mode UX behavior:
 Goal: teach two items with rooms.
 
 - Accept teach commands and guide room capture.
-- Non-essential commands are discouraged; narration steers back to onboarding objective.
+- Enforced order via `onboarding_phase` progression:
+  - `teach_1` -> first teach only
+  - `teach_2` -> second teach only
+- Out-of-order commands are blocked with step-specific narration and state is preserved.
 
 ### 9) State: `onboarding_await_scan`
 
 Goal: scan both taught items and practice browsing.
 
 - Accept scan command (or scan gesture per frontend).
-- Allow navigation-back and settings.
-- Other commands are rejected with onboarding scan prompt.
+- During onboarding, progression is strict:
+  - `await_scan` accepts scan only.
+  - `ask` blocks arbitrary voice actions until the swipe guidance step is completed.
+  - `ask_prompted` accepts only ask/find completion commands.
+- Other commands are rejected with onboarding step prompts and the current state is preserved.
 - On successful scan:
   - transition to `focused_on_item`
   - prompt swipe browsing
@@ -227,11 +250,10 @@ Goal: scan both taught items and practice browsing.
 ## VLM and Grounding Behavior (Current UX Contract)
 
 - Current implemented item description and item question flows use the stored item image for the focused label.
-- Current UX does not claim grounding-crop-by-spoken-noun in home mode as implemented behavior.
-- If future implementation adds:
-  - "describe what I am looking at" -> full-scene VLM
-  - "describe this wallet" -> grounding/crop then VLM
-  then this document should be updated to move that behavior into the active contract.
+- Home/idle describe behavior is implemented:
+  - "describe what I am looking at" -> full-scene VLM on the current camera image.
+  - "describe this wallet" -> GroundingDINO target localization, crop, then VLM on the crop.
+- If no image is attached for idle describe, backend requests image capture and resumes describe flow on next audio event.
 
 ## Narration Guidelines
 

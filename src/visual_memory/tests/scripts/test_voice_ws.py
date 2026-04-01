@@ -232,7 +232,7 @@ def test_transcription_context_policy_varies_by_state():
         client.emit("audio", {"audio": _ogg_audio()})
         rec = client.get_received()
         trans = [e for e in rec if e["name"] == "transcription"][-1]["args"][0]
-        assert trans.get("context_policy") == "focused_item"
+        assert trans.get("context_policy") == "focused_item_scan_browse"
         assert trans.get("context_state_id") == "focused_on_item"
 
         # awaiting location
@@ -242,7 +242,7 @@ def test_transcription_context_policy_varies_by_state():
         client.emit("audio", {"audio": _ogg_audio()})
         rec = client.get_received()
         trans = [e for e in rec if e["name"] == "transcription"][-1]["args"][0]
-        assert trans.get("context_policy") == "awaiting_location"
+        assert trans.get("context_policy") == "awaiting_location_capture"
         assert trans.get("context_state_id") == "awaiting_location"
     finally:
         cleanup()
@@ -519,6 +519,55 @@ def test_onboarding_happy_path_end_to_end():
         cleanup()
 
 
+def test_onboarding_phase_blocks_out_of_order_commands():
+    """Onboarding locks users to ordered steps until tutorial completion."""
+    from visual_memory.api.voice_session import _sessions
+    client, sio, db, stub, cleanup = _make_ws_test_app(empty_db=True)
+    try:
+        client.connect()
+        client.get_received()
+        sid = _client_sid(client)
+        session = _sessions[sid]
+
+        # teach_1 blocks scan
+        session.state = "onboarding_teach"
+        session.context["onboarding_phase"] = "teach_1"
+        stub.set_result("scan")
+        client.emit("audio", {"audio": _ogg_audio()})
+        tts = _get_events(client, "tts")
+        assert tts and "first item" in tts[-1].get("narration", "").lower()
+        assert tts[-1].get("next_state") == "onboarding_teach"
+
+        # teach_2 blocks ask/find
+        session.state = "onboarding_teach"
+        session.context["onboarding_phase"] = "teach_2"
+        stub.set_result("where is my wallet")
+        client.emit("audio", {"audio": _ogg_audio()})
+        tts = _get_events(client, "tts")
+        assert tts and "second item" in tts[-1].get("narration", "").lower()
+        assert tts[-1].get("next_state") == "onboarding_teach"
+
+        # await_scan blocks remember
+        session.state = "onboarding_await_scan"
+        session.context["onboarding_phase"] = "await_scan"
+        stub.set_result("teach my wallet")
+        client.emit("audio", {"audio": _ogg_audio()})
+        tts = _get_events(client, "tts")
+        assert tts and "now scan" in tts[-1].get("narration", "").lower()
+        assert tts[-1].get("next_state") == "onboarding_await_scan"
+
+        # ask blocks arbitrary command until ask prompt is reached/completed
+        session.state = "focused_on_item"
+        session.context["onboarding_phase"] = "ask"
+        stub.set_result("describe this")
+        client.emit("audio", {"audio": _ogg_audio()})
+        tts = _get_events(client, "tts")
+        assert tts and "swipe right" in tts[-1].get("narration", "").lower()
+        assert tts[-1].get("next_state") == "focused_on_item"
+    finally:
+        cleanup()
+
+
 def test_hints_non_repeat_and_trigger_order():
     """Hints fire in configured order and are not repeated once emitted."""
     from visual_memory.api.voice_session import _sessions
@@ -577,6 +626,11 @@ def test_hints_non_repeat_and_trigger_order():
         remember_stub._success = True
 
         def _expect_hint_after_teach(room: str, expected_hint: str | None):
+            session.state = "idle"
+            session.context.pop("scan_matches", None)
+            session.context.pop("scan_id", None)
+            session.context.pop("item_index", None)
+            session.context.pop("current_label", None)
             stub.set_result("teach my book")
             client.emit("audio", {"audio": _ogg_audio(), "image": _tiny_jpeg_b64()})
             tts = _get_events(client, "tts")
@@ -859,6 +913,31 @@ def test_focused_positive_feedback_cache_expired_error():
         cleanup()
 
 
+def test_focused_teach_command_guides_back_home():
+    """Focused mode: teach request should not run; user is guided to return home."""
+    from visual_memory.api.voice_session import _sessions
+
+    client, sio, db, stub, cleanup = _make_ws_test_app(seed_fn=_seed_items)
+    try:
+        client.connect()
+        client.get_received()
+        sid = _client_sid(client)
+        session = _sessions[sid]
+        session.state = "focused_on_item"
+        session.context["scan_id"] = "scan-guidance"
+        session.context["current_label"] = "wallet"
+
+        stub.set_result("teach my umbrella")
+        client.emit("audio", {"audio": _ogg_audio()})
+        tts = _get_events(client, "tts")
+        assert tts, "missing guidance tts"
+        narration = tts[-1].get("narration", "").lower()
+        assert "return home to teach" in narration
+        assert tts[-1].get("next_state") == "focused_on_item"
+    finally:
+        cleanup()
+
+
 for name, fn in [
     ("ws:connect_returning_user", test_connect_returning_user),
     ("ws:connect_onboarding", test_connect_empty_db_triggers_onboarding),
@@ -875,6 +954,7 @@ for name, fn in [
     ("ws:bad_audio_error", test_bad_audio_returns_error),
     ("ws:invalid_audio_payload", test_audio_invalid_audio_payload_returns_bad_payload),
     ("ws:onboarding_happy_path", test_onboarding_happy_path_end_to_end),
+    ("ws:onboarding_phase_lock", test_onboarding_phase_blocks_out_of_order_commands),
     ("ws:hints_order_non_repeat", test_hints_non_repeat_and_trigger_order),
     ("ws:invalid_image_payload", test_audio_invalid_image_payload_returns_bad_payload),
     ("ws:oversize_image_payload", test_audio_oversize_image_payload_returns_bad_payload),
@@ -885,6 +965,7 @@ for name, fn in [
     ("ws:idle_describe_scene_timeout", test_idle_describe_scene_timeout_narration),
     ("ws:focused_positive_feedback", test_focused_positive_feedback_records),
     ("ws:focused_positive_feedback_cache_expired", test_focused_positive_feedback_cache_expired_error),
+    ("ws:focused_teach_guidance", test_focused_teach_command_guides_back_home),
 ]:
     _runner.run(name, fn)
 

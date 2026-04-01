@@ -1,6 +1,7 @@
 """Helpers for building a normalized voice state contract."""
 from __future__ import annotations
 
+from visual_memory.utils.voice_state_policy import resolve_voice_policy
 
 def _normalize_mode(mode: object) -> str:
     value = str(mode or "idle").strip().lower()
@@ -44,6 +45,7 @@ def build_state_contract(mode: object, context: object) -> dict:
     """Return a stable, JSON-safe state payload for downstream voice helpers."""
     mode_value = _normalize_mode(mode)
     ctx = _normalize_context(context)
+    policy = resolve_voice_policy(mode_value, ctx)
 
     contract_context = {
         "scan_id": str(ctx.get("scan_id", "") or ""),
@@ -58,6 +60,9 @@ def build_state_contract(mode: object, context: object) -> dict:
     return {
         "current_mode": mode_value,
         "mode": mode_value,
+        "policy_id": policy.get("policy_id", "idle_home"),
         "context": contract_context,
         "known_labels": _collect_known_labels(ctx),
+        "allowed_global_intents": list(policy.get("allowed_global_intents") or []),
+        "guidance": dict(policy.get("guidance") or {}),
     }

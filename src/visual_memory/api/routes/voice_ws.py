@@ -62,6 +62,19 @@ _HINT_TRIGGERS: dict[str, tuple[str, int]] = {
 
 # Helpers
 
+def _onboarding_phase_prompt(phase: str) -> str:
+    if phase == "teach_1":
+        return "First, teach me your first item. Say teach, then the item name."
+    if phase == "teach_2":
+        return "Now teach me your second item. Say teach, then the item name."
+    if phase == "await_scan":
+        return "Now scan your two taught items. Hold chat and say scan."
+    if phase == "ask":
+        return "Swipe right to browse both detected items, then ask where you left one."
+    if phase == "ask_prompted":
+        return "Now ask where you left one of those items."
+    return "Let's finish onboarding first."
+
 def _session_state_payload(session: VoiceSession) -> dict:
     return {
         "current_mode": session.state,
@@ -484,6 +497,11 @@ def _handle_location(session: VoiceSession, command_text: str) -> None:
     """Handle the awaiting_location state: save sighting and advance state."""
     onboarding_phase = session.context.get("onboarding_phase", "")
     label = session.context.get("label", "")
+    raw = (command_text or "").strip().lower()
+    if any(t in raw for t in ("scan", "teach", "remember", "find", "where", "settings", "go back", "home")):
+        emit("tts", {"narration": "Please tell me the room first, like kitchen or bedroom.", "next_state": "awaiting_location"})
+        return
+
     location = _normalize_room_name(command_text)
 
     if not location:
@@ -678,6 +696,30 @@ def _dispatch(
         _handle_confirmation(session, command_text)
         return
 
+    intent = _normalize_command_type(command_text, has_image=image_bytes is not None)
+    state_contract = build_state_contract(mode=session.state, context=session.context)
+    onboarding_phase = str(session.context.get("onboarding_phase", "") or "")
+
+    # Strict onboarding progression lock
+    if onboarding_phase in {"teach_1", "teach_2"}:
+        if intent != "remember":
+            emit("tts", {"narration": _onboarding_phase_prompt(onboarding_phase), "next_state": session.state})
+            return
+
+    if onboarding_phase == "await_scan":
+        if intent != "scan":
+            emit("tts", {"narration": _onboarding_phase_prompt(onboarding_phase), "next_state": session.state})
+            return
+
+    if onboarding_phase == "ask":
+        emit("tts", {"narration": _onboarding_phase_prompt(onboarding_phase), "next_state": session.state})
+        return
+
+    if onboarding_phase == "ask_prompted":
+        if intent not in {"find", "ask"}:
+            emit("tts", {"narration": _onboarding_phase_prompt(onboarding_phase), "next_state": session.state})
+            return
+
     # focused_on_item: intercept item-specific queries and feedback; rest falls through
     if state == "focused_on_item":
         q = command_text.strip().lower()
@@ -708,19 +750,19 @@ def _dispatch(
             _handle_idle_describe(session, image_bytes, describe_target)
             return
 
-    intent = _normalize_command_type(command_text, has_image=image_bytes is not None)
-
     # onboarding_await_scan: only accept scan and explicit navigation commands
     if state == "onboarding_await_scan":
-        if intent == "navigate_back":
-            _handle_navigate_back(session)
-            return
-        if intent == "open_settings":
-            _handle_open_settings(session)
-            return
         if intent != "scan":
             emit("tts", {"narration": ONBOARDING_AWAIT_SCAN_PROMPT, "next_state": state})
             return
+
+    if state == "focused_on_item" and intent == "remember":
+        guidance = (state_contract.get("guidance") or {}).get("remember")
+        emit("tts", {
+            "narration": guidance or "Return home to teach a new item. Say go back, then teach.",
+            "next_state": state,
+        })
+        return
 
     # Normal command dispatch (covers idle, onboarding_teach, focused_on_item fall-through)
     if intent == "navigate_back":

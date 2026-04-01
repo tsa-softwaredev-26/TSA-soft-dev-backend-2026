@@ -10,6 +10,7 @@ from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
 from visual_memory.config import Settings
 from visual_memory.utils import get_device, get_logger
 from visual_memory.utils.logger import LogTag
+from visual_memory.utils.voice_state_policy import resolve_voice_policy
 
 from .base import BaseSpeechRecognizer
 
@@ -91,7 +92,14 @@ class WhisperRecognizer(BaseSpeechRecognizer):
             "confidence": 1.0,
         }
 
-    def build_context_prompt(self, db_store) -> str:
+    def build_context_prompt(
+        self,
+        db_store,
+        *,
+        mode: str | None = None,
+        state_contract: dict | None = None,
+        known_labels: list[str] | None = None,
+    ) -> str:
         cfg = Settings()
         labels: list[str] = []
         rooms: list[str] = []
@@ -121,13 +129,26 @@ class WhisperRecognizer(BaseSpeechRecognizer):
                 out.append(entry)
             return out
 
-        context_terms = _dedupe(labels) + _dedupe(rooms) + common_query_terms
+        mode_value = mode or ""
+        context_obj = {}
+        if isinstance(state_contract, dict):
+            mode_value = str(state_contract.get("current_mode") or state_contract.get("mode") or mode or "").strip().lower()
+            context_obj = state_contract.get("context") if isinstance(state_contract.get("context"), dict) else {}
+        policy = resolve_voice_policy(mode_value, context_obj)
+
+        policy_terms = list(policy.get("whisper_boost_terms") or [])
+        known = list(known_labels or [])
+        if known:
+            policy_terms.extend(known[:8])
+
+        context_terms = _dedupe(labels) + _dedupe(rooms) + common_query_terms + _dedupe(policy_terms)
         prompt = " ".join(context_terms)[:cfg.whisper_context_max_chars]
         _log.info({
             "event": "whisper_context_built",
             "tag": LogTag.API,
             "label_count": len(_dedupe(labels)),
             "room_count": len(_dedupe(rooms)),
+            "policy_id": policy.get("policy_id", "idle_home"),
             "term_count": len(context_terms),
             "prompt_chars": len(prompt),
         })
