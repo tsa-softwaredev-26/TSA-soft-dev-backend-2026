@@ -18,6 +18,10 @@ Every request (HTTP and WebSocket) requires the header or query param:
 ```
 X-API-Key: <key>
 ```
+Security note:
+- Do not commit real API keys to this repository.
+- Keep API keys in local env vars (for example `API_KEY`) or platform secret storage.
+- If a key is ever pasted into chat/logs/docs, rotate it immediately and replace with `<key>`.
 
 ---
 
