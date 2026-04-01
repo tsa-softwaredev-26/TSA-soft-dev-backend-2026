@@ -75,6 +75,14 @@ Feedback model decisions that affect the backend:
 
 See [UX.md](UX.md) for the full onboarding flow and UX patterns.
 
+### Accessibility Priorities
+
+- Blind-first interaction quality takes precedence over visual polish.
+- Large, forgiving touch targets and clear spacing matter more than color, animation, or other visual state changes.
+- "Visual differentiation" is secondary only for low-vision users, sighted debugging, and demos. It is not the primary accessibility mechanism.
+- Primary state confirmation should come from speech, listening prompts, haptics where supported, and fixed button placement the user can memorize.
+- For the mobile UI, ease of pressing the `Spaitra`, `Settings`, and `Scan` controls is a release blocker. Small icons, dense toolbars, and layout churn are not acceptable for production.
+
 ---
 
 ## Setup
@@ -146,6 +154,9 @@ src/visual_memory/
 │   │   ├── embed_image.py              # ImageEmbedder (DINOv3, 1024-dim)
 │   │   ├── embed_text.py              # CLIPTextEmbedder (CLIP text encoder, 512-dim)
 │   │   └── embed_combined.py          # make_combined_embedding() - 1536-dim output
+│   ├── speech_recognition/
+│   │   ├── base.py                    # BaseSpeechRecognizer ABC
+│   │   └── whisper_recognizer.py      # WhisperRecognizer (active STT)
 │   ├── text_recognition/
 │   │   ├── base.py                    # BaseTextRecognizer ABC
 │   │   └── http_recognizer.py         # HTTPOCRRecognizer (active)
@@ -155,11 +166,14 @@ src/visual_memory/
 │   └── depth/estimator.py             # Depth Pro wrapper
 │
 ├── utils/
+│   ├── audio_utils.py                 # audio validation + decode/resample helpers for STT
 │   ├── image_utils.py
 │   ├── similarity_utils.py
 │   ├── logger.py                      # JSON structured logging via loguru; LogTag constants; crash handler
 │   ├── metrics.py                     # collect_system_metrics() - RAM/swap/VRAM/thermals
-│   └── logparse.py                    # CLI filter + stats tool (python -m visual_memory.utils.logparse)
+│   ├── logparse.py                    # CLI filter + stats tool (python -m visual_memory.utils.logparse)
+│   ├── voice_state_context.py         # mode-aware context contract for STT / routing
+│   └── voice_state_policy.py          # state-aware speech bias policy
 │
 ├── learning/
 │   ├── projection_head.py             # ProjectionHead (residual linear, identity at init)
@@ -179,6 +193,7 @@ src/visual_memory/
 │   ├── app.py                          # create_app() factory - blueprints, auth, upload cap
 │   ├── pipelines.py                    # Lazy singletons: get_remember_pipeline(), get_scan_pipeline(), get_feedback_store(), get_user_settings(), warm_all()
 │   ├── run.py                          # Compatibility shim; prefer services/core/run.py
+│   ├── voice_session.py                # Per-WebSocket state machine state
 │   └── routes/
 │       ├── health.py                   # GET /health
 │       ├── remember.py                 # POST /remember
@@ -191,6 +206,9 @@ src/visual_memory/
 │       ├── items.py                    # GET /items, DELETE /items/<label>, POST /items/<label>/rename
 │       ├── sightings.py               # POST /sightings - user-confirmed location update
 │       ├── crop.py                    # GET /crop - fetch cropped image from cached scan
+│       ├── transcribe.py              # POST /transcribe + shared STT helper
+│       ├── voice.py                   # Unified voice HTTP route
+│       ├── voice_ws.py                # Stateful Socket.IO voice transport
 │       └── debug.py                   # Optional debug endpoints; enabled only when ENABLE_DEBUG_ROUTES=1
 └── tests/                             # Test scripts + test data
     ├── scripts/                        # Runnable .py test scripts
@@ -198,6 +216,34 @@ src/visual_memory/
     ├── demo_database/                  # Reference crops for ScanPipeline
     └── text_demo/                      # OCR test images + ground_truth/
 ```
+
+---
+
+## Voice and STT Architecture
+
+### Current production path
+
+Frontend voice capture belongs in the frontend app only:
+- `composeApp/src/commonMain/kotlin/.../ui/HomeScreen.kt` - hold/release button behavior
+- `composeApp/src/commonMain/kotlin/.../ui/AppViewModel.kt` - UI intent -> socket event bridge
+- `composeApp/src/androidMain/kotlin/.../platform/PlatformVoiceController.android.kt`
+- `composeApp/src/iosMain/kotlin/.../platform/PlatformVoiceController.ios.kt`
+
+Speech-to-text itself belongs in the backend, not the mobile client:
+- `src/visual_memory/utils/audio_utils.py` - validate, decode, and resample incoming audio bytes
+- `src/visual_memory/api/routes/transcribe.py` - shared STT entrypoint (`transcribe_audio_bytes`)
+- `src/visual_memory/engine/speech_recognition/whisper_recognizer.py` - Whisper model load, context prompt injection, and transcription
+- `src/visual_memory/engine/model_registry.py` - lifecycle and warm/cold preparation for Whisper
+- `src/visual_memory/api/routes/voice_ws.py` - WebSocket event handling (`chat_start`, `audio`, `navigate`) and stateful routing after STT
+- `src/visual_memory/api/voice_session.py` - per-connection runtime state for mode-aware voice behavior
+- `src/visual_memory/utils/voice_state_context.py` and `src/visual_memory/utils/voice_state_policy.py` - state-aware context biasing for Whisper
+- `src/visual_memory/config/settings.py` - STT model, language, sample rate, and context-bias settings
+
+### STT responsibility split
+
+- Frontend responsibility: capture audio, stop/release correctly, send bytes, play TTS, expose large reliable controls.
+- Backend responsibility: decode audio, transcribe, apply state-aware biasing, route intent, return narration and authoritative state.
+- Production rule: do not move STT into the mobile client for v1. Keep one backend STT implementation so behavior, context biasing, and evaluation stay consistent across Android and iOS.
 
 ---
 
@@ -771,11 +817,13 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
 - Deployment: `deploy/install.sh` installs systemd units from templates; primary units are `deploy/spaitra-core.service` and `deploy/spaitra-ocr.service`
  - Debug endpoints: /debug/state, /debug/echo, /debug/image, /debug/db, /debug/logs, /debug/perf, /debug/test-remember, /debug/test-scan, /debug/wipe (selective), /debug/config (live settings patch)
  - Ask Mode: POST /ask now uses query-strategy routing with document detection, ordered retrieval strategies, and explicit `strategies_tried` telemetry in responses
- - Voice transcription: POST /transcribe (Whisper Turbo) with optional context bias from known item labels and room names
- - Ollama integration: llama3.2:1b via `ollama_utils.py`; structured JSON output (format="json"); circuit breaker (3-strike, 60 s cooldown); configurable timeout via OLLAMA_TIMEOUT_SECONDS; OLLAMA_HOST env for non-localhost daemon
+ - Voice transcription: POST /transcribe (Whisper Turbo) with unified state-aware context policy (`voice_state_policy`) layered on known item labels and room names; response includes diagnostics (`context_policy`, `context_state_id`)
+ - Ollama integration: llama3.2:1b via `ollama_utils.py`; structured JSON output (format="json"); circuit breaker (3-strike, 60 s cooldown); configurable timeout via OLLAMA_TIMEOUT_SECONDS; OLLAMA_HOST env for non-localhost daemon; prompts include state-policy hints from the normalized state contract
  - Jailbreak resistance: `/ask` now applies an unsafe-query gate before retrieval. Queries with prompt-injection or harmful markers are blocked with `400` (`blocked: true`, `reason: "unsafe_query"`) instead of running fuzzy search.
 - OCR pre-embedding: `add_to_database()` embeds OCR text at teach time and stores in `items.ocr_embedding`; `/ask` OCR content match uses stored embedding, re-embeds only for legacy items
  - Query strategy routing: `/ask` sets `document_query` and routes primary strategy by query type (`ocr_semantic` first for document-like queries, `fuzzy_label` first otherwise) with cross-strategy fallback
+ - Stateful voice WebSocket: `voice_ws.py` is backend-authoritative for mode transitions (`idle`, onboarding states, `awaiting_*`, `focused_on_item`), includes focused-mode guidance for out-of-flow teach commands ("return home to teach"), and emits `control.request_image` with context for camera-required branches (`scan`, `describe`, generic teach capture)
+ - Canonical voice state contract: `build_state_contract()` + `resolve_voice_policy()` provide a single source of truth for mode/pending-action policy IDs used by WebSocket dispatch, Whisper context biasing, and Ollama prompt hints
 
 ---
 
@@ -790,10 +838,62 @@ All server-transition items are complete as of March 2026.
 
 ---
 
-## Future Plans
+## Production Readiness Roadmap
 
-- **Bloat Prevention** - Duplicate entry detection, pruning unused entries, user confirmation before overwriting similar embeddings.
-- **HNSW index** - Marginal benefit below ~10k entries; defer unless scale requires it.
+### 1. Blind-first frontend completion
+
+- Finish the voice-first home surface in the frontend app with only the essential primary controls: `Settings`, `Spaitra`, and large `Scan`.
+- Audit all mobile touch targets to ensure controls are easy to hit one-handed and are stable in position across states.
+- Add platform haptics for press, listening start, recording start, cancel, and send in the frontend platform voice controllers.
+- Keep visual styling simple; do not spend release time on decorative visual differentiation. Spend it on hit area, spacing, and spoken state clarity.
+- Make `button_layout` real rather than a stub so users can swap handedness without changing the semantic flow.
+
+### 2. Voice and STT hardening
+
+- Keep STT in `src/visual_memory/engine/speech_recognition/whisper_recognizer.py` and route all voice requests through `src/visual_memory/api/routes/transcribe.py` and `src/visual_memory/api/routes/voice_ws.py`.
+- Add production logging and alert thresholds for transcription latency, decode failures, empty transcripts, and context-bias usage.
+- Harden `audio_utils.py` and `transcribe.py` against malformed, silent, clipped, and very short audio with explicit user-facing error responses.
+- Finalize voice-state routing in `voice_ws.py` so every state transition emits both `tts` and `session_state` consistently.
+- Add load-testing for concurrent voice sessions and confirm Whisper warm/cold behavior under GPU contention.
+
+### 3. Scan / teach / ask product completion
+
+- Complete the end-to-end onboarding flow and verify it closes back to `idle` after the guided teach/scan/ask sequence.
+- Finish focused-item follow-up behavior so item-scoped asks, OCR actions, wrong/correct feedback, and navigation all work from the same focused scan context.
+- Tighten teach overwrite behavior, duplicate handling, and user-facing narration so memory updates are understandable and safe.
+- Validate scan crop caching, `/crop` lookup, and follow-up query context across reconnects and session restarts.
+- Decide which "future plan" items are pre-launch vs post-launch:
+  - duplicate/bloat prevention is pre-launch if current overwrite behavior is too risky
+  - HNSW indexing is post-launch unless memory scale proves the current scan/search path too slow
+
+### 4. Model quality and evaluation
+
+- Run full voice eval, OCR eval, scan retrieval eval, and depth eval on the latest production-intended models and thresholds.
+- Lock release thresholds for similarity, OCR gating, and detection quality based on benchmark data, not ad hoc tuning.
+- Expand test coverage for blind-user-relevant failure cases: noisy room audio, partial button presses, cluttered scan scenes, dim lighting, and document-heavy rooms.
+- Add acceptance criteria for production readiness:
+  - teach succeeds reliably on target household objects
+  - scan returns stable left/right ordering
+  - ask/find returns useful answers from saved memory
+  - focused-item follow-up stays in context
+  - voice latency is acceptable on deployed hardware
+
+### 5. Operational hardening
+
+- Add dashboards and alerts for core health, OCR health, GPU memory pressure, STT latency, socket disconnect rate, and request failure rate.
+- Confirm backup, restore, and corruption-recovery procedures for `data/memory.db`.
+- Finalize API key management, rotation procedure, and deploy-time secret handling.
+- Verify service boot order and recovery behavior for `spaitra-core` and `spaitra-ocr` after reboot, crash, or transient network failure.
+- Define release rollback steps and a reproducible deploy checklist tied to benchmark results.
+
+### 6. Release gates before first production launch
+
+- Android and iOS frontend builds pass from a clean environment.
+- WebSocket end-to-end tests pass for teach, scan, navigate, ask, describe, reconnect, and malformed payload cases.
+- Production-like server benchmark run is captured and documented for the exact release candidate.
+- Manual accessibility pass is completed on-device with a blind-first rubric focused on button discoverability, press reliability, spoken guidance, and recovery from mistakes.
+- Documentation is updated together: `ARCHITECTURE.md`, `UX.md`, `FRONTEND_GUIDE.md`, deploy docs, and the release checklist.
+
 ---
 
 ## Design Decisions
