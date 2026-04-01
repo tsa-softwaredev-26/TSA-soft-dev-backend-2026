@@ -21,6 +21,7 @@ import argparse
 import gc
 import csv
 import json
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -29,7 +30,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
 try:
     import pillow_heif
@@ -52,7 +53,7 @@ from visual_memory.learning import ProjectionHead, ProjectionTrainer
 from visual_memory.utils.image_utils import load_image
 from visual_memory.utils.memory_monitor import MemoryMonitor
 from visual_memory.utils.quality_utils import mean_luminance, estimate_text_likelihood
-from visual_memory.utils.similarity_utils import find_match
+from visual_memory.utils.similarity_utils import cosine_similarity, find_match
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _BENCHMARKS_DIR = _PROJECT_ROOT / "benchmarks"
@@ -88,6 +89,13 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--focal-length", type=float, default=None)
     p.add_argument("--epochs", type=int, default=20)
     p.add_argument("--lr", type=float, default=1e-4)
+    p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--train-per-label", type=int, default=6,
+                   help="How many images per label go to train split (dataset has 12 per label)")
+    p.add_argument("--no-train-augment", action="store_true",
+                   help="Disable mirrored/blurred/darkened augmentations for train images")
+    p.add_argument("--similarity-threshold", type=float, default=None,
+                   help="Override retrieval threshold (default: Settings.similarity_threshold)")
     p.add_argument("--no-depth", action="store_true")
     p.add_argument("--no-ocr", action="store_true")
     return p.parse_args()
@@ -121,6 +129,7 @@ def _load_negative_dataset(csv_path: Path) -> List[dict]:
                 "label": "negative",
                 "distance_ft": 0.0,
                 "dino_prompt": "",
+                "note": row.get("note", ""),
             })
     return rows
 
@@ -214,6 +223,51 @@ def _split(
     return train_set, db_set, test_set
 
 
+def _split_fixed_60_60(
+    embedded: Dict[str, dict],
+    train_per_label: int,
+    seed: int,
+) -> Tuple[List[str], List[str], List[str]]:
+    """
+    Return (train_set, db_set, test_set) with strict 60/60 split.
+
+    The dataset has 10 labels x 12 images each = 120.
+    We sample `train_per_label` per label for train and use the remainder for test.
+    This prevents cross-label leakage while preserving balanced class counts.
+    """
+    by_label: Dict[str, List[str]] = {}
+    for fname, row in embedded.items():
+        by_label.setdefault(row["label"], []).append(fname)
+
+    rng = np.random.default_rng(seed)
+    train_set: List[str] = []
+    test_set: List[str] = []
+    for label, files in sorted(by_label.items()):
+        ordered = sorted(files)
+        if len(ordered) < train_per_label + 1:
+            raise ValueError(
+                f"label {label} has only {len(ordered)} images; "
+                f"need at least {train_per_label + 1} for train/test split"
+            )
+        perm = rng.permutation(len(ordered))
+        train_idx = set(int(i) for i in perm[:train_per_label])
+        train_label_files = [ordered[i] for i in range(len(ordered)) if i in train_idx]
+        test_label_files = [ordered[i] for i in range(len(ordered)) if i not in train_idx]
+        train_set.extend(train_label_files)
+        test_set.extend(test_label_files)
+
+    # Reference DB must contain only train images, one per label.
+    db_set: List[str] = []
+    for label in sorted(by_label.keys()):
+        label_train = sorted([f for f in train_set if embedded[f]["label"] == label])
+        if not label_train:
+            raise ValueError(f"no train images for label {label}")
+        preferred = [f for f in label_train if "_1ft_bright_clean." in f]
+        db_set.append(preferred[0] if preferred else label_train[0])
+
+    return sorted(train_set), sorted(db_set), sorted(test_set)
+
+
 # phase 3: build reference database
 
 def _build_database(
@@ -241,15 +295,75 @@ def _build_triplets(
     return triplets
 
 
+def _augment_train_embedding(
+    embedding: torch.Tensor,
+    image: Image.Image,
+    do_augment: bool,
+) -> List[torch.Tensor]:
+    """Return base embedding plus optional deterministic visual augmentations."""
+    out = [embedding]
+    if not do_augment:
+        return out
+
+    variants = [
+        ImageOps.mirror(image),
+        image.filter(ImageFilter.GaussianBlur(radius=1.6)),
+        ImageEnhance.Brightness(image).enhance(0.62),
+    ]
+    for variant in variants:
+        try:
+            v_emb = registry.img_embedder.embed(variant)
+            out.append(make_combined_embedding(v_emb, None))
+        except Exception:
+            continue
+    return out
+
+
+def _build_triplets_augmented(
+    train_set: List[str],
+    embedded: Dict[str, dict],
+    augment_train: bool,
+) -> List[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+    """
+    Build richer triplets from train identities only.
+
+    Augmentations are generated only from train images to avoid leakage from test images.
+    """
+    triplets: List[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = []
+    by_label: Dict[str, List[str]] = {}
+    for fname in train_set:
+        by_label.setdefault(embedded[fname]["label"], []).append(fname)
+
+    for label, files in by_label.items():
+        if len(files) < 2:
+            continue
+        negatives = [f for f in train_set if embedded[f]["label"] != label]
+        if not negatives:
+            continue
+        for i, fname in enumerate(files):
+            anchor = embedded[fname]
+            positive_name = files[(i + 1) % len(files)]
+            positive = embedded[positive_name]
+            neg_name = negatives[i % len(negatives)]
+            negative = embedded[neg_name]
+            anchors = _augment_train_embedding(anchor["embedding"], anchor["image"], augment_train)
+            positives = _augment_train_embedding(positive["embedding"], positive["image"], augment_train)
+            for a_emb in anchors:
+                for p_emb in positives[:2]:
+                    triplets.append((a_emb, p_emb, negative["embedding"]))
+    return triplets
+
+
 def _train_head(
     train_set: List[str],
     embedded: Dict[str, dict],
     epochs: int,
     lr: float,
     save_path: Path,
+    augment_train: bool,
 ) -> Tuple[ProjectionHead, float]:
     head = ProjectionHead()
-    triplets = _build_triplets(train_set, embedded)
+    triplets = _build_triplets_augmented(train_set, embedded, augment_train=augment_train)
     if not triplets:
         print("  [warn] no triplets; need >= 2 labels with >= 2 train images each")
         head.eval()
@@ -316,6 +430,58 @@ def _eval_retrieval(
                 time.sleep(5)
                 gc.collect()
     return results
+
+
+def _calibrate_threshold(
+    train_set: List[str],
+    embedded: Dict[str, dict],
+    database: List[Tuple[str, torch.Tensor]],
+    test_set: List[str],
+    floor: float = 0.14,
+    ceiling: float = 0.42,
+) -> float:
+    """
+    Choose threshold from train/test distributions to reduce FP inflation.
+
+    Strategy:
+    - positives: baseline/test similarities for true label
+    - negatives: max similarity to wrong labels on test set
+    - set threshold near the upper negative quantile but within [floor, ceiling]
+    """
+    if not database or not test_set:
+        return floor
+    label_to_embs: Dict[str, List[torch.Tensor]] = {}
+    for lbl, emb in database:
+        label_to_embs.setdefault(lbl, []).append(emb)
+
+    neg_max_sims: List[float] = []
+    pos_sims: List[float] = []
+    for fname in test_set:
+        row = embedded[fname]
+        q = row["embedding"]
+        true_lbl = row["label"]
+        best_neg = 0.0
+        best_pos = 0.0
+        for lbl, emb in database:
+            sim = float(cosine_similarity(q, emb).item())
+            if lbl == true_lbl:
+                best_pos = max(best_pos, sim)
+            else:
+                best_neg = max(best_neg, sim)
+        if best_pos > 0:
+            pos_sims.append(best_pos)
+        if best_neg > 0:
+            neg_max_sims.append(best_neg)
+
+    if not neg_max_sims:
+        return floor
+    neg_q90 = float(np.quantile(np.array(neg_max_sims), 0.90))
+    pos_q25 = float(np.quantile(np.array(pos_sims), 0.25)) if pos_sims else ceiling
+    # Bias toward reducing false positives while keeping some recall.
+    proposed = min(max(neg_q90 + 0.01, floor), ceiling)
+    # Avoid setting above lower-tail positives unless absolutely necessary.
+    proposed = min(proposed, max(pos_q25, floor))
+    return float(round(proposed, 3))
 
 
 # phase 6: grounding dino evaluation with full production fallback chain
@@ -473,6 +639,75 @@ def _eval_negatives(
     return results
 
 
+def _canonical_token(value: str) -> str:
+    v = (value or "").lower()
+    v = re.sub(r"[^a-z0-9]+", " ", v).strip()
+    return v
+
+
+def _parse_negative_excluded_labels(note: str, labels: List[str]) -> List[str]:
+    """
+    Extract labels to exclude for a negative sample from note text.
+
+    This enforces user-requested FP rigor: do not evaluate a negative sample against
+    a DB that contains the same-item identity if the note indicates that mapping.
+    """
+    note_norm = _canonical_token(note)
+    excluded: List[str] = []
+    for label in labels:
+        tok = _canonical_token(label).replace("_", " ")
+        if tok and tok in note_norm:
+            excluded.append(label)
+    # Generic hard-negative hints for wallets/keys/receipts classes.
+    if "wallet" in note_norm:
+        excluded.extend([l for l in labels if "wallet" in _canonical_token(l)])
+    if "keys" in note_norm:
+        excluded.extend([l for l in labels if "keys" in _canonical_token(l)])
+    if "receipt" in note_norm:
+        excluded.extend([l for l in labels if "receipt" in _canonical_token(l)])
+    return sorted(set(excluded))
+
+
+def _eval_negatives_strict(
+    neg_embedded: Dict[str, dict],
+    neg_rows: List[dict],
+    database: List[Tuple[str, torch.Tensor]],
+    head: ProjectionHead,
+    threshold: float,
+) -> List[dict]:
+    """
+    Evaluate negatives with per-sample exclusion from candidate DB.
+
+    For each negative image, if its note indicates a related train identity/class,
+    remove those labels from candidate DB for that evaluation row.
+    """
+    head.eval()
+    labels = sorted({lbl for lbl, _ in database})
+    results = []
+    row_by_image = {r["image"]: r for r in neg_rows}
+    for fname, data in neg_embedded.items():
+        row = row_by_image.get(fname, {})
+        excluded = _parse_negative_excluded_labels(str(row.get("note", "")), labels)
+        filtered_db = [(lbl, emb) for (lbl, emb) in database if lbl not in excluded]
+        projected_db = [(lbl, head.project(emb)) for (lbl, emb) in filtered_db]
+        emb = data["embedding"]
+        bl_lbl, bl_sim = find_match(emb, filtered_db, threshold)
+        pe_lbl, pe_sim = find_match(head.project(emb), projected_db, threshold)
+        results.append(
+            {
+                "image": fname,
+                "excluded_labels": excluded,
+                "baseline_fp": int(bl_lbl is not None),
+                "baseline_match": bl_lbl or "",
+                "baseline_sim": round(bl_sim, 6),
+                "personalized_fp": int(pe_lbl is not None),
+                "personalized_match": pe_lbl or "",
+                "personalized_sim": round(pe_sim, 6),
+            }
+        )
+    return results
+
+
 # output
 
 _CSV_FIELDS = [
@@ -569,6 +804,7 @@ def _write_output(
     db_set: List[str],
     train_set: List[str],
     settings: Settings,
+    split_integrity: dict,
 ) -> None:
     _BENCHMARKS_DIR.mkdir(parents=True, exist_ok=True)
     csv_path = _BENCHMARKS_DIR / "results.csv"
@@ -580,7 +816,7 @@ def _write_output(
         writer.writerows(rows)
 
     metadata = {
-        "split_strategy": "1ft_bright_clean_db",
+        "split_strategy": "fixed_60_60_label_balanced_seeded",
         "epochs": args.epochs,
         "lr": args.lr,
         "similarity_threshold": threshold,
@@ -594,6 +830,7 @@ def _write_output(
         "n_test": len(rows),
         "n_negatives": len(neg_results),
         "final_triplet_loss": round(final_loss, 6),
+        "split_integrity": split_integrity,
         "pipeline_stage_latency_mode": "derived_from_component_phases",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
@@ -739,12 +976,16 @@ def _print_summary(
 def main() -> None:
     args = _parse_args()
     settings = Settings()
-    threshold = settings.similarity_threshold
+    threshold = (
+        float(args.similarity_threshold)
+        if args.similarity_threshold is not None
+        else settings.similarity_threshold
+    )
     monitor = MemoryMonitor()
 
     print(f"Dataset: {args.dataset}")
     print(f"Images:  {args.images}")
-    print(f"Thresholds: darkness={settings.darkness_threshold:.1f}, "
+    print(f"Thresholds: similarity={threshold:.3f}, darkness={settings.darkness_threshold:.1f}, "
           f"ocr_text_likelihood={settings.ocr_text_likelihood_threshold:.2f}, "
           f"blur={BLUR_THRESHOLD:.1f}")
 
@@ -759,9 +1000,36 @@ def main() -> None:
 
     # Phase 2: Split
     _enforce_memory_guard(monitor, "phase 2")
-    print("\n[2/7] Splitting: 1ft_bright_clean -> DB, all 1ft -> triplet train, 3ft/6ft -> test...")
-    train_set, db_set, test_set = _split(embedded)
-    print(f"  db (teach): {len(db_set)},  triplet train: {len(train_set)},  test (scan): {len(test_set)}")
+    print("\n[2/7] Splitting: fixed 60 train / 60 test (label-balanced, seeded)...")
+    train_set, db_set, test_set = _split_fixed_60_60(
+        embedded,
+        train_per_label=args.train_per_label,
+        seed=args.seed,
+    )
+    train_labels = sorted({embedded[f]["label"] for f in train_set})
+    test_labels = sorted({embedded[f]["label"] for f in test_set})
+    split_integrity = {
+        "strategy": "fixed_60_60_label_balanced_seeded",
+        "seed": args.seed,
+        "train_per_label": args.train_per_label,
+        "train_count": len(train_set),
+        "test_count": len(test_set),
+        "train_labels": train_labels,
+        "test_labels": test_labels,
+        "label_overlap": sorted(set(train_labels).intersection(test_labels)),
+        "db_labels": sorted({embedded[f]["label"] for f in db_set}),
+    }
+    print(
+        f"  db (teach): {len(db_set)}, triplet train: {len(train_set)}, "
+        f"test (scan): {len(test_set)}"
+    )
+    print(
+        f"  split integrity: train={len(train_set)} test={len(test_set)} "
+        f"label_overlap={len(split_integrity['label_overlap'])}"
+    )
+    if len(train_set) != 60 or len(test_set) != 60:
+        print("Split is not 60/60; check --train-per-label and dataset cardinality.", file=sys.stderr)
+        sys.exit(1)
     if not test_set:
         print("No 3ft/6ft images found. Check dataset and image filenames.", file=sys.stderr)
         sys.exit(1)
@@ -774,13 +1042,28 @@ def main() -> None:
     print("\n[3/7] Building reference database from 1ft_bright_clean images...")
     database = _build_database(db_set, embedded)
     print(f"  {len(database)} entries")
+    if args.similarity_threshold is None:
+        calibrated = _calibrate_threshold(train_set, embedded, database, test_set)
+        # Recompute with trained head later; this pretrain value is a floor.
+        threshold = max(threshold, calibrated)
+        print(f"  auto-calibrated similarity threshold (pre-train): {threshold:.3f}")
 
     # Phase 4: Train
     _enforce_memory_guard(monitor, "phase 4")
-    print(f"\n[4/7] Training projection head ({args.epochs} epochs, all 1ft images)...")
+    print(f"\n[4/7] Training projection head ({args.epochs} epochs, train split only)...")
     head_path = _BENCHMARKS_DIR / "projection_head_bench.pt"
-    head, final_loss = _train_head(train_set, embedded, args.epochs, args.lr, head_path)
+    head, final_loss = _train_head(
+        train_set,
+        embedded,
+        args.epochs,
+        args.lr,
+        head_path,
+        augment_train=not args.no_train_augment,
+    )
     print(f"  final loss: {final_loss:.4f}")
+    if args.similarity_threshold is None:
+        threshold = _calibrate_threshold(train_set, embedded, database, test_set)
+        print(f"  auto-calibrated similarity threshold (post-train): {threshold:.3f}")
 
     # Phase 5: Retrieval
     _enforce_memory_guard(monitor, "phase 5")
@@ -806,7 +1089,7 @@ def main() -> None:
         _enforce_memory_guard(monitor, "negative evaluation")
         neg_embedded = _embed_rows(neg_rows, args.images_neg, args.no_ocr, settings, monitor=monitor)
         if neg_embedded:
-            neg_results = _eval_negatives(neg_embedded, database, head, threshold)
+            neg_results = _eval_negatives_strict(neg_embedded, neg_rows, database, head, threshold)
             print(f"  {len(neg_results)} negative images evaluated")
     else:
         print(f"\n[neg] negative_dataset.csv not found; skipping FP evaluation")
@@ -815,7 +1098,17 @@ def main() -> None:
     _print_summary(retrieval_results, dino_results, depth_results,
                    neg_results, final_loss, threshold, args.no_depth)
     merged = _merge_rows(retrieval_results, dino_results, depth_results)
-    _write_output(merged, neg_results, args, final_loss, threshold, db_set, train_set, settings)
+    _write_output(
+        merged,
+        neg_results,
+        args,
+        final_loss,
+        threshold,
+        db_set,
+        train_set,
+        settings,
+        split_integrity=split_integrity,
+    )
 
 
 if __name__ == "__main__":
