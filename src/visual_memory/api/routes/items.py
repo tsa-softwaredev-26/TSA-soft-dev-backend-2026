@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 
 from visual_memory.api.pipelines import get_database, get_scan_pipeline
+from ._json_utils import read_json_dict
 
 items_bp = Blueprint("items", __name__)
 
@@ -15,11 +16,17 @@ def list_items():
 
 @items_bp.delete("/items/<label>")
 def delete_item(label):
+    label = (label or "").strip()
+    if not label:
+        return jsonify({"error": "label cannot be empty"}), 400
     db = get_database()
     count = db.delete_items_by_label(label)
     if count == 0:
         return jsonify({"error": "not found"}), 404
-    get_scan_pipeline().reload_database()
+    try:
+        get_scan_pipeline().reload_database()
+    except Exception as exc:
+        return jsonify({"error": "database sync failed", "detail": str(exc)}), 500
     return jsonify({"deleted": True, "label": label, "count": count})
 
 
@@ -36,7 +43,10 @@ def rename_item(label):
     {"conflict": true, ...} so the client can ask the user to confirm,
     then resend with force=true to overwrite.
     """
-    data = request.get_json(silent=True) or {}
+    data, err = read_json_dict(request)
+    if err is not None:
+        body, status = err
+        return jsonify(body), status
     new_label = (data.get("new_label") or "").strip()
     if not new_label:
         return jsonify({"error": "missing field: new_label"}), 400
@@ -62,7 +72,10 @@ def rename_item(label):
         }), 409
 
     result = db.rename_label(label, new_label)
-    get_scan_pipeline().reload_database()
+    try:
+        get_scan_pipeline().reload_database()
+    except Exception as exc:
+        return jsonify({"error": "database sync failed", "detail": str(exc)}), 500
     return jsonify({
         "renamed": True,
         "old_label": label,

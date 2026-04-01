@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 
 from visual_memory.api.pipelines import get_database, get_scan_pipeline, get_settings, get_user_settings
 from visual_memory.config.user_settings import PerformanceMode, _BUTTON_LAYOUTS
+from ._json_utils import read_json_dict
 
 user_settings_bp = Blueprint("user_settings", __name__)
 
@@ -47,7 +48,10 @@ def patch_user_settings():
     Unrecognised fields are ignored. Type and range errors return 400.
     Response: full user settings state (same schema as GET /user-settings).
     """
-    data = request.get_json(silent=True) or {}
+    data, err = read_json_dict(request)
+    if err is not None:
+        body, status = err
+        return jsonify(body), status
     errors = {}
     applied = {}
 

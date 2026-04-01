@@ -64,6 +64,15 @@ def test_missing_sightings_field():
     assert_status(resp, 400)
 
 
+def test_invalid_json_payload():
+    resp = client.post(
+        "/sightings",
+        data='{"room_name":',
+        content_type="application/json",
+    )
+    assert_status(resp, 400)
+
+
 def test_empty_sightings_list():
     resp = client.post("/sightings", json={"sightings": []})
     assert_status(resp, 400)
@@ -101,6 +110,7 @@ for name, fn in [
     ("sightings:multiple", test_multiple_sightings),
     ("sightings:room_normalization", test_room_normalization),
     ("sightings:missing_field", test_missing_sightings_field),
+    ("sightings:invalid_json", test_invalid_json_payload),
     ("sightings:empty_list", test_empty_sightings_list),
     ("sightings:empty_label_skipped", test_empty_label_skipped),
     ("sightings:all_empty_labels", test_all_empty_labels),

@@ -185,6 +185,15 @@ def test_voice_gibberish_defaults_to_ask():
     assert data.get("classification", {}).get("query_type") == "unknown"
 
 
+def test_voice_invalid_json_returns_400():
+    resp = client.post(
+        "/voice",
+        data='{"text":',
+        content_type="application/json",
+    )
+    assert_status(resp, 400)
+
+
 for name, fn in [
     ("voice_router:teach_label_patterns", test_extract_teach_label_patterns),
     ("voice_router:item_intent_classify", test_classify_item_intent),
@@ -197,6 +206,7 @@ for name, fn in [
     ("voice_router:awaiting_location_route", test_voice_awaiting_location_sets_location),
     ("voice_router:teach_phrase_route", test_voice_teach_phrase_routes_remember),
     ("voice_router:gibberish_defaults_to_ask", test_voice_gibberish_defaults_to_ask),
+    ("voice_router:invalid_json", test_voice_invalid_json_returns_400),
 ]:
     _runner.run(name, fn)
 

@@ -27,6 +27,7 @@ from visual_memory.config.settings import Settings as _Settings
 from visual_memory.utils.device_utils import get_device
 from visual_memory.utils.metrics import collect_system_metrics
 from visual_memory.utils.quality_utils import mean_luminance
+from ._json_utils import read_json_dict
 
 debug_bp = Blueprint("debug", __name__)
 
@@ -300,7 +301,8 @@ def debug_echo():
     raw_preview = None
     ct = request.content_type or ""
     if "application/json" in ct:
-        json_body = request.get_json(silent=True)
+        parsed, err = read_json_dict(request)
+        json_body = parsed if err is None else {"error": err[0].get("error"), "detail": err[0].get("detail")}
     elif not request.files:
         raw = request.get_data(as_text=True)
         raw_preview = raw[:500] if raw else None
@@ -520,7 +522,10 @@ def debug_wipe():
         "settings"      - ML settings (enable_learning, thresholds) reset to defaults
         "user-settings" - user preferences (performance_mode, voice_speed) reset to defaults
     """
-    body = request.get_json(silent=True) or {}
+    body, err = read_json_dict(request)
+    if err is not None:
+        body_out, status = err
+        return jsonify(body_out), status
     if not body.get("confirm"):
         return jsonify({"error": 'send {"confirm": true} to wipe data'}), 400
 
@@ -586,7 +591,10 @@ def debug_patch_config():
     Returns the applied values and a list of fields that would take effect
     immediately vs fields that only matter at model-load time (model paths, etc.).
     """
-    data = request.get_json(silent=True) or {}
+    data, err = read_json_dict(request)
+    if err is not None:
+        body, status = err
+        return jsonify(body), status
     if not data:
         return jsonify({
             "settable_fields": {k: t.__name__ for k, t in _SETTABLE_TYPES.items()}

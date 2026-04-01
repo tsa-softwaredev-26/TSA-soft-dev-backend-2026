@@ -3,6 +3,7 @@ import time
 from flask import Blueprint, request, jsonify
 
 from visual_memory.api.pipelines import get_database
+from ._json_utils import read_json_dict
 
 sightings_bp = Blueprint("sightings", __name__)
 
@@ -64,7 +65,10 @@ def add_sightings():
     Response:
         {"saved": int, "labels": [str], "room_name": str | null}
     """
-    data = request.get_json(silent=True) or {}
+    data, err = read_json_dict(request)
+    if err is not None:
+        body, status = err
+        return jsonify(body), status
     raw_room = (data.get("room_name") or "").strip()
     room_name = _normalize_room(raw_room) or None
 

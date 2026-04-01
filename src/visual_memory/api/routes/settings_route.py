@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 
 from visual_memory.api.pipelines import get_database, get_feedback_store, get_scan_pipeline, get_settings
+from ._json_utils import read_json_dict
 
 settings_bp = Blueprint("settings", __name__)
 
@@ -62,7 +63,10 @@ def patch_settings():
 
     Response: full settings state (same schema as GET /settings).
     """
-    data = request.get_json(silent=True) or {}
+    data, err = read_json_dict(request)
+    if err is not None:
+        body, status = err
+        return jsonify(body), status
     errors = {}
     applied = {}
 

@@ -16,6 +16,8 @@ from visual_memory.api.routes.scan import process_scan_request
 from visual_memory.api.routes.transcribe import transcribe_audio_bytes
 from visual_memory.utils import get_logger
 from visual_memory.utils.ollama_utils import extract_search_term
+from visual_memory.utils.voice_state_context import build_state_contract
+from ._json_utils import read_json_dict
 
 voice_bp = Blueprint("voice", __name__)
 _log = get_logger(__name__)
@@ -106,10 +108,10 @@ def _extract_audio_bytes(payload: dict) -> bytes:
     return request.data or b""
 
 
-def _resolve_query_for_find(query: str, label: str) -> str:
+def _resolve_query_for_find(query: str, label: str, state_context: dict | None = None) -> str:
     if label:
         return label
-    extracted = extract_search_term(query)
+    extracted = extract_search_term(query, state_context=state_context)
     if extracted:
         return extracted
     return query.strip()
@@ -216,6 +218,25 @@ def classify_command(transcription: str, state: dict) -> dict:
     lower = (transcription or "").lower().strip()
     mode = state.get("current_mode", "idle")
 
+    if mode == "onboarding_teach":
+        teach_label = extract_teach_label(transcription)
+        if teach_label:
+            return {"command": "remember", "label": teach_label}
+        if any(token in lower for token in ["teach", "remember", "save", "learn"]):
+            return {"command": "remember"}
+        if _matches_any(lower, _BACK_PATTERNS):
+            return {"command": "navigate_back"}
+        return _command_unavailable("ask", mode, ["remember", "navigate_back"])
+
+    if mode == "onboarding_await_scan":
+        if _matches_any(lower, _SCAN_PATTERNS):
+            return {"command": "scan"}
+        if _matches_any(lower, _BACK_PATTERNS):
+            return {"command": "navigate_back"}
+        if _matches_any(lower, _SETTINGS_PATTERNS):
+            return {"command": "open_settings"}
+        return _command_unavailable("ask", mode, ["scan", "navigate_back", "open_settings"])
+
     if mode == "awaiting_location":
         return {"command": "set_location", "location": transcription}
 
@@ -319,8 +340,8 @@ def _process_confirm_action_request(command_text: str, context: dict) -> tuple[d
     }, 200
 
 
-def _process_find_request(query: str, label: str) -> tuple[dict, int]:
-    search_label = _resolve_query_for_find(query, label)
+def _process_find_request(query: str, label: str, state_context: dict | None = None) -> tuple[dict, int]:
+    search_label = _resolve_query_for_find(query, label, state_context=state_context)
     if not search_label:
         return {"error": "missing field: query"}, 400
 
@@ -362,9 +383,14 @@ def _process_find_request(query: str, label: str) -> tuple[dict, int]:
 def voice():
     t0 = time.monotonic()
     use_context = request.args.get("context", "1") != "0"
-    payload = request.get_json(silent=True) if request.is_json else {}
-    payload = payload or {}
+    payload = {}
+    if request.is_json:
+        payload, err = read_json_dict(request)
+        if err is not None:
+            body, status = err
+            return jsonify(body), status
     mode, state_context = _extract_state(payload)
+    state_contract = build_state_contract(mode=mode, context=state_context)
 
     try:
         forced_type = _require_string(payload.get("request_type") or request.form.get("request_type", ""), "request_type").lower()
@@ -389,7 +415,15 @@ def voice():
     should_transcribe = not provided_text and forced_type not in {"remember", "scan"}
     if should_transcribe:
         audio_bytes = _extract_audio_bytes(payload)
-        transcription, status = transcribe_audio_bytes(audio_bytes, use_context=use_context)
+        transcription, status = transcribe_audio_bytes(
+            audio_bytes,
+            use_context=use_context,
+            voice_mode=mode,
+            voice_context={
+                **state_context,
+                "state_contract": state_contract,
+            },
+        )
         if status != 200:
             return jsonify(transcription), status
         transcription["source"] = "whisper"
@@ -414,9 +448,21 @@ def voice():
         }
         request_type = "error"
     elif request_type in {"rename", "read_ocr", "export_ocr", "describe", "item_ask"}:
+        if not scan_id:
+            return jsonify({"error": "missing field: scan_id"}), 400
+        if not label:
+            return jsonify({"error": "missing field: label"}), 400
         intent = classification.get("intent")
-        result, status = process_item_ask_request(scan_id=scan_id, label=label, query=command_text, intent=intent)
+        result, status = process_item_ask_request(
+            scan_id=scan_id,
+            label=label,
+            query=command_text,
+            intent=intent,
+            state_context=state_contract,
+        )
         request_type = "item_ask"
+        if status == 200:
+            next_state = "focused_on_item" if mode == "focused_on_item" else next_state
     elif request_type in {"open_settings", "navigate_next", "navigate_previous", "navigate_back"}:
         narration_map = {
             "open_settings": "Opening settings.",
@@ -428,24 +474,60 @@ def voice():
             "action": request_type,
             "narration": narration_map.get(request_type, ""),
         }, 200
+        next_state = "idle" if request_type in {"open_settings", "navigate_back"} else mode
     elif request_type == "remember":
         image_file = request.files.get("image")
         image_files = request.files.getlist("images[]")
-        prompt = (request.form.get("prompt") or classification.get("label") or _resolve_query_for_find(command_text, "")).strip()
+        prompt = (
+            request.form.get("prompt")
+            or classification.get("label")
+            or _resolve_query_for_find(command_text, "", state_context=state_contract)
+        ).strip()
         result, status = process_remember_request(prompt=prompt, image_file=image_file, image_files=image_files)
         if status == 200 and isinstance(result, dict) and result.get("success"):
             next_state = "awaiting_location"
+            state_context["label"] = prompt
+            if mode == "onboarding_teach":
+                onboarding_phase = str(state_context.get("onboarding_phase", "") or "")
+                if not onboarding_phase:
+                    state_context["onboarding_phase"] = "teach_1"
     elif request_type == "scan":
         result, status = process_scan_request(
             image_file=request.files.get("image"),
             focal_length_raw=request.form.get("focal_length_px", ""),
         )
+        if status == 200 and isinstance(result, dict):
+            matches = result.get("matches") or []
+            if matches:
+                state_context["scan_id"] = result.get("scan_id", "")
+                state_context["scan_matches"] = matches
+                state_context["item_index"] = 0
+                state_context["label"] = str(matches[0].get("label", "") or "")
+                next_state = "focused_on_item"
+            else:
+                next_state = "onboarding_await_scan" if mode == "onboarding_await_scan" else "idle"
     elif request_type == "find":
-        result, status = _process_find_request(query=classification.get("query", command_text), label=label)
+        result, status = _process_find_request(
+            query=classification.get("query", command_text),
+            label=label,
+            state_context=state_contract,
+        )
+        if status == 200:
+            next_state = "idle"
     elif request_type == "set_location":
         result, status = _process_set_location_request(label=label, location_text=classification.get("location", command_text))
         if status == 200:
-            next_state = "idle"
+            onboarding_phase = str(state_context.get("onboarding_phase", "") or "")
+            if onboarding_phase == "teach_1":
+                state_context["onboarding_phase"] = "teach_2"
+                state_context["label"] = ""
+                next_state = "onboarding_teach"
+            elif onboarding_phase == "teach_2":
+                state_context["onboarding_phase"] = "await_scan"
+                state_context["label"] = ""
+                next_state = "onboarding_await_scan"
+            else:
+                next_state = "idle"
     elif request_type == "confirm_action":
         result, status = _process_confirm_action_request(command_text=command_text, context=state_context)
         if status == 200:
@@ -457,8 +539,10 @@ def voice():
             "narration": "Okay, stopping.",
         }, 200
     else:
-        result, status = process_ask_query(command_text)
+        result, status = process_ask_query(command_text, state_context=state_contract)
         request_type = "ask"
+        if status == 200:
+            next_state = "idle"
 
     narration = result.get("narration", "") if isinstance(result, dict) else ""
     response = {
@@ -468,7 +552,8 @@ def voice():
         "classification": classification,
         "result": result,
         "narration": narration,
-        "next_state": next_state,
+        "next_state": next_state or mode,
+        "state_contract": build_state_contract(mode=next_state or mode, context=state_context),
         "latency_ms": round((time.monotonic() - t0) * 1000),
     }
     if classification.get("intent"):
@@ -479,6 +564,7 @@ def voice():
         "request_type": request_type,
         "status": status,
         "mode": mode,
-        "next_state": next_state,
+        "next_state": next_state or mode,
+        "state_contract_mode": (response.get("state_contract") or {}).get("current_mode"),
     })
     return jsonify(response), status

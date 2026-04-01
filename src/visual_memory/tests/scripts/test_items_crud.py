@@ -109,6 +109,15 @@ def test_rename_missing_new_label():
     assert_status(resp, 400)
 
 
+def test_rename_invalid_json():
+    resp = client.post(
+        "/items/keys/rename",
+        data='{"new_label":',
+        content_type="application/json",
+    )
+    assert_status(resp, 400)
+
+
 def test_rename_nonexistent_source():
     resp = client.post("/items/ghost_item_xyz/rename", json={"new_label": "something"})
     assert_status(resp, 404)
@@ -142,6 +151,7 @@ for name, fn in [
     ("items:rename_same_label", test_rename_same_label),
     ("items:rename_empty_label", test_rename_empty_label),
     ("items:rename_missing_field", test_rename_missing_new_label),
+    ("items:rename_invalid_json", test_rename_invalid_json),
     ("items:rename_nonexistent_source", test_rename_nonexistent_source),
     ("items:rename_conflict_no_force", test_rename_conflict_without_force),
     ("items:rename_conflict_with_force", test_rename_conflict_with_force),

@@ -68,6 +68,15 @@ def test_patch_settings_valid_head_weight():
     assert data.get("projection_head_weight") == 0.5
 
 
+def test_patch_settings_invalid_json():
+    resp = client.patch(
+        "/settings",
+        data='{"enable_learning":',
+        content_type="application/json",
+    )
+    assert_status(resp, 400)
+
+
 def test_get_user_settings_fields():
     resp = client.get("/user-settings")
     assert_status(resp, 200)
@@ -104,6 +113,15 @@ def test_patch_user_settings_valid_voice_speed():
     assert data.get("voice_speed") == 1.5
 
 
+def test_patch_user_settings_invalid_json():
+    resp = client.patch(
+        "/user-settings",
+        data='{"performance_mode":',
+        content_type="application/json",
+    )
+    assert_status(resp, 400)
+
+
 def test_fast_mode_disables_second_pass():
     resp = client.patch("/user-settings", json={"performance_mode": "fast"})
     assert_status(resp, 200)
@@ -136,11 +154,13 @@ for name, fn in [
     ("settings:patch_invalid_min_feedback", test_patch_settings_invalid_min_feedback),
     ("settings:patch_unrecognized_field_ignored", test_patch_settings_unrecognized_field_ignored),
     ("settings:patch_valid_head_weight", test_patch_settings_valid_head_weight),
+    ("settings:patch_invalid_json", test_patch_settings_invalid_json),
     ("user_settings:get_fields", test_get_user_settings_fields),
     ("user_settings:patch_performance_mode", test_patch_user_settings_performance_mode),
     ("user_settings:patch_invalid_performance_mode", test_patch_user_settings_invalid_performance_mode),
     ("user_settings:patch_invalid_voice_speed", test_patch_user_settings_invalid_voice_speed),
     ("user_settings:patch_valid_voice_speed", test_patch_user_settings_valid_voice_speed),
+    ("user_settings:patch_invalid_json", test_patch_user_settings_invalid_json),
     ("user_settings:fast_mode_disables_second_pass", test_fast_mode_disables_second_pass),
     ("user_settings:accurate_mode_enables_second_pass", test_accurate_mode_enables_second_pass),
     ("user_settings:balanced_mode_enables_llm_fallback", test_balanced_mode_enables_llm_fallback),
