@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import gc
 import csv
+import hashlib
 import json
 import re
 import sys
@@ -90,12 +91,47 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--epochs", type=int, default=20)
     p.add_argument("--lr", type=float, default=1e-4)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument(
+        "--split-manifest",
+        type=Path,
+        default=_BENCHMARKS_DIR / "split_manifest.json",
+        help="Pinned split manifest path (load if present, write if missing)",
+    )
+    p.add_argument(
+        "--refresh-split-manifest",
+        action="store_true",
+        help="Regenerate split manifest instead of reusing an existing file",
+    )
     p.add_argument("--train-per-label", type=int, default=6,
                    help="How many images per label go to train split (dataset has 12 per label)")
     p.add_argument("--no-train-augment", action="store_true",
                    help="Disable mirrored/blurred/darkened augmentations for train images")
     p.add_argument("--similarity-threshold", type=float, default=None,
                    help="Override retrieval threshold (default: Settings.similarity_threshold)")
+    p.add_argument(
+        "--regression-baseline",
+        type=Path,
+        default=None,
+        help="Optional previous results.json path for drift gating",
+    )
+    p.add_argument(
+        "--max-accuracy-drop-pp",
+        type=float,
+        default=3.0,
+        help="Maximum allowed personalized accuracy drop (percentage points)",
+    )
+    p.add_argument(
+        "--max-fp-increase-pp",
+        type=float,
+        default=2.0,
+        help="Maximum allowed personalized false-positive increase on negatives (pp)",
+    )
+    p.add_argument(
+        "--max-fn-increase-pp",
+        type=float,
+        default=3.0,
+        help="Maximum allowed personalized false-negative increase on test set (pp)",
+    )
     p.add_argument("--no-depth", action="store_true")
     p.add_argument("--no-ocr", action="store_true")
     return p.parse_args()
@@ -266,6 +302,67 @@ def _split_fixed_60_60(
         db_set.append(preferred[0] if preferred else label_train[0])
 
     return sorted(train_set), sorted(db_set), sorted(test_set)
+
+
+def _dataset_signature(embedded: Dict[str, dict]) -> dict:
+    pairs = [f"{fname}:{embedded[fname]['label']}" for fname in sorted(embedded)]
+    digest = hashlib.sha256("\n".join(pairs).encode("utf-8")).hexdigest()
+    return {
+        "count": len(pairs),
+        "sha256": digest,
+    }
+
+
+def _write_split_manifest(
+    path: Path,
+    signature: dict,
+    seed: int,
+    train_per_label: int,
+    train_set: List[str],
+    db_set: List[str],
+    test_set: List[str],
+) -> None:
+    payload = {
+        "version": 1,
+        "signature": signature,
+        "seed": seed,
+        "train_per_label": train_per_label,
+        "train_set": sorted(train_set),
+        "db_set": sorted(db_set),
+        "test_set": sorted(test_set),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+
+
+def _load_split_manifest(path: Path, embedded: Dict[str, dict]) -> Tuple[List[str], List[str], List[str], dict]:
+    with open(path, encoding="utf-8") as f:
+        payload = json.load(f)
+    if not isinstance(payload, dict):
+        raise ValueError(f"invalid split manifest payload: {path}")
+
+    train_set = payload.get("train_set") or []
+    db_set = payload.get("db_set") or []
+    test_set = payload.get("test_set") or []
+    if not isinstance(train_set, list) or not isinstance(db_set, list) or not isinstance(test_set, list):
+        raise ValueError(f"invalid split lists in manifest: {path}")
+
+    all_names = set(embedded.keys())
+    missing = sorted({str(x) for x in (train_set + db_set + test_set) if str(x) not in all_names})
+    if missing:
+        raise ValueError(
+            f"split manifest references {len(missing)} missing images "
+            f"(first: {missing[:3]}). Re-run with --refresh-split-manifest."
+        )
+
+    signature = payload.get("signature")
+    info = {
+        "signature": signature if isinstance(signature, dict) else {},
+        "seed": int(payload.get("seed", 42)),
+        "train_per_label": int(payload.get("train_per_label", 6)),
+    }
+    return sorted(train_set), sorted(db_set), sorted(test_set), info
 
 
 # phase 3: build reference database
@@ -910,6 +1007,7 @@ def _write_output(
     train_set: List[str],
     settings: Settings,
     split_integrity: dict,
+    benchmark_guard: dict,
 ) -> None:
     _BENCHMARKS_DIR.mkdir(parents=True, exist_ok=True)
     csv_path = _BENCHMARKS_DIR / "results.csv"
@@ -922,6 +1020,8 @@ def _write_output(
 
     metadata = {
         "split_strategy": "fixed_60_60_label_balanced_seeded",
+        "seed": split_integrity.get("seed"),
+        "train_per_label": split_integrity.get("train_per_label"),
         "epochs": args.epochs,
         "lr": args.lr,
         "similarity_threshold": threshold,
@@ -936,6 +1036,7 @@ def _write_output(
         "n_negatives": len(neg_results),
         "final_triplet_loss": round(final_loss, 6),
         "split_integrity": split_integrity,
+        "benchmark_guard": benchmark_guard,
         "pipeline_stage_latency_mode": "derived_from_component_phases",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
@@ -943,6 +1044,104 @@ def _write_output(
         json.dump({"metadata": metadata, "results": rows, "negatives": neg_results}, f, indent=2)
 
     print(f"\nResults written to: {csv_path}, {json_path}")
+
+
+def _pct(value: float) -> float:
+    return round(value * 100.0, 3)
+
+
+def _regression_guard(
+    rows: List[dict],
+    neg_results: List[dict],
+    baseline_path: Optional[Path],
+    max_accuracy_drop_pp: float,
+    max_fp_increase_pp: float,
+    max_fn_increase_pp: float,
+) -> dict:
+    n = max(len(rows), 1)
+    pe_acc = sum(int(r.get("personalized_correct", 0)) for r in rows) / n
+    pe_fn = 1.0 - pe_acc
+    neg_n = len(neg_results)
+    pe_fp = (
+        sum(int(r.get("personalized_fp", 0)) for r in neg_results) / max(neg_n, 1)
+        if neg_n > 0 else None
+    )
+
+    summary = {
+        "enabled": bool(baseline_path),
+        "baseline_path": str(baseline_path) if baseline_path else "",
+        "current": {
+            "personalized_accuracy_pct": _pct(pe_acc),
+            "personalized_fn_rate_pct": _pct(pe_fn),
+            "personalized_fp_rate_pct": _pct(pe_fp) if pe_fp is not None else None,
+        },
+        "thresholds": {
+            "max_accuracy_drop_pp": float(max_accuracy_drop_pp),
+            "max_fp_increase_pp": float(max_fp_increase_pp),
+            "max_fn_increase_pp": float(max_fn_increase_pp),
+        },
+        "baseline": None,
+        "checks": [],
+        "passed": True,
+    }
+    if not baseline_path:
+        return summary
+    if not baseline_path.exists():
+        raise FileNotFoundError(f"regression baseline not found: {baseline_path}")
+
+    with open(baseline_path, encoding="utf-8") as f:
+        baseline = json.load(f)
+    b_rows = baseline.get("results") or []
+    b_neg = baseline.get("negatives") or []
+    if not isinstance(b_rows, list) or not b_rows:
+        raise ValueError(f"baseline results missing/invalid: {baseline_path}")
+
+    bn = max(len(b_rows), 1)
+    b_pe_acc = sum(int(r.get("personalized_correct", 0)) for r in b_rows) / bn
+    b_pe_fn = 1.0 - b_pe_acc
+    b_neg_n = len(b_neg)
+    b_pe_fp = (
+        sum(int(r.get("personalized_fp", 0)) for r in b_neg) / max(b_neg_n, 1)
+        if b_neg_n > 0 else None
+    )
+    summary["baseline"] = {
+        "personalized_accuracy_pct": _pct(b_pe_acc),
+        "personalized_fn_rate_pct": _pct(b_pe_fn),
+        "personalized_fp_rate_pct": _pct(b_pe_fp) if b_pe_fp is not None else None,
+        "n_test": len(b_rows),
+        "n_negatives": b_neg_n,
+    }
+
+    acc_drop_pp = _pct(b_pe_acc - pe_acc)
+    fn_increase_pp = _pct(pe_fn - b_pe_fn)
+    fp_increase_pp = _pct((pe_fp - b_pe_fp)) if (pe_fp is not None and b_pe_fp is not None) else None
+
+    acc_ok = acc_drop_pp <= max_accuracy_drop_pp
+    fn_ok = fn_increase_pp <= max_fn_increase_pp
+    fp_ok = True if fp_increase_pp is None else fp_increase_pp <= max_fp_increase_pp
+    summary["checks"] = [
+        {
+            "name": "accuracy_drop_pp",
+            "actual": acc_drop_pp,
+            "limit": float(max_accuracy_drop_pp),
+            "ok": acc_ok,
+        },
+        {
+            "name": "fn_increase_pp",
+            "actual": fn_increase_pp,
+            "limit": float(max_fn_increase_pp),
+            "ok": fn_ok,
+        },
+        {
+            "name": "fp_increase_pp",
+            "actual": fp_increase_pp,
+            "limit": float(max_fp_increase_pp),
+            "ok": fp_ok,
+            "skipped": fp_increase_pp is None,
+        },
+    ]
+    summary["passed"] = bool(acc_ok and fn_ok and fp_ok)
+    return summary
 
 
 def _enforce_memory_guard(monitor: MemoryMonitor, phase_name: str) -> None:
@@ -1106,17 +1305,48 @@ def main() -> None:
     # Phase 2: Split
     _enforce_memory_guard(monitor, "phase 2")
     print("\n[2/7] Splitting: fixed 60 train / 60 test (label-balanced, seeded)...")
-    train_set, db_set, test_set = _split_fixed_60_60(
-        embedded,
-        train_per_label=args.train_per_label,
-        seed=args.seed,
-    )
+    ds_sig = _dataset_signature(embedded)
+    manifest_path = args.split_manifest
+    used_manifest = False
+    manifest_seed = args.seed
+    manifest_train_per_label = args.train_per_label
+    if manifest_path.exists() and not args.refresh_split_manifest:
+        train_set, db_set, test_set, manifest_info = _load_split_manifest(manifest_path, embedded)
+        manifest_sig = manifest_info.get("signature") or {}
+        if manifest_sig and manifest_sig != ds_sig:
+            raise ValueError(
+                "split manifest signature mismatch; dataset changed. "
+                "Re-run with --refresh-split-manifest."
+            )
+        manifest_seed = int(manifest_info.get("seed", manifest_seed))
+        manifest_train_per_label = int(manifest_info.get("train_per_label", manifest_train_per_label))
+        used_manifest = True
+        print(f"  using split manifest: {manifest_path}")
+    else:
+        train_set, db_set, test_set = _split_fixed_60_60(
+            embedded,
+            train_per_label=args.train_per_label,
+            seed=args.seed,
+        )
+        _write_split_manifest(
+            manifest_path,
+            ds_sig,
+            args.seed,
+            args.train_per_label,
+            train_set,
+            db_set,
+            test_set,
+        )
+        print(f"  wrote split manifest: {manifest_path}")
     train_labels = sorted({embedded[f]["label"] for f in train_set})
     test_labels = sorted({embedded[f]["label"] for f in test_set})
     split_integrity = {
         "strategy": "fixed_60_60_label_balanced_seeded",
-        "seed": args.seed,
-        "train_per_label": args.train_per_label,
+        "manifest_path": str(manifest_path),
+        "manifest_used": used_manifest,
+        "seed": manifest_seed,
+        "train_per_label": manifest_train_per_label,
+        "dataset_signature": ds_sig,
         "train_count": len(train_set),
         "test_count": len(test_set),
         "train_labels": train_labels,
@@ -1217,9 +1447,17 @@ def main() -> None:
         print(f"\n[neg] negative_dataset.csv not found; skipping FP evaluation")
 
     # Output
+    merged = _merge_rows(retrieval_results, dino_results, depth_results)
+    benchmark_guard = _regression_guard(
+        rows=merged,
+        neg_results=neg_results,
+        baseline_path=args.regression_baseline,
+        max_accuracy_drop_pp=args.max_accuracy_drop_pp,
+        max_fp_increase_pp=args.max_fp_increase_pp,
+        max_fn_increase_pp=args.max_fn_increase_pp,
+    )
     _print_summary(retrieval_results, dino_results, depth_results,
                    neg_results, final_loss, threshold, args.no_depth)
-    merged = _merge_rows(retrieval_results, dino_results, depth_results)
     _write_output(
         merged,
         neg_results,
@@ -1230,7 +1468,22 @@ def main() -> None:
         train_set,
         settings,
         split_integrity=split_integrity,
+        benchmark_guard=benchmark_guard,
     )
+    if benchmark_guard["enabled"]:
+        print("\n[guard] Benchmark regression checks:")
+        for check in benchmark_guard["checks"]:
+            if check.get("skipped"):
+                print(f"  - {check['name']}: skipped (insufficient negative baseline)")
+                continue
+            status = "PASS" if check["ok"] else "FAIL"
+            print(
+                f"  - {check['name']}: {status} "
+                f"(actual={check['actual']} limit={check['limit']})"
+            )
+        if not benchmark_guard["passed"]:
+            print("[guard] Regression gate failed.", file=sys.stderr)
+            sys.exit(2)
 
 
 if __name__ == "__main__":

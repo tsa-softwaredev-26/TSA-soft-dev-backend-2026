@@ -130,10 +130,50 @@ def generate(results_path: Path, output_path: Path) -> None:
     n_test = meta.get('n_test', 'N/A')
     seed = meta.get('seed', 'default')
     a(f"**Dataset**: {n_train} train / {n_test} test images (seed {seed})")
+    split_integrity = meta.get("split_integrity", {}) or {}
+    manifest_path = split_integrity.get("manifest_path")
+    if manifest_path:
+        source = "reused" if split_integrity.get("manifest_used") else "generated"
+        a(f"**Split manifest**: `{manifest_path}` ({source})")
     a(f"**Training**: {meta['epochs']} epochs, lr {meta['lr']}, final triplet loss {meta['final_triplet_loss']:.4f}")
+    guard = meta.get("benchmark_guard") or {}
+    if guard.get("enabled"):
+        guard_status = "PASS" if guard.get("passed") else "FAIL"
+        a(f"**Regression guard**: {guard_status}")
     a("")
     a("---")
     a("")
+    guard = meta.get("benchmark_guard") or {}
+    if guard.get("enabled"):
+        a("## Regression Guard")
+        a("")
+        current = guard.get("current") or {}
+        baseline = guard.get("baseline") or {}
+        thresholds = guard.get("thresholds") or {}
+        a(f"- Baseline: `{guard.get('baseline_path', '')}`")
+        a(f"- Personalized accuracy: {baseline.get('personalized_accuracy_pct', 'n/a')}% -> {current.get('personalized_accuracy_pct', 'n/a')}%")
+        a(f"- Personalized FN rate: {baseline.get('personalized_fn_rate_pct', 'n/a')}% -> {current.get('personalized_fn_rate_pct', 'n/a')}%")
+        bfp = baseline.get('personalized_fp_rate_pct')
+        cfp = current.get('personalized_fp_rate_pct')
+        if bfp is not None and cfp is not None:
+            a(f"- Personalized FP rate (negatives): {bfp}% -> {cfp}%")
+        a("")
+        a(_row("Check", "Actual (pp)", "Limit (pp)", "Status"))
+        a(_sep(24, 12, 11, 8))
+        for check in guard.get("checks", []):
+            if check.get("skipped"):
+                a(_row(check.get("name", ""), "n/a", f"{check.get('limit', 'n/a')}", "SKIP"))
+            else:
+                status = "PASS" if check.get("ok") else "FAIL"
+                a(_row(
+                    check.get("name", ""),
+                    str(check.get("actual", "n/a")),
+                    str(check.get("limit", "n/a")),
+                    status,
+                ))
+        a("")
+        a("---")
+        a("")
 
     # retrieval table
     a("## Retrieval")
