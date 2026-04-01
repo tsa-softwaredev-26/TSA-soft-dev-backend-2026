@@ -844,25 +844,47 @@ See `UX.md` for current onboarding narration and state-driven UX behavior.
 
 ---
 
-## Performance Tuning and Server-Side Optimization
+## Tuning Process
 
-### Single-GPU Contention Avoidance
+### How tuning is run
 
-When tuning ML parameters on single-GPU systems:
+When tuning ML/runtime parameters on single-GPU systems:
 
 1. Stop live services: `systemctl stop spaitra-core spaitra-ocr`
 2. Clear GPU memory: `nvidia-smi --query-gpu=memory.free --format=csv`
-3. Run optimization workloads isolated with no concurrent system load
+3. Run tuning workloads in isolation (no concurrent load)
 4. Monitor GPU utilization and VRAM: `nvidia-smi dmon`
-5. Validate stability before restarting services: `systemctl start spaitra-core spaitra-ocr && sleep 5 && systemctl status spaitra-core spaitra-ocr`
+5. Validate stability before restart: `systemctl start spaitra-core spaitra-ocr && sleep 5 && systemctl status spaitra-core spaitra-ocr`
 
-### Checklist Whenever Making Engine Changes
+Before merging tuning changes:
 
-Before merging tuning/performance changes to `main`:
+1. Run benchmark/test coverage for the affected area on server
+2. Check for regressions in latency and accuracy
+3. Persist and verify settings through `PATCH /settings` + restart (`warm_all()` reapplies)
+4. Commit benchmark artifacts/settings snapshots under `benchmarks/` when generated
 
-1. Run full benchmark suite on server: `python -m pytest src/visual_memory/benchmarks/ -v --tb=short`
-2. Validate no regressions in latency (stage timing) or accuracy (detection/retrieval rates)
-3. Commit benchmark results and ML settings snapshots to `benchmarks/` and document changes in PR description
-4. Ensure `PATCH /settings` accepts new tuning params and persists them to `user_state.ml_settings`
-5. Test settings persistence on server: stop core service, load new settings, verify `warm_all()` applies changes
-6. Merge with squash to `main` and tag release with benchmark results
+### Tuned parameters (current)
+
+- **NumPy OCR text-likelihood gate** (`estimate_text_likelihood` + settings):
+  - `ocr_text_likelihood_threshold=0.30`, `ocr_text_likelihood_upper_threshold=0.85`
+  - Rescue path: `0.10` + min luminance `40.0` + min blur `130.0`
+  - **Why:** reduce OCR false positives and OCR call load on textless crops while still catching receipt/document-like crops.
+- **Remember blur quality threshold:**
+  - `blur_sharpness_threshold=120.0`
+  - **Why:** adjusted from benchmark blur-score distribution to reduce over-flagging blur in user messaging.
+- **Darkness gate (remember + scan):**
+  - `darkness_threshold=30.0`
+  - **Why:** conservative block for genuinely dark scenes where detection reliability is poor.
+- **Grounding DINO detection thresholds (remember):**
+  - `box_threshold=0.30`, `text_threshold=0.25`
+  - **Why:** tuned for practical detectability/precision tradeoff in teach/remember flows (limited sweep artifacts currently documented).
+- **YOLOE detection thresholds (scan detector stage):**
+  - `yoloe_confidence=0.35`, `yoloe_iou=0.45`
+  - **Why:** broad proposal recall at detector stage, with downstream matching/dedup filtering.
+- **Combined embedding text weighting:**
+  - `combined_text_weight=1.10`, `combined_text_weight_high_confidence_boost=0.10`
+  - **Why:** improve retrieval on text-heavy objects without fully dominating image signal.
+
+### In-progress tuning placeholders
+
+- **Scan similarity thresholds:** actively being tuned against current benchmark runs; final values intentionally not locked in this document yet.
