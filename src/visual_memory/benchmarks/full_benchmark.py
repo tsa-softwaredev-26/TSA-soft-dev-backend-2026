@@ -215,7 +215,7 @@ def _embed_rows(
             "distance_ft": row["distance_ft"],
             "dino_prompt": row["dino_prompt"],
             "embedding": emb,
-            "image": img,
+            "image_path": str(img_path),
             "lat_embed_img": lat_img,
             "lat_ocr": lat_ocr,
             "lat_embed_txt": lat_txt,
@@ -394,12 +394,16 @@ def _build_triplets(
 
 def _augment_train_embedding(
     embedding: torch.Tensor,
-    image: Image.Image,
+    image_path: str,
     do_augment: bool,
 ) -> List[torch.Tensor]:
     """Return base embedding plus optional deterministic visual augmentations."""
     out = [embedding]
     if not do_augment:
+        return out
+    try:
+        image = load_image(image_path)
+    except Exception:
         return out
 
     variants = [
@@ -443,8 +447,8 @@ def _build_triplets_augmented(
             positive = embedded[positive_name]
             neg_name = negatives[i % len(negatives)]
             negative = embedded[neg_name]
-            anchors = _augment_train_embedding(anchor["embedding"], anchor["image"], augment_train)
-            positives = _augment_train_embedding(positive["embedding"], positive["image"], augment_train)
+            anchors = _augment_train_embedding(anchor["embedding"], anchor["image_path"], augment_train)
+            positives = _augment_train_embedding(positive["embedding"], positive["image_path"], augment_train)
             for a_emb in anchors:
                 for p_emb in positives[:2]:
                     triplets.append((a_emb, p_emb, negative["embedding"]))
@@ -741,10 +745,22 @@ def _eval_detection(
 ) -> Dict[str, dict]:
     detector = registry.gdino_detector
     results: Dict[str, dict] = {}
+    oom_seen = False
     for i, fname in enumerate(test_set):
         data = embedded[fname]
+        image = load_image(data["image_path"])
         t0 = time.perf_counter()
-        det, used_prompt = _detect_with_fallback(detector, data["image"], data["dino_prompt"], settings)
+        if oom_seen:
+            det, used_prompt = None, None
+        else:
+            try:
+                det, used_prompt = _detect_with_fallback(detector, image, data["dino_prompt"], settings)
+            except torch.OutOfMemoryError:
+                oom_seen = True
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                det, used_prompt = None, None
+                print("  [warn] detection OOM; marking remaining detections as unavailable")
         lat_detect = time.perf_counter() - t0
         if det:
             results[fname] = {"detected": 1, "confidence": det["score"],
@@ -795,8 +811,9 @@ def _eval_depth(
         gt_dist = data["distance_ft"]
         if not det["detected"] or gt_dist <= 0:
             continue
+        image = load_image(data["image_path"])
         t0 = time.perf_counter()
-        depth_map = estimator.estimate(data["image"], focal_length_px=focal_length)
+        depth_map = estimator.estimate(image, focal_length_px=focal_length)
         pred_ft = estimator.get_depth_at_bbox(depth_map, det["box"])
         lat_depth = time.perf_counter() - t0
         abs_err = abs(pred_ft - gt_dist)
