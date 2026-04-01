@@ -7,7 +7,7 @@ Narration content, onboarding flow, hints, and UX decisions. This is the product
 ## Design Philosophy
 
 - Voice-first, low-friction. One core action per interaction.
-- No tutorials. Onboarding is the first real use.
+- No tutorials; onboarding is the first real use.
 - The user learns by doing, not by reading instructions.
 - Every spoken output is phrased for a blind user who cannot see the screen.
 - Steve Jobs philosophy: fewer controls, more intelligence.
@@ -22,7 +22,7 @@ Triggered when the database is empty (first install). The server drives every st
 
 Server speaks on connect:
 
-> "Welcome to Spaitra. I remember where your things are. Grab two items near you and let's start. Say teach, then the name of the first item."
+> "Welcome to Spaitra. I help you build a spatial world and ask about it with natural language. Grab two items near you and let's start. Say teach, then the name of the first item."
 
 State: `onboarding_teach`
 
@@ -46,13 +46,13 @@ State: `onboarding_teach`, phase `teach_2`
 
 Same flow as item 1. After room is named:
 
-> "Got it, [label] in the [room]. Great. Place both items somewhere in the room, then say scan."
+> "Got it, [label] in the [room]. Place both items somewhere in the room, then press anywhere in the lower half of the screen to scan."
 
 State: `onboarding_await_scan`
 
 ### Scan
 
-User says "scan". Server requests camera. User sends image. Server announces results:
+User scans. Server requests camera. User sends image. Server announces results:
 
 > "[Item 1 narration]. [Item 2 narration]. Now swipe right to browse each item."
 
@@ -62,7 +62,7 @@ State: `focused_on_item`
 
 User swipes through items. Server re-reads narration for each item. After the user reaches the last item:
 
-> "[Item narration]. Swipe left to go back. That is how scan works. Now ask me where you left your [first item]."
+> "[Item narration]. Swipe left to go back. That is how scan works. Now ask me where you left your [first item], while holding down the top right button."
 
 ### Ask demo
 

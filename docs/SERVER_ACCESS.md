@@ -187,7 +187,7 @@ curl -X POST "$BASE/feedback" \
   -d '{
     "scan_id": "<uuid-from-scan-response>",
     "label": "red mug",
-    "correct": true
+    "feedback": "correct"
   }'
 ```
 

@@ -73,7 +73,7 @@ Feedback model decisions that affect the backend:
 - No feedback is collected during onboarding. The ProjectionHead does not train until the user has organic sessions with clean, representative data.
 - Implicit acceptance is excluded because unverified positives corrupt triplet training over time.
 
-See [FRONTEND_GUIDE.md](FRONTEND_GUIDE.md) for the full onboarding flow and UX patterns.
+See [UX.md](UX.md) for the full onboarding flow and UX patterns.
 
 ---
 
@@ -695,7 +695,7 @@ Models are loaded once at startup via `warm_all()` in `create_app()`. Upload cap
 
 **Endpoints:** GET /health, POST /remember, POST /scan, POST /feedback, POST /retrain, GET /retrain/status, GET /settings, PATCH /settings, GET /user-settings, PATCH /user-settings, GET /find, POST /ask, POST /item/ask, GET /crop, GET /items, DELETE /items/<label>, POST /items/<label>/rename, POST /sightings, GET /debug/state, POST /debug/echo, POST /debug/image, GET /debug/db, GET /debug/logs, GET /debug/perf, GET /debug/test-remember, GET /debug/test-scan, POST /debug/wipe, PATCH /debug/config.
 
-See `FRONTEND_GUIDE.md` for full request/response schemas, field reference, and integration patterns.
+See `UX.md` for current onboarding narration and state-driven UX behavior.
 
 ---
 
@@ -884,4 +884,3 @@ Before merging tuning/performance changes to `main`:
 4. Ensure `PATCH /settings` accepts new tuning params and persists them to `user_state.ml_settings`
 5. Test settings persistence on server: stop core service, load new settings, verify `warm_all()` applies changes
 6. Merge with squash to `main` and tag release with benchmark results
-
