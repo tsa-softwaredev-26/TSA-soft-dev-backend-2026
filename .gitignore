@@ -70,10 +70,13 @@ depth_demo/ml-depth-pro/
 # Benchmark data (images, generated outputs, personal process files)
 benchmarks/images/
 benchmarks/results*
+benchmarks/threshold_comparison.csv
+benchmarks/baslines/
 benchmarks/projection_head_bench.pt
 benchmarks/CAPTURE_GUIDE.md
 benchmarks/ground_truth/
 BENCHMARKS.md
 src/visual_memory/benchmarks/redact_receipt.py
+src/visual_memory/benchmarks/query_sets/
 benchmarks/baselines/stress_tests/
 src/visual_memory/tests/input_audio/
