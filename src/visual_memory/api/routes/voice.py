@@ -82,30 +82,38 @@ _ALLOWED_REQUEST_TYPES = {
 }
 
 
-def _extract_audio_bytes(payload: dict) -> bytes:
+def _extract_audio_bytes(payload: dict) -> tuple[bytes, str | None]:
     if request.files.get("audio") is not None:
-        return request.files["audio"].read()
+        return request.files["audio"].read(), None
     if request.files.get("audio_file") is not None:
-        return request.files["audio_file"].read()
+        return request.files["audio_file"].read(), None
     raw_audio = payload.get("audio")
     if isinstance(raw_audio, str) and raw_audio.strip():
         encoded = raw_audio.strip()
         if "," in encoded and encoded.startswith("data:"):
             encoded = encoded.split(",", 1)[1]
         try:
-            return base64.b64decode(encoded, validate=True)
-        except Exception:
-            _log.warning({"event": "voice_audio_decode_failed", "reason": "invalid_base64"})
-            return b""
+            return base64.b64decode(encoded, validate=True), None
+        except Exception as exc:
+            _log.warning({
+                "event": "voice_audio_decode_failed",
+                "reason": "invalid_base64",
+                "error": str(exc),
+            })
+            return b"", "invalid_audio_payload"
     if isinstance(raw_audio, dict):
         b64 = raw_audio.get("base64")
         if isinstance(b64, str) and b64.strip():
             try:
-                return base64.b64decode(b64.strip(), validate=True)
-            except Exception:
-                _log.warning({"event": "voice_audio_decode_failed", "reason": "invalid_base64_dict"})
-                return b""
-    return request.data or b""
+                return base64.b64decode(b64.strip(), validate=True), None
+            except Exception as exc:
+                _log.warning({
+                    "event": "voice_audio_decode_failed",
+                    "reason": "invalid_base64_dict",
+                    "error": str(exc),
+                })
+                return b"", "invalid_audio_payload"
+    return request.data or b"", None
 
 
 def _resolve_query_for_find(query: str, label: str, state_context: dict | None = None) -> str:
@@ -414,7 +422,9 @@ def voice():
 
     should_transcribe = not provided_text and forced_type not in {"remember", "scan"}
     if should_transcribe:
-        audio_bytes = _extract_audio_bytes(payload)
+        audio_bytes, audio_decode_error = _extract_audio_bytes(payload)
+        if audio_decode_error is not None:
+            return jsonify({"error": "invalid audio payload"}), 400
         transcription, status = transcribe_audio_bytes(
             audio_bytes,
             use_context=use_context,

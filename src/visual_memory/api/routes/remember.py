@@ -5,8 +5,11 @@ from uuid import uuid4
 from flask import Blueprint, jsonify, request
 
 from visual_memory.api.pipelines import get_remember_pipeline, get_scan_pipeline
+from visual_memory.utils import get_logger
+
 
 remember_bp = Blueprint("remember", __name__)
+_log = get_logger(__name__)
 _UPLOADS_DIR = Path(__file__).resolve().parents[4] / "uploads"
 
 
@@ -48,12 +51,22 @@ def _remember_multi(image_files, prompt: str) -> tuple[dict, int]:
 
         try:
             scores = pipeline.detect_score_batch(tmp_paths, prompt)
-        except Exception:
+        except Exception as exc:
+            _log.warning({
+                "event": "remember_detect_score_batch_failed",
+                "error": str(exc),
+                "images_tried": len(tmp_paths),
+            })
             scores = []
             for p in tmp_paths:
                 try:
                     score = pipeline.detect_score(p, prompt)
-                except Exception:
+                except Exception as score_exc:
+                    _log.warning({
+                        "event": "remember_detect_score_single_failed",
+                        "error": str(score_exc),
+                        "image_path": str(p),
+                    })
                     score = {
                         "detected": False,
                         "score": 0.0,
