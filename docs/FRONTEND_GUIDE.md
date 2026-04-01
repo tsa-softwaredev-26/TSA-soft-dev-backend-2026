@@ -81,7 +81,12 @@ Send when the user releases the held chat button or cancels before sending audio
 }
 ```
 
-Send when recording ends. Always include `audio`. Include `image` and `focal_length_px` when the camera is active (scan or teach flows).
+Send when recording ends. Always include `audio`.
+
+Include `image` and `focal_length_px` when the camera is active or when responding to `control.request_image` for:
+- scan
+- teach/remember
+- idle describe requests (`context: "describe"`)
 
 Focal length formula: `focal_length_px = (focalLengthMm / sensorWidthMm) * imageWidthPx`
 
@@ -144,9 +149,15 @@ User canceled. Reset recording UI.
 
 ```json
 { "action": "request_image", "context": "scan" }
+{ "action": "request_image", "context": "describe" }
 ```
 
 When `action == "request_image"`: activate camera, capture a JPEG frame, include it as `image` in the next `audio` event you send.
+
+`context` tells you why image is being requested:
+- `scan`: scan flow
+- `describe`: idle describe flow ("describe what I am looking at" / "describe this wallet")
+- missing or other: treat as generic camera-required step
 
 ### `action_result` -> update content views
 
@@ -156,15 +167,24 @@ When `action == "request_image"`: activate camera, capture a JPEG frame, include
 
 Store `scan_id` from scan results. You need it for `GET /crop`. The narration for scan results comes separately via `tts` - do not read `matches` yourself.
 
-Other types: `find`, `remember`, `set_location`, `item_focus`, `open_settings`, `navigate_back`. Route these to the appropriate UI transition.
+Other types: `find`, `remember`, `set_location`, `item_focus`, `open_settings`, `navigate_back`, `item_ask`, `ask`.
+
+Route by `type`, not by assumptions about current mode.
 
 ### `transcription` -> live display (optional)
 
 ```json
-{ "text": "where is my wallet" }
+{
+  "text": "where is my wallet",
+  "context_used": true,
+  "context_policy": "idle_home",
+  "context_state_id": "idle"
+}
 ```
 
-Optionally display what was heard before the result arrives. Cosmetic only.
+`text` is the only field required for UI.
+
+`context_used`, `context_policy`, and `context_state_id` are diagnostics only (safe to ignore in UI logic).
 
 ### `error` -> show error
 
@@ -191,6 +211,21 @@ Track `current_mode` from `session_state`. Show different UI per state.
 | `focused_on_item` | Scan results overlay. Enable swipe navigation. |
 
 The server drives all transitions. Use `current_mode` exactly as sent in `session_state`; do not remap state names on the client.
+
+---
+
+## Frontend behavior in focused item mode
+
+When `current_mode == focused_on_item`, keep these behaviors available:
+- swipe navigation (`navigate`)
+- hold-to-talk item commands
+
+Expected voice examples in focused mode include:
+- `wrong` (negative feedback)
+- `right` or `correct` (positive feedback)
+- item ask commands like read/export/describe/rename/find
+
+No special client parsing is required. Just send `audio` and render returned events.
 
 ---
 
@@ -235,9 +270,15 @@ Returns raw JPEG of the matched object. Call this only when displaying a cropped
 
 ```
 GET /debug/state        -> pipeline health, model load status
+POST /debug/echo
+POST /debug/image
+GET /debug/db
+GET /debug/logs
+GET /debug/perf
 GET /debug/test-remember
 GET /debug/test-scan
 POST /debug/wipe        body: { "confirm": true, "target": "all" }
+PATCH /debug/config
 ```
 
 Do not call these from production code.

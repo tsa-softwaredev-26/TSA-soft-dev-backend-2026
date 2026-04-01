@@ -5,15 +5,19 @@ import base64
 import io
 import os
 import re
+import tempfile
 import time
+from pathlib import Path
 
 from flask import request
 from flask_socketio import SocketIO, emit
+from PIL import Image
 
 from visual_memory.api.pipelines import (
     get_database,
     get_feedback_store,
     get_scan_pipeline,
+    get_user_settings,
 )
 from visual_memory.api.narration import (
     ONBOARDING_AWAIT_SCAN_PROMPT,
@@ -21,6 +25,8 @@ from visual_memory.api.narration import (
 )
 from visual_memory.api.routes.transcribe import transcribe_audio_bytes
 from visual_memory.api.voice_session import VoiceSession, clear_session, get_session
+from visual_memory.engine.model_registry import registry
+from visual_memory.engine.vlm import get_vlm_pipeline
 from visual_memory.utils import get_logger
 from visual_memory.utils.logger import LogTag
 from visual_memory.utils.voice_state_context import build_state_contract
@@ -29,6 +35,13 @@ _log = get_logger(__name__)
 _API_KEY = os.environ.get("API_KEY", "")
 _ROOM_PREFIX = re.compile(r"^(in (the|my) |the |my )", re.IGNORECASE)
 _MAX_WS_MEDIA_BYTES = 50 * 1024 * 1024
+_DESCRIBE_SCENE_PATTERNS = (
+    "describe what i am looking at",
+    "describe what i'm looking at",
+    "describe what im looking at",
+    "describe what i see",
+    "describe this scene",
+)
 
 # Hint content and when to fire them (counter_key, threshold count)
 _HINTS: dict[str, str] = {
@@ -111,36 +124,48 @@ def _get_hint(session: VoiceSession) -> str | None:
     return None
 
 
-def _decode_audio(value) -> bytes:
+def _decode_audio(value) -> tuple[bytes, str | None]:
     if isinstance(value, (bytes, bytearray)):
-        return bytes(value)
+        return bytes(value), None
     if not isinstance(value, str):
-        return b""
+        return b"", None
     encoded = value.strip()
     if "," in encoded and encoded.startswith("data:"):
         encoded = encoded.split(",", 1)[1]
     try:
-        return base64.b64decode(encoded, validate=True)
-    except Exception:
-        return b""
+        return base64.b64decode(encoded, validate=True), None
+    except Exception as exc:
+        _log.warning({
+            "event": "ws_audio_decode_failed",
+            "tag": LogTag.API,
+            "reason": "invalid_base64",
+            "error": str(exc),
+        })
+        return b"", "invalid_audio_payload"
 
 
-def _decode_image(value) -> bytes | None:
+def _decode_image(value) -> tuple[bytes | None, str | None]:
     if value is None:
-        return None
+        return None, None
     if isinstance(value, (bytes, bytearray)):
-        return bytes(value)
+        return bytes(value), None
     if not isinstance(value, str):
-        return None
+        return None, "invalid_image_payload"
     encoded = value.strip()
     if not encoded:
-        return None
+        return None, None
     if "," in encoded and encoded.startswith("data:"):
         encoded = encoded.split(",", 1)[1]
     try:
-        return base64.b64decode(encoded, validate=True)
-    except Exception:
-        return None
+        return base64.b64decode(encoded, validate=True), None
+    except Exception as exc:
+        _log.warning({
+            "event": "ws_image_decode_failed",
+            "tag": LogTag.API,
+            "reason": "invalid_base64",
+            "error": str(exc),
+        })
+        return None, "invalid_image_payload"
 
 
 class _BytesFileStorage:
@@ -161,6 +186,99 @@ class _BytesFileStorage:
 
 def _normalize_room_name(text: str) -> str:
     return _ROOM_PREFIX.sub("", (text or "").strip()).strip().lower()
+
+
+def _extract_idle_describe_target(command_text: str) -> tuple[bool, str | None]:
+    q = re.sub(r"\s+", " ", (command_text or "").strip().lower())
+    if "describe" not in q:
+        return False, None
+    if any(p in q for p in _DESCRIBE_SCENE_PATTERNS):
+        return True, None
+    match = re.search(r"\bdescribe\s+(?:this|the|my|a|an)?\s*([a-z0-9][a-z0-9\s'\-]{0,40})\b", q)
+    if not match:
+        return False, None
+    target = re.sub(r"\s+", " ", match.group(1)).strip(" ?.!,'\"")
+    if not target or target in {"it", "this", "that", "scene"}:
+        return True, None
+    return True, target
+
+
+def _describe_image_with_vlm(image: Image.Image, timeout_s: float) -> str:
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(prefix="ws_describe_", suffix=".jpg", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+        image.save(tmp_path, format="JPEG", quality=90)
+        return get_vlm_pipeline().describe(tmp_path, timeout=timeout_s)
+    finally:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+
+
+def _handle_idle_describe(session: VoiceSession, image_bytes: bytes, target: str | None) -> None:
+    session.context.pop("pending_action", None)
+    session.context.pop("describe_target", None)
+    session.state = "idle"
+
+    perf_cfg = get_user_settings().get_performance_config()
+    if not perf_cfg.vlm_enabled:
+        emit("tts", {
+            "narration": "Visual describe is disabled in fast mode. Switch to balanced or accurate.",
+            "next_state": "idle",
+        })
+        return
+
+    timeout_s = float(perf_cfg.vlm_timeout_seconds)
+    try:
+        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    except Exception as exc:
+        emit("error", {"code": "bad_payload", "message": f"Could not decode image: {exc}"})
+        return
+
+    if target is None:
+        try:
+            narration = _describe_image_with_vlm(image, timeout_s)
+            emit("action_result", {"type": "ask", "data": {"action": "describe_scene", "target": None}})
+            emit("tts", {"narration": narration, "next_state": "idle"})
+        except TimeoutError:
+            emit("tts", {"narration": "That took too long. Try again.", "next_state": "idle"})
+        except Exception as exc:
+            _log.warning({"event": "ws_describe_scene_failed", "error": str(exc)})
+            emit("tts", {"narration": "I could not describe this view right now.", "next_state": "idle"})
+        return
+
+    try:
+        detection = registry.gdino_detector.detect(image, target)
+    except Exception as exc:
+        _log.warning({"event": "ws_describe_target_detect_failed", "target": target, "error": str(exc)})
+        emit("tts", {"narration": "I could not isolate that object right now.", "next_state": "idle"})
+        return
+
+    if not detection:
+        emit("tts", {"narration": f"I could not find {target} in this view.", "next_state": "idle"})
+        return
+
+    box = detection.get("box")
+    if not isinstance(box, list) or len(box) != 4:
+        emit("tts", {"narration": f"I could not isolate {target} in this view.", "next_state": "idle"})
+        return
+
+    x1, y1, x2, y2 = [int(round(float(v))) for v in box]
+    x1 = max(0, min(x1, image.width - 1))
+    y1 = max(0, min(y1, image.height - 1))
+    x2 = max(x1 + 1, min(x2, image.width))
+    y2 = max(y1 + 1, min(y2, image.height))
+    crop = image.crop((x1, y1, x2, y2))
+
+    try:
+        narration = _describe_image_with_vlm(crop, timeout_s)
+        emit("action_result", {"type": "ask", "data": {"action": "describe_scene", "target": target}})
+        emit("tts", {"narration": narration, "next_state": "idle"})
+    except TimeoutError:
+        emit("tts", {"narration": "That took too long. Try again.", "next_state": "idle"})
+    except Exception as exc:
+        _log.warning({"event": "ws_describe_target_vlm_failed", "target": target, "error": str(exc)})
+        emit("tts", {"narration": "I could not describe that object right now.", "next_state": "idle"})
 
 
 def _extract_label(command_text: str, state_context: dict | None = None) -> str:
@@ -471,6 +589,25 @@ def _handle_feedback(session: VoiceSession) -> None:
     emit("tts", {"narration": "Got it, noted as incorrect.", "next_state": session.state})
 
 
+def _handle_positive_feedback(session: VoiceSession) -> None:
+    scan_id = session.context.get("scan_id", "")
+    label = session.context.get("current_label", "")
+    if not scan_id or not label:
+        emit("tts", {"narration": "No active scan to give feedback on.", "next_state": session.state})
+        return
+    try:
+        embeddings = get_scan_pipeline().get_cached_embeddings(scan_id, label)
+        if isinstance(embeddings, (tuple, list)) and len(embeddings) == 2:
+            anchor_emb, query_emb = embeddings
+            get_feedback_store().record_positive(anchor_emb, query_emb, label)
+        else:
+            emit("error", {"code": "cache_expired", "message": "Feedback expired. Please rescan."})
+            return
+    except Exception as exc:
+        _log.warning({"event": "ws_positive_feedback_failed", "tag": LogTag.API, "error": str(exc)})
+    emit("tts", {"narration": "Got it, noted as correct.", "next_state": session.state})
+
+
 def _handle_navigate_back(session: VoiceSession) -> None:
     _clear_focus_context(session)
     session.state = "idle"
@@ -521,6 +658,11 @@ def _dispatch(
                 emit("tts", {"narration": "I lost the item name. Please start again.", "next_state": "idle"})
                 return
             _handle_remember(session, image_bytes, label)
+        elif pending in {"describe_scene", "describe_target"}:
+            target = session.context.get("describe_target")
+            if not isinstance(target, str):
+                target = None
+            _handle_idle_describe(session, image_bytes, target)
         else:
             session.state = "idle"
             emit("error", {"code": "bad_state", "message": "Unknown pending action."})
@@ -542,12 +684,29 @@ def _dispatch(
         if "wrong" in q:
             _handle_feedback(session)
             return
+        if any(t in q for t in ("right", "correct", "yes this one", "this is right")):
+            _handle_positive_feedback(session)
+            return
         item_query_tokens = ("read", "what does", "text", "says", "export", "copy", "share",
                              "describe", "what is this", "looks like")
         if any(t in q for t in item_query_tokens):
             _handle_item_query(session, command_text)
             return
         # Not item-specific - fall through to normal command dispatch
+
+    if state == "idle":
+        is_describe, describe_target = _extract_idle_describe_target(command_text)
+        if is_describe:
+            if image_bytes is None:
+                session.context["pending_action"] = "describe_scene" if describe_target is None else "describe_target"
+                if describe_target is not None:
+                    session.context["describe_target"] = describe_target
+                session.state = "awaiting_image"
+                emit("control", {"action": "request_image", "context": "describe"})
+                emit("tts", {"narration": "Hold your phone up.", "next_state": "awaiting_image"})
+                return
+            _handle_idle_describe(session, image_bytes, describe_target)
+            return
 
     intent = _normalize_command_type(command_text, has_image=image_bytes is not None)
 
@@ -683,10 +842,13 @@ def register_events(sio: SocketIO) -> None:
         session = get_session(request.sid)
         t0 = time.monotonic()
 
-        audio_bytes = _decode_audio(data.get("audio", b""))
+        audio_bytes, audio_decode_error = _decode_audio(data.get("audio", b""))
+        if audio_decode_error is not None:
+            emit("error", {"code": "bad_payload", "message": "Invalid audio payload."})
+            return
         raw_image = data.get("image")
-        image_bytes = _decode_image(raw_image)
-        if raw_image not in (None, "") and image_bytes is None:
+        image_bytes, image_decode_error = _decode_image(raw_image)
+        if image_decode_error is not None:
             emit("error", {"code": "bad_payload", "message": "Invalid image payload."})
             return
         if len(audio_bytes) > _MAX_WS_MEDIA_BYTES:

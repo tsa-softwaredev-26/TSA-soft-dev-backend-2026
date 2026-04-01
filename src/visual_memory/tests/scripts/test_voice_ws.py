@@ -193,11 +193,57 @@ def test_audio_find_intent():
 
         transcription_events = [e for e in received if e["name"] == "transcription"]
         assert transcription_events, "no transcription event"
+        assert transcription_events[-1]["args"][0].get("context_policy"), "missing context_policy"
+        assert transcription_events[-1]["args"][0].get("context_state_id"), "missing context_state_id"
 
         tts_events = [e for e in received if e["name"] == "tts"]
         assert tts_events, "no tts event after find command"
         narration = tts_events[-1]["args"][0].get("narration", "")
         assert narration, "tts narration is empty"
+    finally:
+        cleanup()
+
+
+def test_transcription_context_policy_varies_by_state():
+    """WS transcription context policy should change with session mode."""
+    from visual_memory.api.voice_session import _sessions
+
+    client, sio, db, stub, cleanup = _make_ws_test_app(seed_fn=_seed_items)
+    try:
+        client.connect()
+        client.get_received()
+        sid = _client_sid(client)
+        session = _sessions[sid]
+
+        # idle
+        session.state = "idle"
+        stub.set_result("where is my wallet")
+        client.emit("audio", {"audio": _ogg_audio()})
+        rec = client.get_received()
+        trans = [e for e in rec if e["name"] == "transcription"][-1]["args"][0]
+        assert trans.get("context_policy") == "idle_home"
+        assert trans.get("context_state_id") == "idle"
+
+        # focused
+        session.state = "focused_on_item"
+        session.context["scan_id"] = "scan-pol"
+        session.context["current_label"] = "wallet"
+        stub.set_result("read this")
+        client.emit("audio", {"audio": _ogg_audio()})
+        rec = client.get_received()
+        trans = [e for e in rec if e["name"] == "transcription"][-1]["args"][0]
+        assert trans.get("context_policy") == "focused_item"
+        assert trans.get("context_state_id") == "focused_on_item"
+
+        # awaiting location
+        session.state = "awaiting_location"
+        session.context["label"] = "wallet"
+        stub.set_result("kitchen")
+        client.emit("audio", {"audio": _ogg_audio()})
+        rec = client.get_received()
+        trans = [e for e in rec if e["name"] == "transcription"][-1]["args"][0]
+        assert trans.get("context_policy") == "awaiting_location"
+        assert trans.get("context_state_id") == "awaiting_location"
     finally:
         cleanup()
 
@@ -589,6 +635,21 @@ def test_audio_invalid_image_payload_returns_bad_payload():
         cleanup()
 
 
+def test_audio_invalid_audio_payload_returns_bad_payload():
+    """Malformed audio payload is rejected before transcription."""
+    client, sio, db, stub, cleanup = _make_ws_test_app(seed_fn=_seed_items)
+    try:
+        client.connect()
+        client.get_received()
+        client.emit("audio", {"audio": "not-base64!!!"})
+        errors = _get_events(client, "error")
+        assert errors, "expected bad_payload error"
+        assert errors[-1].get("code") == "bad_payload"
+        assert "invalid audio payload" in errors[-1].get("message", "").lower()
+    finally:
+        cleanup()
+
+
 def test_audio_oversize_image_payload_returns_bad_payload():
     """Image bytes over 50MB are rejected with bad_payload."""
     import base64
@@ -607,11 +668,203 @@ def test_audio_oversize_image_payload_returns_bad_payload():
         cleanup()
 
 
+def test_idle_describe_scene_with_image_runs_vlm():
+    """Idle: 'describe what I am looking at' uses full-scene VLM."""
+    import visual_memory.api.routes.voice_ws as _vws
+
+    class _StubVLM:
+        def describe(self, image_path, timeout):
+            return "Scene: a desk with a wallet and keys."
+
+    orig_get_vlm = _vws.get_vlm_pipeline
+    _vws.get_vlm_pipeline = lambda: _StubVLM()
+
+    client, sio, db, stub, cleanup = _make_ws_test_app(seed_fn=_seed_items)
+    try:
+        client.connect()
+        client.get_received()
+        stub.set_result("describe what I am looking at")
+        client.emit("audio", {"audio": _ogg_audio(), "image": _tiny_jpeg_b64()})
+        tts = _get_events(client, "tts")
+        assert tts, "missing tts for scene describe"
+        assert "desk" in tts[-1].get("narration", "").lower()
+    finally:
+        _vws.get_vlm_pipeline = orig_get_vlm
+        cleanup()
+
+
+def test_idle_describe_target_with_image_uses_grounding_then_vlm():
+    """Idle: 'describe this wallet' grounds target and describes crop."""
+    import visual_memory.api.routes.voice_ws as _vws
+    from visual_memory.engine.model_registry import registry as _registry
+
+    class _StubVLM:
+        def describe(self, image_path, timeout):
+            return "A black leather wallet."
+
+    class _StubDetector:
+        def detect(self, image, prompt):
+            if "wallet" in (prompt or "").lower():
+                return {"box": [2, 2, 20, 20], "score": 0.9, "label": "wallet"}
+            return None
+
+    orig_get_vlm = _vws.get_vlm_pipeline
+    orig_detector = _registry._gdino_detector
+    _vws.get_vlm_pipeline = lambda: _StubVLM()
+    _registry._gdino_detector = _StubDetector()
+
+    client, sio, db, stub, cleanup = _make_ws_test_app(seed_fn=_seed_items)
+    try:
+        client.connect()
+        client.get_received()
+        stub.set_result("describe this wallet")
+        client.emit("audio", {"audio": _ogg_audio(), "image": _tiny_jpeg_b64()})
+        tts = _get_events(client, "tts")
+        assert tts, "missing tts for target describe"
+        assert "wallet" in tts[-1].get("narration", "").lower()
+    finally:
+        _vws.get_vlm_pipeline = orig_get_vlm
+        _registry._gdino_detector = orig_detector
+        cleanup()
+
+
+def test_idle_describe_without_image_requests_image():
+    """Idle describe without image should request image capture."""
+    client, sio, db, stub, cleanup = _make_ws_test_app(seed_fn=_seed_items)
+    try:
+        client.connect()
+        client.get_received()
+        stub.set_result("describe this wallet")
+        client.emit("audio", {"audio": _ogg_audio()})
+        controls = _get_events(client, "control")
+        assert controls, "missing control request for describe"
+        assert controls[-1].get("action") == "request_image"
+        assert controls[-1].get("context") == "describe"
+    finally:
+        cleanup()
+
+
+def test_focused_positive_feedback_records():
+    """Focused item: saying 'right' records positive feedback."""
+    from visual_memory.api.voice_session import _sessions
+    import visual_memory.api.pipelines as _pm
+
+    client, sio, db, stub, cleanup = _make_ws_test_app(seed_fn=_seed_items)
+    try:
+        client.connect()
+        client.get_received()
+
+        sid = _client_sid(client)
+        session = _sessions[sid]
+        session.state = "focused_on_item"
+        session.context["scan_id"] = "scan-pos"
+        session.context["current_label"] = "wallet"
+
+        scan_stub: StubScanPipeline = _pm._scan_pipeline
+        scan_stub.seed_embeddings("scan-pos", "wallet", seed=7)
+
+        counts_before = _pm._feedback_store.count()
+        pos_before = int(counts_before.get("positives", 0))
+
+        stub.set_result("right")
+        client.emit("audio", {"audio": _ogg_audio()})
+        tts = _get_events(client, "tts")
+        assert tts, "missing tts after positive feedback"
+        assert "noted as correct" in tts[-1].get("narration", "").lower()
+
+        counts_after = _pm._feedback_store.count()
+        assert int(counts_after.get("positives", 0)) == pos_before + 1
+    finally:
+        cleanup()
+
+
+def test_idle_describe_target_not_found_narration():
+    """Idle describe target miss should fail safely with clear narration."""
+    import visual_memory.api.routes.voice_ws as _vws
+    from visual_memory.engine.model_registry import registry as _registry
+
+    class _StubVLM:
+        def describe(self, image_path, timeout):
+            return "should not be used"
+
+    class _MissDetector:
+        def detect(self, image, prompt):
+            return None
+
+    orig_get_vlm = _vws.get_vlm_pipeline
+    orig_detector = _registry._gdino_detector
+    _vws.get_vlm_pipeline = lambda: _StubVLM()
+    _registry._gdino_detector = _MissDetector()
+
+    client, sio, db, stub, cleanup = _make_ws_test_app(seed_fn=_seed_items)
+    try:
+        client.connect()
+        client.get_received()
+        stub.set_result("describe this wallet")
+        client.emit("audio", {"audio": _ogg_audio(), "image": _tiny_jpeg_b64()})
+        tts = _get_events(client, "tts")
+        assert tts, "missing tts for detector miss"
+        assert "could not find wallet" in tts[-1].get("narration", "").lower()
+    finally:
+        _vws.get_vlm_pipeline = orig_get_vlm
+        _registry._gdino_detector = orig_detector
+        cleanup()
+
+
+def test_idle_describe_scene_timeout_narration():
+    """Idle describe scene timeout should return deterministic fallback narration."""
+    import visual_memory.api.routes.voice_ws as _vws
+
+    class _TimeoutVLM:
+        def describe(self, image_path, timeout):
+            raise TimeoutError("forced timeout")
+
+    orig_get_vlm = _vws.get_vlm_pipeline
+    _vws.get_vlm_pipeline = lambda: _TimeoutVLM()
+
+    client, sio, db, stub, cleanup = _make_ws_test_app(seed_fn=_seed_items)
+    try:
+        client.connect()
+        client.get_received()
+        stub.set_result("describe what i am looking at")
+        client.emit("audio", {"audio": _ogg_audio(), "image": _tiny_jpeg_b64()})
+        tts = _get_events(client, "tts")
+        assert tts, "missing tts for timeout"
+        assert "took too long" in tts[-1].get("narration", "").lower()
+    finally:
+        _vws.get_vlm_pipeline = orig_get_vlm
+        cleanup()
+
+
+def test_focused_positive_feedback_cache_expired_error():
+    """Focused positive feedback should fail safely when embeddings cache expired."""
+    from visual_memory.api.voice_session import _sessions
+
+    client, sio, db, stub, cleanup = _make_ws_test_app(seed_fn=_seed_items)
+    try:
+        client.connect()
+        client.get_received()
+        sid = _client_sid(client)
+        session = _sessions[sid]
+        session.state = "focused_on_item"
+        session.context["scan_id"] = "scan-miss"
+        session.context["current_label"] = "wallet"
+
+        stub.set_result("correct")
+        client.emit("audio", {"audio": _ogg_audio()})
+        errors = _get_events(client, "error")
+        assert errors, "missing error for expired feedback cache"
+        assert errors[-1].get("code") == "cache_expired"
+    finally:
+        cleanup()
+
+
 for name, fn in [
     ("ws:connect_returning_user", test_connect_returning_user),
     ("ws:connect_onboarding", test_connect_empty_db_triggers_onboarding),
     ("ws:connect_bad_key", test_connect_bad_api_key_rejected),
     ("ws:audio_find", test_audio_find_intent),
+    ("ws:context_policy_by_state", test_transcription_context_policy_varies_by_state),
     ("ws:audio_scan_no_image", test_audio_scan_no_image_requests_image),
     ("ws:audio_scan_with_image", test_audio_scan_with_image_returns_results),
     ("ws:audio_remember_no_image", test_audio_remember_no_image_requests_image),
@@ -620,10 +873,18 @@ for name, fn in [
     ("ws:navigate_empty", test_navigate_empty_session_returns_tts),
     ("ws:disconnect_clears_session", test_disconnect_clears_session),
     ("ws:bad_audio_error", test_bad_audio_returns_error),
+    ("ws:invalid_audio_payload", test_audio_invalid_audio_payload_returns_bad_payload),
     ("ws:onboarding_happy_path", test_onboarding_happy_path_end_to_end),
     ("ws:hints_order_non_repeat", test_hints_non_repeat_and_trigger_order),
     ("ws:invalid_image_payload", test_audio_invalid_image_payload_returns_bad_payload),
     ("ws:oversize_image_payload", test_audio_oversize_image_payload_returns_bad_payload),
+    ("ws:idle_describe_scene", test_idle_describe_scene_with_image_runs_vlm),
+    ("ws:idle_describe_target", test_idle_describe_target_with_image_uses_grounding_then_vlm),
+    ("ws:idle_describe_request_image", test_idle_describe_without_image_requests_image),
+    ("ws:idle_describe_target_not_found", test_idle_describe_target_not_found_narration),
+    ("ws:idle_describe_scene_timeout", test_idle_describe_scene_timeout_narration),
+    ("ws:focused_positive_feedback", test_focused_positive_feedback_records),
+    ("ws:focused_positive_feedback_cache_expired", test_focused_positive_feedback_cache_expired_error),
 ]:
     _runner.run(name, fn)
 

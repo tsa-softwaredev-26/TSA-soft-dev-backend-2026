@@ -89,6 +89,8 @@ def test_voice_success_with_context():
     assert_status(resp, 200)
     data = resp.get_json()
     assert data.get("transcription_meta", {}).get("context_used") is True
+    assert data.get("transcription_meta", {}).get("context_policy")
+    assert data.get("transcription_meta", {}).get("context_state_id")
 
 
 def test_voice_model_failure():

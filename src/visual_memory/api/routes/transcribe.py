@@ -14,6 +14,49 @@ transcribe_bp = Blueprint("transcribe", __name__)
 _log = get_logger(__name__)
 
 
+def _build_context_policy(
+    mode_hint: str,
+    state_contract: dict | None,
+    known_labels: list[str],
+) -> tuple[str, list[str]]:
+    policy = "default"
+    mode_terms: list[str] = []
+    contract_mode = ""
+    if isinstance(state_contract, dict):
+        contract_mode = str(state_contract.get("current_mode") or state_contract.get("mode") or "").strip().lower()
+    mode = mode_hint or contract_mode
+    if mode in {"focused_on_item"}:
+        policy = "focused_item"
+        mode_terms = [
+            "describe", "read", "text", "says", "export", "copy",
+            "rename", "wrong", "correct", "right", "where is this",
+        ]
+    elif mode in {"awaiting_location"}:
+        policy = "awaiting_location"
+        mode_terms = [
+            "kitchen", "bedroom", "bathroom", "living room",
+            "office", "garage", "hallway",
+        ]
+    elif mode in {"awaiting_confirmation"}:
+        policy = "awaiting_confirmation"
+        mode_terms = ["yes", "no", "confirm", "cancel", "correct", "wrong"]
+    elif mode in {"onboarding_teach"}:
+        policy = "onboarding_teach"
+        mode_terms = ["teach", "remember", "save", "this is", "my"]
+    elif mode in {"onboarding_await_scan", "awaiting_image"}:
+        policy = "camera_capture"
+        mode_terms = ["scan", "hold", "phone", "camera", "describe", "what i am looking at"]
+    else:
+        policy = "idle_home"
+        mode_terms = [
+            "scan", "teach", "remember", "find", "where",
+            "describe", "settings", "export", "read",
+        ]
+    if known_labels and policy in {"focused_item", "idle_home"}:
+        mode_terms.extend(known_labels[:4])
+    return policy, mode_terms
+
+
 def transcribe_audio_bytes(
     audio_bytes: bytes,
     use_context: bool = True,
@@ -52,20 +95,31 @@ def transcribe_audio_bytes(
     context_prompt = None
     mode_hint = (voice_mode or "").strip().lower()
     recognizer = registry.get_whisper_recognizer()
+    state_contract = None
+    known_labels: list[str] = []
+    if isinstance(voice_context, dict):
+        contract = voice_context.get("state_contract")
+        if isinstance(contract, dict):
+            state_contract = contract
+            raw_labels = contract.get("known_labels")
+            if isinstance(raw_labels, list):
+                known_labels = [str(x).strip() for x in raw_labels if str(x).strip()][:8]
+    context_policy = "none"
+    context_state_id = mode_hint or "idle"
     if use_context and settings.whisper_context_enabled:
         context_prompt = recognizer.build_context_prompt(get_database())
-        # Add lightweight state hints when available to reduce ambiguity
-        # for short utterances while keeping prompt compact.
+        context_policy, policy_terms = _build_context_policy(mode_hint, state_contract, known_labels)
+        context_state_id = (
+            str((state_contract or {}).get("current_mode") or mode_hint or "idle").strip().lower() or "idle"
+        )
+        extra_terms: list[str] = []
         if mode_hint:
-            context_prompt = f"{context_prompt} {mode_hint}".strip()
-        if isinstance(voice_context, dict):
-            state_contract = voice_context.get("state_contract")
-            if isinstance(state_contract, dict):
-                known_labels = state_contract.get("known_labels")
-                if isinstance(known_labels, list):
-                    labels = [str(x).strip() for x in known_labels if str(x).strip()][:8]
-                    if labels:
-                        context_prompt = f"{context_prompt} {' '.join(labels)}".strip()
+            extra_terms.append(mode_hint)
+        extra_terms.extend(policy_terms)
+        if known_labels:
+            extra_terms.extend(known_labels[:8])
+        if extra_terms:
+            context_prompt = f"{context_prompt} {' '.join(extra_terms)}".strip()
 
     try:
         registry.prepare_for_voice()
@@ -89,6 +143,8 @@ def transcribe_audio_bytes(
         "duration_ms": duration_ms,
         "audio_duration_s": round(audio_duration_s, 2),
         "context_used": bool(context_prompt),
+        "context_policy": context_policy,
+        "context_state_id": context_state_id,
         "model": settings.whisper_model,
     }
     _log.info({
