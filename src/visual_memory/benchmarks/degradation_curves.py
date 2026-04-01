@@ -26,6 +26,32 @@ _DEFAULT_FIG_DIR = _BENCHMARKS_DIR / "figures"
 _KINDS = ("blur", "brightness", "noise")
 
 
+def _normalize_kind_and_level(row: dict) -> Optional[Tuple[str, float]]:
+    raw_kind = (row.get("degradation_type") or "").strip().lower()
+    if not raw_kind:
+        return None
+
+    raw_level = row.get("degradation_level")
+    if raw_level in (None, ""):
+        raw_level = row.get("degradation_param")
+    if raw_level in (None, ""):
+        return None
+
+    try:
+        level = float(raw_level)
+    except (TypeError, ValueError):
+        return None
+
+    # Backward compatibility:
+    # - create_degraded historically emitted "compression" + "degradation_param"
+    # - degradation_curves historically consumed "brightness" + "degradation_level"
+    if raw_kind == "compression":
+        return "brightness", level / 100.0
+    if raw_kind in _KINDS:
+        return raw_kind, level
+    return None
+
+
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Generate degradation curves")
     p.add_argument("--dataset-degraded", type=Path, default=_DEFAULT_DEGRADED)
@@ -96,10 +122,10 @@ def _build_curves(degraded_rows: List[dict], result_rows: List[dict]) -> Tuple[D
     grouped: Dict[Tuple[str, float], List[dict]] = {}
 
     for row in degraded_rows:
-        kind = row["degradation_type"].strip()
-        if kind not in _KINDS:
+        norm = _normalize_kind_and_level(row)
+        if norm is None:
             continue
-        level = float(row["degradation_level"])
+        kind, level = norm
         grouped.setdefault((kind, level), []).append(row)
 
     curves: Dict[str, List[dict]] = {k: [] for k in _KINDS}

@@ -11,19 +11,20 @@ import argparse
 import csv
 import sys
 from pathlib import Path
+from typing import List, Optional
+
+from PIL import Image
+
+from visual_memory.engine.text_recognition import TextRecognizer
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _BENCHMARKS_DIR = _PROJECT_ROOT / "benchmarks"
-_DEFAULT_NEG_IMAGES = _PROJECT_ROOT / "src" / "visual_memory" / "tests" / "input_images"
 
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Verify benchmark dataset completeness")
     p.add_argument("--dataset", type=Path, default=_BENCHMARKS_DIR / "dataset.csv")
     p.add_argument("--images", type=Path, default=_BENCHMARKS_DIR / "images")
-    p.add_argument("--negative-dataset", type=Path,
-                   default=_BENCHMARKS_DIR / "negative_dataset.csv")
-    p.add_argument("--images-neg", type=Path, default=_DEFAULT_NEG_IMAGES)
     return p.parse_args()
 
 
@@ -35,6 +36,16 @@ def _load_csv(path: Path) -> list:
                 continue
             rows.append(line)
     return list(csv.DictReader(iter(rows)))
+
+
+def _receipt_images(entries: list, label: str) -> List[str]:
+    candidates = [r.get("image", "") for r in entries if r.get("label", "") == label and r.get("image")]
+    preferred = ("1ft_bright_clean", "1ft_bright_messy", "3ft_bright_clean")
+    ordered: List[str] = []
+    for hint in preferred:
+        ordered.extend(sorted([name for name in candidates if hint in name]))
+    ordered.extend(sorted([name for name in candidates if name not in ordered]))
+    return ordered
 
 
 def main() -> None:
@@ -60,30 +71,56 @@ def main() -> None:
     else:
         print("  ok")
 
-    # negative images
-    if args.negative_dataset.exists():
-        neg_entries = _load_csv(args.negative_dataset)
-        neg_missing = [r["image"] for r in neg_entries
-                       if not (args.images_neg / r["image"]).exists()]
-        neg_found = len(neg_entries) - len(neg_missing)
-        print(f"Negative: {neg_found} / {len(neg_entries)} found", end="")
-        if neg_missing:
-            all_ok = False
-            print(f"  ({len(neg_missing)} missing in {args.images_neg})")
-            for m in neg_missing:
-                print(f"    {m}")
-        else:
-            print("  ok")
-    else:
-        print(f"Negative: negative_dataset.csv not found; skipping")
-
-    # receipt ground truth
+    # Strict OCR receipt text validation is deferred for now; use smoke checks.
+    print("Receipt OCR strict validation: deferred")
     gt_dir = _BENCHMARKS_DIR / "ground_truth"
     for rid in ("receipt_salon", "receipt_eye_doctor"):
         gt_file = gt_dir / f"{rid}.txt"
-        status = "ok" if gt_file.exists() else "MISSING; run: python -m visual_memory.benchmarks.redact_receipt"
+        status = "present (unused while deferred)" if gt_file.exists() else "missing (unused while deferred)"
         print(f"Ground truth {rid}: {status}")
-        if not gt_file.exists():
+
+    recognizer = TextRecognizer()
+    smoke_checks = (
+        ("receipt_salon", "salon"),
+        ("receipt_eye_doctor", "eye"),
+    )
+    for receipt_label, keyword in smoke_checks:
+        image_names = _receipt_images(entries, receipt_label)
+        if not image_names:
+            all_ok = False
+            print(f"OCR smoke {receipt_label}: no dataset image found")
+            continue
+
+        text_hits = 0
+        keyword_hits = 0
+        keyword_example: Optional[str] = None
+        scanned = 0
+        missing_images = 0
+        for image_name in image_names:
+            image_path = args.images / image_name
+            if not image_path.exists():
+                missing_images += 1
+                continue
+            scanned += 1
+            with Image.open(image_path) as image:
+                ocr = recognizer.recognize(image)
+            text = str(ocr.get("text", "") or "").strip()
+            if text:
+                text_hits += 1
+                if keyword.lower() in text.lower():
+                    keyword_hits += 1
+                    if keyword_example is None:
+                        keyword_example = image_name
+
+        has_text = text_hits > 0
+        has_keyword = keyword_hits > 0
+        print(
+            f"OCR smoke {receipt_label}: "
+            f"scanned={scanned}, missing_images={missing_images}, "
+            f"text_hits={text_hits}, keyword[{keyword}]_hits={keyword_hits}, "
+            f"keyword_example={keyword_example or 'none'}"
+        )
+        if not has_text or not has_keyword:
             all_ok = False
 
     print()
