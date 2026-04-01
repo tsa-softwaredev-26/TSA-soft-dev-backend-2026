@@ -103,6 +103,35 @@ Focal length formula: `focal_length_px = (focalLengthMm / sensorWidthMm) * image
 
 Send on swipe left/right in the scan results view. The server responds with `tts` narrating the newly focused item.
 
+### `shortcut_start` - start a shortcut turn
+
+```json
+{ "shortcut": "scan" }
+```
+
+Starts shortcut flow using current backend mode rules. Do not apply client-side mode overrides.
+
+### `shortcut_submit` - submit a shortcut turn
+
+```json
+{
+  "shortcut": "scan",
+  "audio": "<base64 webm or ogg>",
+  "image": "<base64 jpeg optional>",
+  "focal_length_px": 3094.0
+}
+```
+
+Equivalent to a normal audio turn, but explicitly tied to shortcut flow. Backend still emits normal `tts`, `session_state`, `control`, and `action_result` as the source of truth.
+
+### `shortcut_cancel` - cancel an in-flight shortcut turn
+
+```json
+{ "shortcut": "scan" }
+```
+
+Cancels an active shortcut turn.
+
 ---
 
 ## Receiving Events
@@ -209,6 +238,47 @@ Current policy ids you may see in diagnostics include:
 ```
 
 Show or speak `message`. Reset recording UI.
+
+### `shortcut_listening` -> shortcut listening prompt
+
+```json
+{
+  "shortcut": "scan",
+  "prompt": "Hold your phone up.",
+  "state": "awaiting_image"
+}
+```
+
+Shortcut-specific prompt signal. Show prompt as-is.
+
+### `shortcut_error` -> shortcut-specific error
+
+```json
+{
+  "shortcut": "scan",
+  "code": "not_allowed_in_mode",
+  "message": "Scan is not available right now."
+}
+```
+
+Use `code` for branching. Current standardized codes:
+- `not_allowed_in_mode`
+- `bad_payload`
+- `unauthorized`
+
+### `shortcut_ack` -> low-latency shortcut confirmation
+
+```json
+{
+  "shortcut": "scan",
+  "phase": "started"
+}
+```
+
+`phase` is locked to exactly one of:
+- `started`
+- `submitted`
+- `canceled`
 
 ---
 

@@ -70,6 +70,10 @@ _HINT_TRIGGERS: dict[str, tuple[str, int]] = {
     "double_tap": ("scan_count", 5),
 }
 
+_SHORTCUT_SCAN = "scan"
+_SHORTCUT_ACK_PHASES = frozenset({"started", "submitted", "canceled"})
+_SHORTCUT_ERROR_CODES = frozenset({"not_allowed_in_mode", "bad_payload", "unauthorized"})
+
 
 # Helpers
 
@@ -97,6 +101,32 @@ def _clear_focus_context(session: VoiceSession) -> None:
 def _emit_error(code: str, message: str) -> None:
     _log.warning({"event": "ws_error_emitted", "tag": LogTag.API, "error_code": code, "message": message})
     emit("error", {"code": code, "message": message})
+
+
+def _emit_shortcut_ack(shortcut: str, phase: str) -> None:
+    if phase not in _SHORTCUT_ACK_PHASES:
+        return
+    emit("shortcut_ack", {"shortcut": shortcut, "phase": phase})
+
+
+def _emit_shortcut_listening(*, shortcut: str, prompt: str, state: str) -> None:
+    emit("shortcut_listening", {"shortcut": shortcut, "prompt": prompt, "state": state})
+
+
+def _emit_shortcut_error(shortcut: str, code: str, message: str) -> None:
+    normalized = code if code in _SHORTCUT_ERROR_CODES else "bad_payload"
+    emit("shortcut_error", {"shortcut": shortcut, "code": normalized, "message": message})
+
+
+def _shortcut_allowed(session: VoiceSession, shortcut: str) -> tuple[bool, str]:
+    if shortcut != _SHORTCUT_SCAN:
+        return False, "Shortcut is not supported."
+    if session.state in {"awaiting_location", "awaiting_confirmation", "onboarding_teach"}:
+        return False, "Scan is not available right now."
+    if session.state == "awaiting_image":
+        if session.context.get("pending_action") != "scan":
+            return False, "Scan is not available right now."
+    return True, ""
 
 
 def _emit_turn(
@@ -1162,3 +1192,80 @@ def register_events(sio: SocketIO) -> None:
         """User released the Spaitra button without sending audio (canceled)."""
         session = get_session(request.sid)
         emit("listening_stopped", {"state": session.state})
+
+    @sio.on("shortcut_start")
+    def on_shortcut_start(data):
+        if not isinstance(data, dict):
+            _emit_shortcut_error(_SHORTCUT_SCAN, "bad_payload", "Expected JSON object.")
+            return
+        shortcut = str(data.get("shortcut") or "").strip().lower()
+        if shortcut != _SHORTCUT_SCAN:
+            _emit_shortcut_error(shortcut or _SHORTCUT_SCAN, "bad_payload", "Unsupported shortcut.")
+            return
+        session = get_session(request.sid)
+        allowed, message = _shortcut_allowed(session, shortcut)
+        if not allowed:
+            _emit_shortcut_error(shortcut, "not_allowed_in_mode", message)
+            return
+        _emit_shortcut_ack(shortcut, "started")
+        _emit_shortcut_listening(shortcut=shortcut, prompt="Hold your phone up.", state="awaiting_image")
+
+    @sio.on("shortcut_submit")
+    def on_shortcut_submit(data):
+        if not isinstance(data, dict):
+            _emit_shortcut_error(_SHORTCUT_SCAN, "bad_payload", "Expected JSON object.")
+            return
+        shortcut = str(data.get("shortcut") or "").strip().lower()
+        if shortcut != _SHORTCUT_SCAN:
+            _emit_shortcut_error(shortcut or _SHORTCUT_SCAN, "bad_payload", "Unsupported shortcut.")
+            return
+        session = get_session(request.sid)
+        allowed, message = _shortcut_allowed(session, shortcut)
+        if not allowed:
+            _emit_shortcut_error(shortcut, "not_allowed_in_mode", message)
+            return
+
+        audio_bytes, audio_decode_error = _decode_audio(data.get("audio", b""))
+        if audio_decode_error is not None:
+            _emit_shortcut_error(shortcut, "bad_payload", "Invalid audio payload.")
+            return
+        if len(audio_bytes) > _MAX_WS_MEDIA_BYTES:
+            _emit_shortcut_error(shortcut, "bad_payload", "Audio payload exceeds 50MB limit.")
+            return
+
+        image_bytes, image_decode_error = _decode_image(data.get("image"))
+        if image_decode_error is not None:
+            _emit_shortcut_error(shortcut, "bad_payload", "Invalid image payload.")
+            return
+        if image_bytes is not None and len(image_bytes) > _MAX_WS_MEDIA_BYTES:
+            _emit_shortcut_error(shortcut, "bad_payload", "Image payload exceeds 50MB limit.")
+            return
+
+        focal_length = data.get("focal_length_px")
+        if isinstance(focal_length, str):
+            try:
+                focal_length = float(focal_length)
+            except ValueError:
+                focal_length = None
+
+        _emit_shortcut_ack(shortcut, "submitted")
+        _dispatch(session, _SHORTCUT_SCAN, image_bytes, focal_length)
+
+    @sio.on("shortcut_cancel")
+    def on_shortcut_cancel(data):
+        if not isinstance(data, dict):
+            _emit_shortcut_error(_SHORTCUT_SCAN, "bad_payload", "Expected JSON object.")
+            return
+        shortcut = str(data.get("shortcut") or "").strip().lower()
+        if shortcut != _SHORTCUT_SCAN:
+            _emit_shortcut_error(shortcut or _SHORTCUT_SCAN, "bad_payload", "Unsupported shortcut.")
+            return
+        session = get_session(request.sid)
+        _emit_shortcut_ack(shortcut, "canceled")
+        if session.state == "awaiting_image" and session.context.get("pending_action") == "scan":
+            _emit_turn(
+                session,
+                next_state="idle",
+                clear_keys=("pending_action", "describe_target", "label", "_pending_ts"),
+                tts_narration="Canceled.",
+            )

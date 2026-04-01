@@ -234,7 +234,7 @@ Speech-to-text itself belongs in the backend, not the mobile client:
 - `src/visual_memory/api/routes/transcribe.py` - shared STT entrypoint (`transcribe_audio_bytes`)
 - `src/visual_memory/engine/speech_recognition/whisper_recognizer.py` - Whisper model load, context prompt injection, and transcription
 - `src/visual_memory/engine/model_registry.py` - lifecycle and warm/cold preparation for Whisper
-- `src/visual_memory/api/routes/voice_ws.py` - WebSocket event handling (`chat_start`, `audio`, `navigate`) and stateful routing after STT
+- `src/visual_memory/api/routes/voice_ws.py` - WebSocket event handling (`chat_start`, `audio`, `navigate`, `shortcut_*`) and stateful routing after STT
 - `src/visual_memory/api/voice_session.py` - per-connection runtime state for mode-aware voice behavior
 - `src/visual_memory/utils/voice_state_context.py` and `src/visual_memory/utils/voice_state_policy.py` - state-aware context biasing for Whisper
 - `src/visual_memory/config/settings.py` - STT model, language, sample rate, and context-bias settings
@@ -771,7 +771,7 @@ See `UX.md` for current onboarding narration and state-driven UX behavior.
  - Jailbreak resistance: `/ask` now applies an unsafe-query gate before retrieval. Queries with prompt-injection or harmful markers are blocked with `400` (`blocked: true`, `reason: "unsafe_query"`) instead of running fuzzy search.
 - OCR pre-embedding: `add_to_database()` embeds OCR text at teach time and stores in `items.ocr_embedding`; `/ask` OCR content match uses stored embedding, re-embeds only for legacy items
  - Query strategy routing: `/ask` sets `document_query` and routes primary strategy by query type (`ocr_semantic` first for document-like queries, `fuzzy_label` first otherwise) with cross-strategy fallback
- - Stateful voice WebSocket: `voice_ws.py` is backend-authoritative for mode transitions (`idle`, onboarding states, `awaiting_*`, `focused_on_item`), includes focused-mode guidance for out-of-flow teach commands ("return home to teach"), emits `control.request_image` with context for camera-required branches (`scan`, `describe`, generic teach capture), and enforces strict onboarding order via `onboarding_phase` (`teach_1` -> `teach_2` -> `await_scan` -> `ask` -> `ask_prompted`)
+ - Stateful voice WebSocket: `voice_ws.py` is backend-authoritative for mode transitions (`idle`, onboarding states, `awaiting_*`, `focused_on_item`), includes focused-mode guidance for out-of-flow teach commands ("return home to teach"), emits `control.request_image` with context for camera-required branches (`scan`, `describe`, generic teach capture), enforces strict onboarding order via `onboarding_phase` (`teach_1` -> `teach_2` -> `await_scan` -> `ask` -> `ask_prompted`), and supports shortcut contracts (`shortcut_start`, `shortcut_submit`, `shortcut_cancel`) with standardized shortcut responses (`shortcut_listening`, `shortcut_ack`, `shortcut_error`) while keeping `tts` + `session_state` authoritative.
  - Canonical voice state contract: `build_state_contract()` + `resolve_voice_policy()` provide a single source of truth for mode/pending-action policy IDs used by WebSocket dispatch, Whisper context biasing, and Ollama prompt hints
 
 ---

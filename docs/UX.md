@@ -29,10 +29,15 @@ Intentionally behavior-focused; implementation details are in code.
 - User holds the top-right chat button to record, releases to send.
 - Frontend emits `chat_start` on press, starts recording after `listening`.
 - Frontend emits `audio` on release, with optional `image` when camera is active.
+- Frontend may also use shortcut events for deterministic scan UX:
+  - `shortcut_start` / `shortcut_submit` / `shortcut_cancel` with `{"shortcut":"scan"}`
+  - `shortcut_listening` / `shortcut_ack` / `shortcut_error` for shortcut-specific signals
 - Backend transcribes speech, dispatches intent based on current mode, and returns:
   - `tts` narration
   - `session_state` (authoritative current mode + context)
   - optional `action_result` for UI data updates
+- Even in shortcut flow, `tts` + `session_state` remain authoritative for narration and mode transitions.
+- Camera requests in shortcut flow still use existing `control.request_image`.
 - Frontend may interrupt TTS when user presses chat button again.
 
 ## Authoritative Runtime States
@@ -97,8 +102,11 @@ Canonical policy buckets used at runtime:
 
 - User presses chat:
   - Server emits `listening` prompt for current state.
+- User triggers scan shortcut:
+  - Server emits `shortcut_ack` (`phase: started`) and `shortcut_listening`.
 - User releases:
   - Frontend sends `audio` (+ optional image).
+  - Shortcut path sends `shortcut_submit` (`audio`, optional `image`, optional `focal_length_px`).
   - Server transcribes and emits optional `transcription`.
   - Server dispatches by state + intent and emits narration + state update.
 

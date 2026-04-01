@@ -973,6 +973,107 @@ def test_focused_teach_command_guides_back_home():
         cleanup()
 
 
+def test_shortcut_start_emits_ack_and_shortcut_listening():
+    """shortcut_start emits deterministic ack phase and shortcut listening prompt."""
+    client, sio, db, stub, cleanup = _make_ws_test_app(seed_fn=_seed_items)
+    try:
+        client.connect()
+        client.get_received()
+        client.emit("shortcut_start", {"shortcut": "scan"})
+        received = client.get_received()
+        ack = [e for e in received if e["name"] == "shortcut_ack"]
+        listening = [e for e in received if e["name"] == "shortcut_listening"]
+        assert ack and ack[-1]["args"][0].get("phase") == "started"
+        assert listening, "missing shortcut_listening"
+        payload = listening[-1]["args"][0]
+        assert payload.get("shortcut") == "scan"
+        assert payload.get("state") == "awaiting_image"
+        assert payload.get("prompt") == "Hold your phone up."
+    finally:
+        cleanup()
+
+
+def test_shortcut_submit_emits_ack_and_runs_normal_scan_turn():
+    """shortcut_submit emits submitted ack and still returns normal tts/session_state/action_result."""
+    import visual_memory.api.pipelines as _pm
+
+    client, sio, db, stub, cleanup = _make_ws_test_app(seed_fn=_seed_items)
+    try:
+        client.connect()
+        client.get_received()
+        scan_stub: StubScanPipeline = _pm._scan_pipeline
+        scan_stub.run = lambda image, scan_id="", focal_length_px=0.0: {
+            "matches": [{"label": "wallet", "narration": "Wallet to your left.", "similarity": 0.8}],
+            "count": 1,
+            "scan_id": scan_id,
+            "is_dark": False,
+            "darkness_level": 100.0,
+        }
+        client.emit("shortcut_submit", {
+            "shortcut": "scan",
+            "audio": _ogg_audio(),
+            "image": _tiny_jpeg_b64(),
+            "focal_length_px": 3094.0,
+        })
+        received = client.get_received()
+        names = _event_names(received)
+        assert "shortcut_ack" in names
+        assert [e for e in received if e["name"] == "shortcut_ack"][-1]["args"][0].get("phase") == "submitted"
+        assert "action_result" in names
+        assert "tts" in names
+        assert "session_state" in names
+    finally:
+        cleanup()
+
+
+def test_shortcut_cancel_emits_canceled_ack():
+    """shortcut_cancel emits canceled ack phase."""
+    client, sio, db, stub, cleanup = _make_ws_test_app(seed_fn=_seed_items)
+    try:
+        client.connect()
+        client.get_received()
+        client.emit("shortcut_cancel", {"shortcut": "scan"})
+        received = client.get_received()
+        ack = [e for e in received if e["name"] == "shortcut_ack"]
+        assert ack and ack[-1]["args"][0].get("phase") == "canceled"
+    finally:
+        cleanup()
+
+
+def test_shortcut_error_codes_are_standardized():
+    """shortcut_error codes are stable and suitable for frontend branching."""
+    client, sio, db, stub, cleanup = _make_ws_test_app(seed_fn=_seed_items)
+    try:
+        client.connect()
+        client.get_received()
+        client.emit("shortcut_submit", {"shortcut": "scan", "audio": "not-base64!!!"})
+        errs = _get_events(client, "shortcut_error")
+        assert errs and errs[-1].get("code") == "bad_payload"
+
+        client.emit("shortcut_start", {"shortcut": "remember"})
+        errs = _get_events(client, "shortcut_error")
+        assert errs and errs[-1].get("code") == "bad_payload"
+    finally:
+        cleanup()
+
+
+def test_shortcut_blocked_mode_emits_not_allowed_in_mode():
+    """shortcut_start in blocked states returns not_allowed_in_mode."""
+    from visual_memory.api.voice_session import _sessions
+
+    client, sio, db, stub, cleanup = _make_ws_test_app(seed_fn=_seed_items)
+    try:
+        client.connect()
+        client.get_received()
+        sid = _client_sid(client)
+        _sessions[sid].state = "awaiting_location"
+        client.emit("shortcut_start", {"shortcut": "scan"})
+        errs = _get_events(client, "shortcut_error")
+        assert errs and errs[-1].get("code") == "not_allowed_in_mode"
+    finally:
+        cleanup()
+
+
 for name, fn in [
     ("ws:connect_returning_user", test_connect_returning_user),
     ("ws:connect_onboarding", test_connect_empty_db_triggers_onboarding),
@@ -1002,6 +1103,11 @@ for name, fn in [
     ("ws:focused_positive_feedback", test_focused_positive_feedback_records),
     ("ws:focused_positive_feedback_cache_expired", test_focused_positive_feedback_cache_expired_error),
     ("ws:focused_teach_guidance", test_focused_teach_command_guides_back_home),
+    ("ws:shortcut_start_ack_listening", test_shortcut_start_emits_ack_and_shortcut_listening),
+    ("ws:shortcut_submit_runs_scan", test_shortcut_submit_emits_ack_and_runs_normal_scan_turn),
+    ("ws:shortcut_cancel_ack", test_shortcut_cancel_emits_canceled_ack),
+    ("ws:shortcut_errors_standardized", test_shortcut_error_codes_are_standardized),
+    ("ws:shortcut_not_allowed_mode", test_shortcut_blocked_mode_emits_not_allowed_in_mode),
 ]:
     _runner.run(name, fn)
 
