@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 
 from visual_memory.api.pipelines import get_scan_pipeline, get_feedback_store, get_settings
+from ._json_utils import read_json_dict
 
 feedback_bp = Blueprint("feedback", __name__)
 
@@ -9,11 +10,14 @@ _VALID_FEEDBACK = {"correct", "wrong"}
 
 @feedback_bp.post("/feedback")
 def feedback():
-    data = request.get_json(silent=True) or {}
+    data, err = read_json_dict(request)
+    if err is not None:
+        body, status = err
+        return jsonify(body), status
 
-    scan_id = data.get("scan_id", "").strip()
-    label = data.get("label", "").strip()
-    fb = data.get("feedback", "").strip()
+    scan_id = str(data.get("scan_id", "") or "").strip()
+    label = str(data.get("label", "") or "").strip()
+    fb = str(data.get("feedback", "") or "").strip()
 
     if not scan_id:
         return jsonify({"error": "missing field: scan_id"}), 400
@@ -24,8 +28,16 @@ def feedback():
 
     cached = get_scan_pipeline().get_cached_embeddings(scan_id, label)
     if cached is None:
-        return jsonify({"error": "scan_id not found or expired"}), 404
+        scan_meta = get_scan_pipeline().get_scan_cache_meta(scan_id)
+        payload = {"error": "scan_id not found or expired", "scan_id": scan_id}
+        if scan_meta:
+            payload["cache"] = scan_meta
+        return jsonify(payload), 410
 
+    match_meta = get_scan_pipeline().get_cached_match_meta(scan_id, label)
+
+    if not isinstance(cached, (tuple, list)) or len(cached) != 2:
+        return jsonify({"error": "invalid cached embedding payload", "scan_id": scan_id}), 500
     anchor_emb, query_emb = cached
     store = get_feedback_store()
 
@@ -41,4 +53,5 @@ def feedback():
         "feedback": fb,
         "triplets": counts["triplets"],
         "min_for_training": get_settings().min_feedback_for_training,
+        "match_meta": match_meta or {},
     })

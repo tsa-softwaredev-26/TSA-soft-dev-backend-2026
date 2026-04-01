@@ -30,7 +30,7 @@ def _run_training(settings, store, pipeline) -> None:
 
         pipeline.reload_head()
         triplet_count = store.count()["triplets"]
-        pipeline._triplet_count = triplet_count
+        pipeline.set_triplet_count(triplet_count)
 
         effective_weight = min(
             settings.projection_head_weight,

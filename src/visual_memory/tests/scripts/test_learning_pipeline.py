@@ -80,16 +80,16 @@ def test_apply_head_blending_ramp():
         pipeline._head.linear.weight.fill_(0.01)
 
     emb = make_embedding(42)
-    pipeline._triplet_count = 0
+    pipeline.set_triplet_count(0)
     out0 = pipeline._apply_head(emb)
     assert torch.allclose(out0, emb, atol=1e-6)
 
-    pipeline._triplet_count = 5
+    pipeline.set_triplet_count(5)
     out_mid = pipeline._apply_head(emb)
     sim_mid = F.cosine_similarity(emb, out_mid).item()
     assert sim_mid < 0.999999
 
-    pipeline._triplet_count = 10
+    pipeline.set_triplet_count(10)
     out_full = pipeline._apply_head(emb)
     assert out_full.shape == emb.shape
 

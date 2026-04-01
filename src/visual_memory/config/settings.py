@@ -66,9 +66,17 @@ class Settings:
     ocr_service_url: str = field(default_factory=lambda: os.environ.get("OCR_SERVICE_URL", "http://127.0.0.1:8001/ocr"))
     ocr_health_url: str = field(default_factory=lambda: os.environ.get("OCR_HEALTH_URL", ""))
     ocr_timeout_seconds: float = field(default_factory=lambda: float(os.environ.get("OCR_TIMEOUT_SECONDS", "10.0")))
+    # Upper bound for OCR gating band. OCR runs only when likelihood is within:
+    # [ocr_text_likelihood_threshold, ocr_text_likelihood_upper_threshold].
+    # Keeps OCR from running on extreme-noise crops while preserving text-like crops.
+    ocr_text_likelihood_upper_threshold: float = 0.85
 
     # Text similarity (CLIP text embeddings)
     text_similarity_threshold: float = 0.4
+    # Combined embedding weighting. Text can be boosted relative to image to
+    # improve retrieval for text-heavy objects (receipts, labels).
+    combined_text_weight: float = 1.25
+    combined_text_weight_high_confidence_boost: float = 0.25
 
     # Pipeline feature toggles - overridable via env vars before pipeline import
     enable_depth: bool = field(default_factory=lambda: os.environ.get("ENABLE_DEPTH", "1") != "0")
@@ -136,6 +144,8 @@ class Settings:
 
     # Database
     db_path: str = "data/memory.db"
+    # Per-scan cache TTL for feedback/crop lookup.
+    scan_cache_ttl_seconds: int = field(default_factory=lambda: int(os.environ.get("SCAN_CACHE_TTL_SECONDS", "300")))
 
     # API server
     api_host: str = field(default_factory=lambda: os.environ.get("API_HOST", "127.0.0.1"))

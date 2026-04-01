@@ -389,8 +389,10 @@ class RememberPipeline:
         ocr_confidence = 0.0
         text_embedding = None
         ocr_t0 = time.monotonic()
-        if (self.ocr_client is not None
-                and text_likelihood >= _settings.ocr_text_likelihood_threshold):
+        if (
+            self.ocr_client is not None
+            and _settings.ocr_text_likelihood_threshold <= text_likelihood <= _settings.ocr_text_likelihood_upper_threshold
+        ):
             ocr_result = self.ocr_client.recognize(cropped)
             ocr_text = ocr_result["text"]
             ocr_confidence = ocr_result["confidence"]
@@ -402,14 +404,23 @@ class RememberPipeline:
             "event": "remember_ocr",
             "label": label,
             "text_likelihood": round(text_likelihood, 3),
-            "ocr_ran": self.ocr_client is not None and text_likelihood >= _settings.ocr_text_likelihood_threshold,
+            "ocr_ran": (
+                self.ocr_client is not None
+                and _settings.ocr_text_likelihood_threshold <= text_likelihood <= _settings.ocr_text_likelihood_upper_threshold
+            ),
             "ocr_text_length": len(ocr_text),
             "ocr_confidence": round(ocr_confidence, 4),
             "has_text_embedding": text_embedding is not None,
         })
 
         # Build combined embedding (image + text) for consistent matching
-        combined = make_combined_embedding(embedding, text_embedding)
+        combined = make_combined_embedding(
+            embedding,
+            text_embedding,
+            text_weight=_settings.combined_text_weight,
+            text_confidence=ocr_confidence if ocr_text else None,
+            text_high_confidence_boost=_settings.combined_text_weight_high_confidence_boost,
+        )
 
         label_embedding = None
         if self.text_embedder is not None:

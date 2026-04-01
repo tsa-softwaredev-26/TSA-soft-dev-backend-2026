@@ -67,11 +67,16 @@ class ScanPipeline:
         self._head.eval()
         items = self.db.get_all_items()
         self.database_embeddings = [(item["label"], item["combined_embedding"]) for item in items]
+        self._projected_db: list[tuple[str, torch.Tensor]] | None = None
 
         # scan_id -> {label -> (anchor_emb, query_emb)}; capped at _SCAN_CACHE_MAX entries
         self._emb_cache: OrderedDict = OrderedDict()
         # scan_id -> [PIL Image, ...] in left-to-right match order; for /crop by index
         self._crop_cache: OrderedDict = OrderedDict()
+        # scan_id -> {label -> metadata}; used for feedback/debug context.
+        self._match_cache: OrderedDict = OrderedDict()
+        # scan_id -> metadata (created_at, expires_at, ttl_s); mirrors emb/crop cache keys
+        self._scan_cache_meta: OrderedDict = OrderedDict()
 
     def _load_head(self) -> bool:
         """Load projection head weights: DB first, file fallback.
@@ -88,26 +93,85 @@ class ScanPipeline:
         """Refresh in-memory database embeddings from the DB store."""
         items = self.db.get_all_items()
         self.database_embeddings = [(item["label"], item["combined_embedding"]) for item in items]
+        self._projected_db = None
 
     def get_cached_crop(self, scan_id: str, index: int):
         """Return the PIL Image crop at the given match index, or None."""
+        self._is_scan_cache_expired(scan_id)
         crops = self._crop_cache.get(scan_id)
         if crops is None or index < 0 or index >= len(crops):
             return None
         return crops[index]
 
     def _store_crops(self, scan_id: str, crops: list) -> None:
+        self._store_scan_cache_meta(scan_id)
         if scan_id not in self._crop_cache:
             if len(self._crop_cache) >= _SCAN_CACHE_MAX:
-                self._crop_cache.popitem(last=False)
+                old_scan_id, _ = self._crop_cache.popitem(last=False)
+                self._evict_scan_cache_entry(old_scan_id)
         self._crop_cache[scan_id] = crops
 
     def get_cached_embeddings(self, scan_id: str, label: str):
         """Return (anchor_emb, query_emb) for a previous scan result, or None."""
+        self._is_scan_cache_expired(scan_id)
         entry = self._emb_cache.get(scan_id)
         if entry is None:
             return None
         return entry.get(label)
+
+    def get_cached_match_meta(self, scan_id: str, label: str) -> dict | None:
+        """Return scan-time metadata for a matched label in a scan."""
+        self._is_scan_cache_expired(scan_id)
+        by_label = self._match_cache.get(scan_id)
+        if not isinstance(by_label, dict):
+            return None
+        meta = by_label.get(label)
+        return dict(meta) if isinstance(meta, dict) else None
+
+    def get_scan_cache_meta(self, scan_id: str) -> dict | None:
+        self._is_scan_cache_expired(scan_id)
+        meta = self._scan_cache_meta.get(scan_id)
+        return dict(meta) if isinstance(meta, dict) else None
+
+    def _store_scan_cache_meta(self, scan_id: str) -> None:
+        now = time.time()
+        ttl_s = int(max(1, _settings.scan_cache_ttl_seconds))
+        if scan_id not in self._scan_cache_meta and len(self._scan_cache_meta) >= _SCAN_CACHE_MAX:
+            old_scan_id, _ = self._scan_cache_meta.popitem(last=False)
+            self._evict_scan_cache_entry(old_scan_id)
+        self._scan_cache_meta[scan_id] = {
+            "created_at": now,
+            "expires_at": now + ttl_s,
+            "ttl_s": ttl_s,
+            "expired": False,
+        }
+        self._scan_cache_meta.move_to_end(scan_id)
+
+    def _is_scan_cache_expired(self, scan_id: str) -> bool:
+        meta = self._scan_cache_meta.get(scan_id)
+        if not isinstance(meta, dict):
+            return False
+        expires_at = float(meta.get("expires_at", 0.0) or 0.0)
+        if expires_at and time.time() > expires_at:
+            self._evict_scan_cache_entry(scan_id, keep_meta=True)
+            return True
+        return False
+
+    def _evict_scan_cache_entry(self, scan_id: str, *, keep_meta: bool = False) -> None:
+        self._emb_cache.pop(scan_id, None)
+        self._crop_cache.pop(scan_id, None)
+        self._match_cache.pop(scan_id, None)
+        if keep_meta:
+            meta = self._scan_cache_meta.get(scan_id)
+            if isinstance(meta, dict):
+                meta["expired"] = True
+        else:
+            self._scan_cache_meta.pop(scan_id, None)
+
+    def _project_database_embeddings(self) -> list[tuple[str, torch.Tensor]]:
+        if self._projected_db is None:
+            self._projected_db = [(p, self._apply_head(e)) for p, e in self.database_embeddings]
+        return self._projected_db
 
     def reload_head(self) -> bool:
         """Re-read projection head weights (DB first, file fallback) after a retrain.
@@ -116,11 +180,13 @@ class ScanPipeline:
         """
         self._head_trained = self._load_head()
         self._head.eval()
+        self._projected_db = None
         return self._head_trained
 
     def set_enable_learning(self, enabled: bool) -> None:
         """Toggle whether the projection head is applied during scan at runtime."""
         self._enable_learning = enabled
+        self._projected_db = None
 
     def set_head_weight(self, weight: float, ramp_at: int) -> None:
         """Update the head blend weight ceiling and ramp target at runtime.
@@ -130,6 +196,12 @@ class ScanPipeline:
         """
         self._head_weight = float(weight)
         self._head_ramp_at = int(ramp_at)
+        self._projected_db = None
+
+    def set_triplet_count(self, triplet_count: int) -> None:
+        """Set triplet count and invalidate projected DB cache when blend can change."""
+        self._triplet_count = int(max(0, triplet_count))
+        self._projected_db = None
 
     def _apply_head(self, emb: torch.Tensor) -> torch.Tensor:
         """Blend raw embedding with projected embedding according to current weight.
@@ -223,8 +295,8 @@ class ScanPipeline:
         crops = [crop_object(query_image, box) for box in boxes]
         img_embs = self.img_embedder.batch_embed(crops)  # (N, 1024); one forward pass
 
-        # project DB embeddings once for all boxes this scan call
-        projected_db = [(p, self._apply_head(e)) for p, e in self.database_embeddings]
+        # project DB embeddings once and cache until DB/head changes
+        projected_db = self._project_database_embeddings()
         projected_db_map = {p: e for p, e in projected_db}
         timing["embed_ms"] = round((time.monotonic() - stage_start) * 1000)
 
@@ -234,11 +306,12 @@ class ScanPipeline:
         text_likelihoods = [estimate_text_likelihood(crop) for crop in crops]
         ocr_text_by_index: dict[int, str] = {}
         text_emb_by_index: dict[int, torch.Tensor] = {}
+        ocr_conf_by_index: dict[int, float] = {}
 
         if self.ocr_client is not None:
             ocr_indices = [
                 i for i, likelihood in enumerate(text_likelihoods)
-                if likelihood >= _settings.ocr_text_likelihood_threshold
+                if _settings.ocr_text_likelihood_threshold <= likelihood <= _settings.ocr_text_likelihood_upper_threshold
             ]
             if ocr_indices:
                 ocr_t0 = time.monotonic()
@@ -247,6 +320,8 @@ class ScanPipeline:
 
                 for idx, ocr_result in zip(ocr_indices, ocr_results):
                     text = str((ocr_result or {}).get("text", "") or "")
+                    conf = float((ocr_result or {}).get("confidence", 0.0) or 0.0)
+                    ocr_conf_by_index[idx] = conf
                     if text:
                         ocr_text_by_index[idx] = text
 
@@ -261,7 +336,14 @@ class ScanPipeline:
             text_likelihood = text_likelihoods[i]
             ocr_text = ocr_text_by_index.get(i, "")
             text_emb = text_emb_by_index.get(i)
-            combined = make_combined_embedding(img_emb, text_emb)
+            ocr_confidence = ocr_conf_by_index.get(i)
+            combined = make_combined_embedding(
+                img_emb,
+                text_emb,
+                text_weight=_settings.combined_text_weight,
+                text_confidence=ocr_confidence,
+                text_high_confidence_boost=_settings.combined_text_weight_high_confidence_boost,
+            )
 
             projected_query = self._apply_head(combined)
 
@@ -285,11 +367,20 @@ class ScanPipeline:
                 if scan_id is not None:
                     anchor_emb = projected_db_map.get(match_path)
                     if anchor_emb is not None:
+                        self._store_scan_cache_meta(scan_id)
                         if scan_id not in self._emb_cache:
                             if len(self._emb_cache) >= _SCAN_CACHE_MAX:
-                                self._emb_cache.popitem(last=False)
+                                old_scan_id, _ = self._emb_cache.popitem(last=False)
+                                self._evict_scan_cache_entry(old_scan_id)
                             self._emb_cache[scan_id] = {}
                         self._emb_cache[scan_id][matched_label] = (anchor_emb, projected_query)
+                        if scan_id not in self._match_cache:
+                            self._match_cache[scan_id] = {}
+                        self._match_cache[scan_id][matched_label] = {
+                            "text_likelihood": round(text_likelihood, 3),
+                            "ocr_ran": i in ocr_conf_by_index,
+                            "ocr_confidence": round(float(ocr_conf_by_index.get(i, 0.0)), 4),
+                        }
                 direction_auto = _direction_from_box(box, query_image.width)
                 self.db.add_sighting(
                     label=matched_label,

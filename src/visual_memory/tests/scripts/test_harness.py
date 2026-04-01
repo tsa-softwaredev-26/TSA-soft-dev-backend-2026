@@ -131,6 +131,9 @@ class StubScanPipeline:
         self._head_weight = w
         self._head_ramp_at = r
 
+    def set_triplet_count(self, c: int) -> None:
+        self._triplet_count = int(max(0, c))
+
 
     def _apply_head(self, emb: torch.Tensor) -> torch.Tensor:
         if not self._head_trained or not self._enable_learning:
@@ -165,6 +168,17 @@ class StubScanPipeline:
         """Return (anchor, query) tensors or None. Configurable per test."""
         key = (scan_id, label)
         return self._cached_embeddings.get(key)
+
+    def get_cached_match_meta(self, scan_id: str, label: str) -> dict | None:
+        if (scan_id, label) in self._cached_embeddings:
+            return {"ocr_ran": False, "ocr_confidence": 0.0, "text_likelihood": 0.0}
+        return None
+
+    def get_scan_cache_meta(self, scan_id: str) -> dict | None:
+        for sid, _ in self._cached_embeddings.keys():
+            if sid == scan_id:
+                return {"created_at": 0.0, "expires_at": 9999999999.0, "ttl_s": 300, "expired": False}
+        return None
 
     def get_cached_crop(self, scan_id: str, index: int) -> Optional[Image.Image]:
         """Return cached PIL Image or None."""

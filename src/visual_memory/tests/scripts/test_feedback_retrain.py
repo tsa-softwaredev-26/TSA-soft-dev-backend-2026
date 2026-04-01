@@ -47,6 +47,7 @@ def test_feedback_correct():
     assert data.get("feedback") == "correct"
     assert "triplets" in data
     assert "min_for_training" in data
+    assert isinstance(data.get("match_meta"), dict)
 
 
 def test_feedback_wrong():
@@ -93,7 +94,9 @@ def test_feedback_unknown_scan_id():
         "label": "wallet",
         "feedback": "correct",
     })
-    assert_status(resp, 404)
+    assert_status(resp, 410)
+    data = resp.get_json()
+    assert data.get("scan_id") == "no-such-scan"
 
 
 def test_retrain_insufficient_data():
