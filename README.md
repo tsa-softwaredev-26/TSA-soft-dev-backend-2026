@@ -111,7 +111,11 @@ Core backend with gunicorn:
 
 ```bash
 source .venv-core/bin/activate
-gunicorn -w 1 -b 127.0.0.1:5000 services.core.wsgi:application
+gunicorn -w 1 \
+  -k geventwebsocket.gunicorn.workers.GeventWebSocketWorker \
+  -b 127.0.0.1:5000 \
+  --timeout 0 \
+  services.core.wsgi:application
 ```
 
 OCR service with uvicorn:

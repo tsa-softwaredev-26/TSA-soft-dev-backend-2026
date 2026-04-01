@@ -222,7 +222,8 @@ curl -X POST "$BASE/retrain" -H "X-API-Key: $KEY"
 ## 6. Debug endpoints 
 
 These require the API key and are useful for verifying the running state of the
-server.
+server. Debug routes are disabled by default in production. Enable them with
+`ENABLE_DEBUG_ROUTES=1` in `/opt/spaitra/.env` and restart `spaitra-core`.
 
 ```bash
 # Full system state: GPU, model load status, settings
@@ -277,7 +278,7 @@ python -m visual_memory.tests.scripts.run_all --suite pentest
 ```
 
 Stress and pentest artifacts are written to:
-`benchmarks/baslines/stress_tests/`
+`benchmarks/baselines/stress_tests/`
 
 ---
 

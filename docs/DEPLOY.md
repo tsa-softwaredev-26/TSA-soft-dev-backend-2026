@@ -408,7 +408,7 @@ sleep 10   # models load on startup; allow extra time on first run
 curl http://127.0.0.1:5000/health
 # Test with API key:
 KEY=$(grep ^API_KEY= /opt/spaitra/.env | cut -d= -f2-)
-curl -s http://127.0.0.1:5000/debug/state -H "X-API-Key: $KEY" | python3 -m json.tool
+curl -s http://127.0.0.1:5000/settings -H "X-API-Key: $KEY" | python3 -m json.tool
 
 kill %1
 deactivate
@@ -418,24 +418,11 @@ deactivate
 
 ## 9. Install systemd units
 
-Choose a layout before installing service files:
-- Flat layout (recommended): venvs at `/opt/spaitra/venv-core` and `/opt/spaitra/venv-ocr`
-- Subdirectory layout: venvs at `$REPO/venv-core` and `$REPO/venv-ocr`
-
-The service files in `deploy/` assume flat layout.
-If you use subdirectory layout, edit the paths before copying:
+Service templates in `deploy/` use `__REPO_ROOT__` placeholders.
+Install them with the helper so paths match your clone location:
 
 ```bash
-# For subdirectory layout; create adjusted copies:
-sed 's|/opt/spaitra/venv-core|'"$REPO"'/venv-core|g; s|/opt/spaitra/venv-ocr|'"$REPO"'/venv-ocr|g; s|WorkingDirectory=/opt/spaitra$|WorkingDirectory='"$REPO"'|' \
-  $REPO/deploy/spaitra-core.service > /etc/systemd/system/spaitra-core.service
-
-sed 's|/opt/spaitra/venv-ocr|'"$REPO"'/venv-ocr|g; s|WorkingDirectory=/opt/spaitra$|WorkingDirectory='"$REPO"'|' \
-  $REPO/deploy/spaitra-ocr.service > /etc/systemd/system/spaitra-ocr.service
-
-# For flat layout; copy directly:
-# cp $REPO/deploy/spaitra-core.service /etc/systemd/system/
-# cp $REPO/deploy/spaitra-ocr.service /etc/systemd/system/
+sudo bash "$REPO/deploy/install.sh" "$REPO" /opt/spaitra
 
 systemctl daemon-reload
 systemctl enable --now spaitra-ocr
@@ -584,9 +571,9 @@ curl -sf http://127.0.0.1:5000/health && echo " Core OK"
 
 # Auth
 curl -s -o /dev/null -w "No key → %{http_code} (expect 401)\n" \
-  http://127.0.0.1:5000/debug/state
+  http://127.0.0.1:5000/settings
 curl -s -o /dev/null -w "With key → %{http_code} (expect 200)\n" \
-  http://127.0.0.1:5000/debug/state -H "X-API-Key: $KEY"
+  http://127.0.0.1:5000/settings -H "X-API-Key: $KEY"
 curl -s -o /dev/null -w "OCR no key → %{http_code} (expect 401)\n" \
   -X POST -F image=@$REPO/src/visual_memory/tests/text_demo/typed.jpeg \
   http://127.0.0.1:8001/ocr
@@ -595,12 +582,11 @@ curl -s -o /dev/null -w "OCR with key → %{http_code} (expect 200)\n" \
   -H "X-API-Key: $KEY" \
   http://127.0.0.1:8001/ocr
 
-# System state (GPU, pipelines, OCR reachability)
-curl -sf http://127.0.0.1:5000/debug/state -H "X-API-Key: $KEY" | python3 -m json.tool
-
-# Pipeline smoke tests
-curl -sf http://127.0.0.1:5000/debug/test-remember -H "X-API-Key: $KEY" | python3 -m json.tool
-curl -sf http://127.0.0.1:5000/debug/test-scan    -H "X-API-Key: $KEY" | python3 -m json.tool
+# Optional debug checks (enable only for diagnostics)
+# ENABLE_DEBUG_ROUTES=1 in /opt/spaitra/.env, then restart spaitra-core.
+# curl -sf http://127.0.0.1:5000/debug/state -H "X-API-Key: $KEY" | python3 -m json.tool
+# curl -sf http://127.0.0.1:5000/debug/test-remember -H "X-API-Key: $KEY" | python3 -m json.tool
+# curl -sf http://127.0.0.1:5000/debug/test-scan -H "X-API-Key: $KEY" | python3 -m json.tool
 
 # Retrain endpoint (expect insufficient_data on a fresh install)
 curl -sf -X POST http://127.0.0.1:5000/retrain -H "X-API-Key: $KEY"
@@ -691,9 +677,9 @@ Validation:
 ```bash
 KEY=$(grep ^API_KEY= /opt/spaitra/.env | cut -d= -f2-)
 curl -s -o /dev/null -w "core health=%{http_code}\n" http://127.0.0.1:5000/health
-curl -s -o /dev/null -w "core debug=%{http_code}\n" \
+curl -s -o /dev/null -w "core settings=%{http_code}\n" \
   -H "X-API-Key: $KEY" \
-  http://127.0.0.1:5000/debug/state
+  http://127.0.0.1:5000/settings
 ```
 
 Rollback:
@@ -901,5 +887,5 @@ systemctl status spaitra-core spaitra-ocr
 Use the helper script to run zombie cleanup every 30 minutes:
 
 ```bash
-*/30 * * * * /opt/spaitra/TSA-soft-dev-backend-2026/deploy/memory_cleanup.sh >> /var/log/spaitra/memory_cleanup.log 2>&1
+*/30 * * * * /opt/spaitra/TSA-soft-dev-backend-2026/deploy/memory_cleanup.sh /opt/spaitra/TSA-soft-dev-backend-2026 >> /var/log/spaitra/memory_cleanup.log 2>&1
 ```

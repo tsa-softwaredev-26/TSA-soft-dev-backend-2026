@@ -1,25 +1,12 @@
+# Deprecated legacy unit template intentionally disabled.
+# Use deploy/spaitra-core.service instead.
 [Unit]
-Description=Spaitra Visual Memory API
+Description=Deprecated Spaitra legacy unit (disabled)
 After=network.target
 
 [Service]
-Type=simple
-User=spaitra
-Group=spaitra
-UMask=0077
-WorkingDirectory=/opt/spaitra
-EnvironmentFile=/opt/spaitra/.env
-# Legacy alias for the core backend. Prefer deploy/spaitra-core.service.
-ExecStart=/opt/spaitra/venv-core/bin/gunicorn \
-    -w 1 \
-    -b 127.0.0.1:5000 \
-    --timeout 120 \
-    --access-logfile - \
-    services.core.wsgi:application
-Restart=always
-RestartSec=10
-StandardOutput=journal
-StandardError=journal
+Type=oneshot
+ExecStart=/bin/sh -c 'echo "ERROR: deploy/spaitra.service is deprecated. Use deploy/spaitra-core.service with deploy/install.sh." >&2; exit 1'
 
 [Install]
 WantedBy=multi-user.target

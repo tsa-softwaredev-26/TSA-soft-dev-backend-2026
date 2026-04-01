@@ -12,6 +12,9 @@ chmod 600 "$REPO_ROOT"/data/*.db 2>/dev/null || true
 chmod 700 "$REPO_ROOT/models" 2>/dev/null || true
 chmod 640 "$REPO_ROOT"/models/*.pt 2>/dev/null || true
 
+chmod 700 "$REPO_ROOT/checkpoints" 2>/dev/null || true
+chmod 640 "$REPO_ROOT"/checkpoints/*.pt 2>/dev/null || true
+
 chmod 750 "$REPO_ROOT/logs" 2>/dev/null || true
 chmod 640 "$REPO_ROOT"/logs/*.log 2>/dev/null || true
 
