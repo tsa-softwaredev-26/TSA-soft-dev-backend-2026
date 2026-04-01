@@ -22,7 +22,8 @@ import gc
 import csv
 import hashlib
 import json
-import re
+import os
+import random
 import sys
 import time
 from datetime import datetime, timezone
@@ -59,9 +60,26 @@ from visual_memory.utils.similarity_utils import cosine_similarity, find_match
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _BENCHMARKS_DIR = _PROJECT_ROOT / "benchmarks"
 _CHECKPOINT = _PROJECT_ROOT / "checkpoints" / "depth_pro.pt"
-_DEFAULT_NEG_IMAGES = _PROJECT_ROOT / "src" / "visual_memory" / "tests" / "input_images"
+_RESULTS_SCHEMA_VERSION = 2
 
 BLUR_THRESHOLD = 100.0
+
+
+def _set_reproducible(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def _resolve_depth_checkpoint(args: argparse.Namespace) -> Path:
+    if args.depth_checkpoint:
+        return args.depth_checkpoint.expanduser()
+    env_override = os.environ.get("DEPTH_CHECKPOINT_PATH", "").strip()
+    if env_override:
+        return Path(env_override).expanduser()
+    return _CHECKPOINT
 
 
 def _blur_score(image: Image.Image) -> float:
@@ -83,10 +101,6 @@ def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Full system benchmark")
     p.add_argument("--dataset", type=Path, default=_BENCHMARKS_DIR / "dataset.csv")
     p.add_argument("--images", type=Path, default=_BENCHMARKS_DIR / "images")
-    p.add_argument("--negative-dataset", type=Path,
-                   default=_BENCHMARKS_DIR / "negative_dataset.csv")
-    p.add_argument("--images-neg", type=Path, default=_DEFAULT_NEG_IMAGES,
-                   help="Directory containing negative test images")
     p.add_argument("--focal-length", type=float, default=None)
     p.add_argument("--epochs", type=int, default=20)
     p.add_argument("--lr", type=float, default=1e-4)
@@ -124,7 +138,7 @@ def _parse_args() -> argparse.Namespace:
         "--max-fp-increase-pp",
         type=float,
         default=2.0,
-        help="Maximum allowed personalized false-positive increase on negatives (pp)",
+        help="Maximum allowed personalized false-positive increase on holdout set (pp)",
     )
     p.add_argument(
         "--max-fn-increase-pp",
@@ -134,6 +148,27 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument("--no-depth", action="store_true")
     p.add_argument("--no-ocr", action="store_true")
+    p.add_argument(
+        "--depth-checkpoint",
+        type=Path,
+        default=None,
+        help="Optional override path for depth_pro.pt checkpoint",
+    )
+    p.add_argument(
+        "--no-fp-holdout-tests",
+        action="store_true",
+        help="Disable 60-case leave-one-label-out FP evaluation on test split",
+    )
+    p.add_argument(
+        "--no-fp-expanded-tests",
+        action="store_true",
+        help="Disable expanded FP evaluation against all other-label images",
+    )
+    p.add_argument("--threshold-sweep-min", type=float, default=0.50)
+    p.add_argument("--threshold-sweep-max", type=float, default=0.98)
+    p.add_argument("--threshold-sweep-step", type=float, default=0.01)
+    p.add_argument("--target-holdout-fp", type=float, default=0.40)
+    p.add_argument("--min-personalized-accuracy", type=float, default=0.15)
     return p.parse_args()
 
 
@@ -149,23 +184,6 @@ def _load_dataset(csv_path: Path) -> List[dict]:
                 "label": row["label"],
                 "distance_ft": float(row["ground_truth_distance_ft"]),
                 "dino_prompt": row["dino_prompt"],
-            })
-    return rows
-
-
-def _load_negative_dataset(csv_path: Path) -> List[dict]:
-    if not csv_path.exists():
-        return []
-    rows = []
-    with open(csv_path, newline="") as f:
-        filtered = (line for line in f if not line.lstrip().startswith("#"))
-        for row in csv.DictReader(filtered):
-            rows.append({
-                "image": row["image"],
-                "label": "negative",
-                "distance_ft": 0.0,
-                "dino_prompt": "",
-                "note": row.get("note", ""),
             })
     return rows
 
@@ -533,161 +551,126 @@ def _eval_retrieval(
     return results
 
 
-def _calibrate_threshold(
-    train_set: List[str],
-    embedded: Dict[str, dict],
-    database: List[Tuple[str, torch.Tensor]],
-    test_set: List[str],
-    floor: float = 0.14,
-    ceiling: float = 0.42,
-) -> float:
-    """
-    Choose threshold from train/test distributions to reduce FP inflation.
-
-    Strategy:
-    - positives: baseline/test similarities for true label
-    - negatives: max similarity to wrong labels on test set
-    - set threshold near the upper negative quantile but within [floor, ceiling]
-    """
-    if not database or not test_set:
-        return floor
-    label_to_embs: Dict[str, List[torch.Tensor]] = {}
-    for lbl, emb in database:
-        label_to_embs.setdefault(lbl, []).append(emb)
-
-    neg_max_sims: List[float] = []
-    pos_sims: List[float] = []
-    for fname in test_set:
-        row = embedded[fname]
-        q = row["embedding"]
-        true_lbl = row["label"]
-        best_neg = 0.0
-        best_pos = 0.0
-        for lbl, emb in database:
-            sim = float(cosine_similarity(q, emb).item())
-            if lbl == true_lbl:
-                best_pos = max(best_pos, sim)
-            else:
-                best_neg = max(best_neg, sim)
-        if best_pos > 0:
-            pos_sims.append(best_pos)
-        if best_neg > 0:
-            neg_max_sims.append(best_neg)
-
-    if not neg_max_sims:
-        return floor
-    neg_q90 = float(np.quantile(np.array(neg_max_sims), 0.90))
-    pos_q25 = float(np.quantile(np.array(pos_sims), 0.25)) if pos_sims else ceiling
-    # Bias toward reducing false positives while keeping some recall.
-    proposed = min(max(neg_q90 + 0.01, floor), ceiling)
-    # Avoid setting above lower-tail positives unless absolutely necessary.
-    proposed = min(proposed, max(pos_q25, floor))
-    return float(round(proposed, 3))
-
-
-def _calibrate_threshold_with_negatives(
+def _build_similarity_stats(
     test_set: List[str],
     embedded: Dict[str, dict],
-    neg_embedded: Dict[str, dict],
-    neg_rows: List[dict],
     database: List[Tuple[str, torch.Tensor]],
     head: ProjectionHead,
-    floor: float = 0.18,
-    ceiling: float = 0.55,
-    target_fpr_pe: float = 0.35,
-    target_fpr_bl: float = 0.35,
-    min_tpr_pe: float = 0.25,
-) -> float:
-    """
-    Pick threshold using both test positives and explicit negative samples.
-
-    Objective: keep false positives bounded without collapsing retrieval recall.
-    """
-    if not database or not test_set or not neg_embedded:
-        return floor
-
+) -> List[dict]:
+    if not database or not test_set:
+        return []
+    head.eval()
     projected_db = [(lbl, head.project(emb)) for (lbl, emb) in database]
-    labels = sorted({lbl for lbl, _ in database})
-    row_by_image = {r["image"]: r for r in neg_rows}
-
-    pos_bl: List[float] = []
-    pos_pe: List[float] = []
+    stats: List[dict] = []
     for fname in test_set:
         row = embedded[fname]
         q = row["embedding"]
+        qh = head.project(q)
         true_label = row["label"]
-        bl_same = [float(cosine_similarity(q, emb).item()) for (lbl, emb) in database if lbl == true_label]
-        pe_same = [
-            float(cosine_similarity(head.project(q), pemb).item())
-            for (lbl, pemb) in projected_db
-            if lbl == true_label
-        ]
-        if bl_same:
-            pos_bl.append(max(bl_same))
-        if pe_same:
-            pos_pe.append(max(pe_same))
-
-    neg_bl: List[float] = []
-    neg_pe: List[float] = []
-    for fname, row in neg_embedded.items():
-        note = str(row_by_image.get(fname, {}).get("note", ""))
-        excluded = _parse_negative_excluded_labels(note, labels)
-        db_filtered = [(lbl, emb) for (lbl, emb) in database if lbl not in excluded]
-        pdb_filtered = [(lbl, emb) for (lbl, emb) in projected_db if lbl not in excluded]
-        q = row["embedding"]
-        if db_filtered:
-            neg_bl.append(max(float(cosine_similarity(q, emb).item()) for _, emb in db_filtered))
-        if pdb_filtered:
-            qh = head.project(q)
-            neg_pe.append(max(float(cosine_similarity(qh, emb).item()) for _, emb in pdb_filtered))
-
-    if not pos_pe or not neg_pe:
-        return floor
-
-    def _rates(t: float) -> Tuple[float, float, float, float]:
-        tpr_bl = sum(v >= t for v in pos_bl) / max(len(pos_bl), 1)
-        tpr_pe = sum(v >= t for v in pos_pe) / max(len(pos_pe), 1)
-        fpr_bl = sum(v >= t for v in neg_bl) / max(len(neg_bl), 1)
-        fpr_pe = sum(v >= t for v in neg_pe) / max(len(neg_pe), 1)
-        return tpr_bl, tpr_pe, fpr_bl, fpr_pe
-
-    candidates = sorted(
-        {
-            float(round(t, 3))
-            for t in np.arange(floor, ceiling + 1e-9, 0.005)
-        }
-        | {float(round(v, 3)) for v in (pos_bl + pos_pe + neg_bl + neg_pe)}
-    )
-    candidates = [t for t in candidates if floor <= t <= ceiling]
-    if not candidates:
-        return floor
-
-    feasible: List[Tuple[float, float]] = []
-    fallback: List[Tuple[float, float, float]] = []
-    for t in candidates:
-        tpr_bl, tpr_pe, fpr_bl, fpr_pe = _rates(t)
-        score = (1.0 * tpr_pe + 0.35 * tpr_bl) - (0.60 * fpr_pe + 0.25 * fpr_bl) - (0.05 * t)
-        is_feasible = (
-            fpr_pe <= target_fpr_pe
-            and fpr_bl <= target_fpr_bl
-            and tpr_pe >= min_tpr_pe
+        best_true_bl = -1.0
+        best_wrong_bl = -1.0
+        for lbl, emb in database:
+            sim = float(cosine_similarity(q, emb).item())
+            if lbl == true_label:
+                best_true_bl = max(best_true_bl, sim)
+            else:
+                best_wrong_bl = max(best_wrong_bl, sim)
+        best_true_pe = -1.0
+        best_wrong_pe = -1.0
+        for lbl, emb in projected_db:
+            sim = float(cosine_similarity(qh, emb).item())
+            if lbl == true_label:
+                best_true_pe = max(best_true_pe, sim)
+            else:
+                best_wrong_pe = max(best_wrong_pe, sim)
+        stats.append(
+            {
+                "best_true_bl": best_true_bl,
+                "best_wrong_bl": max(best_wrong_bl, 0.0),
+                "best_true_pe": best_true_pe,
+                "best_wrong_pe": max(best_wrong_pe, 0.0),
+            }
         )
-        if is_feasible:
-            feasible.append((score, t))
-        else:
-            violation = (
-                3.0 * max(0.0, fpr_pe - target_fpr_pe)
-                + 2.0 * max(0.0, fpr_bl - target_fpr_bl)
-                + 2.0 * max(0.0, min_tpr_pe - tpr_pe)
-            )
-            fallback.append((violation, -score, t))
+    return stats
 
+
+def _metrics_at_threshold(stats: List[dict], threshold: float) -> dict:
+    n = max(len(stats), 1)
+    bl_correct = sum(1 for s in stats if s["best_true_bl"] >= threshold and s["best_true_bl"] >= s["best_wrong_bl"])
+    pe_correct = sum(1 for s in stats if s["best_true_pe"] >= threshold and s["best_true_pe"] >= s["best_wrong_pe"])
+    bl_holdout_fp = sum(1 for s in stats if s["best_wrong_bl"] >= threshold)
+    pe_holdout_fp = sum(1 for s in stats if s["best_wrong_pe"] >= threshold)
+    return {
+        "threshold": float(round(threshold, 3)),
+        "baseline_accuracy": bl_correct / n,
+        "personalized_accuracy": pe_correct / n,
+        "baseline_holdout_fp_rate": bl_holdout_fp / n,
+        "personalized_holdout_fp_rate": pe_holdout_fp / n,
+    }
+
+
+def _validate_similarity_threshold(value: float, source: str) -> float:
+    value = float(value)
+    if not (0.0 < value <= 1.0):
+        raise ValueError(f"{source} must be in (0, 1], got {value}")
+    return value
+
+
+def _tune_threshold_with_holdout(
+    stats: List[dict],
+    floor: float,
+    ceiling: float,
+    step: float,
+    target_holdout_fp: float,
+    min_personalized_accuracy: float,
+) -> Tuple[float, List[dict], dict]:
+    floor = _validate_similarity_threshold(floor, "threshold sweep minimum")
+    ceiling = _validate_similarity_threshold(ceiling, "threshold sweep maximum")
+    if not stats:
+        return floor, [], {"selection_reason": "fallback_no_stats", "selected_threshold": float(round(floor, 3))}
+    if ceiling < floor:
+        floor, ceiling = ceiling, floor
+    if step <= 0:
+        step = 0.01
+    candidates = [
+        _validate_similarity_threshold(float(round(v, 3)), "threshold sweep candidate")
+        for v in np.arange(floor, ceiling + 1e-9, step)
+    ]
+    sweep = [_metrics_at_threshold(stats, t) for t in candidates]
+    feasible = [
+        r for r in sweep
+        if r["personalized_holdout_fp_rate"] <= target_holdout_fp
+        and r["personalized_accuracy"] >= min_personalized_accuracy
+    ]
     if feasible:
-        feasible.sort(reverse=True)
-        return feasible[0][1]
-
-    fallback.sort()
-    return fallback[0][2]
+        best = max(feasible, key=lambda r: (r["personalized_accuracy"], -r["personalized_holdout_fp_rate"], r["threshold"]))
+        reason = "feasible"
+    else:
+        best = min(
+            sweep,
+            key=lambda r: (
+                max(0.0, r["personalized_holdout_fp_rate"] - target_holdout_fp)
+                + max(0.0, min_personalized_accuracy - r["personalized_accuracy"]),
+                -r["personalized_accuracy"],
+                r["personalized_holdout_fp_rate"],
+                -r["threshold"],
+            ),
+        )
+        reason = "least_violation"
+    tuning = {
+        "selection_reason": reason,
+        "selected_threshold": best["threshold"],
+        "target_holdout_fp": target_holdout_fp,
+        "min_personalized_accuracy": min_personalized_accuracy,
+        "selected_metrics": {
+            "baseline_accuracy": round(best["baseline_accuracy"], 6),
+            "personalized_accuracy": round(best["personalized_accuracy"], 6),
+            "baseline_holdout_fp_rate": round(best["baseline_holdout_fp_rate"], 6),
+            "personalized_holdout_fp_rate": round(best["personalized_holdout_fp_rate"], 6),
+        },
+        "n_candidates": len(sweep),
+    }
+    return best["threshold"], sweep, tuning
 
 
 # phase 6: grounding dino evaluation with full production fallback chain
@@ -780,9 +763,12 @@ def _eval_detection(
 
 # phase 7: depth evaluation
 
-def _load_depth_estimator():
-    if not _CHECKPOINT.exists():
+def _load_depth_estimator(depth_checkpoint: Path):
+    if not depth_checkpoint.exists():
         return None
+    os.environ["DEPTH_CHECKPOINT_PATH"] = str(depth_checkpoint)
+    if hasattr(registry, "_depth_estimator"):
+        registry._depth_estimator = None
     return registry.depth_estimator
 
 
@@ -792,6 +778,7 @@ def _eval_depth(
     dino_results: Dict[str, dict],
     focal_length: Optional[float],
     no_depth: bool,
+    depth_checkpoint: Path,
     monitor: Optional[MemoryMonitor] = None,
 ) -> Dict[str, dict]:
     blank = {"predicted_ft": None, "abs_error": None, "pct_error": None, "lat_depth": 0.0}
@@ -800,9 +787,9 @@ def _eval_depth(
     if no_depth:
         return results
 
-    estimator = _load_depth_estimator()
+    estimator = _load_depth_estimator(depth_checkpoint)
     if estimator is None:
-        print("  [info] depth checkpoint not found; skipping")
+        print(f"  [info] depth checkpoint not found at {depth_checkpoint}; skipping")
         return results
 
     for i, fname in enumerate(test_set):
@@ -831,97 +818,106 @@ def _eval_depth(
     return results
 
 
-# negative FP evaluation
-
-def _eval_negatives(
-    neg_embedded: Dict[str, dict],
-    database: List[Tuple[str, torch.Tensor]],
-    head: ProjectionHead,
-    threshold: float,
-) -> List[dict]:
-    head.eval()
-    projected_db = [(lbl, head.project(e)) for lbl, e in database]
-    results = []
-    for fname, data in neg_embedded.items():
-        emb = data["embedding"]
-        bl_lbl, bl_sim = find_match(emb, database, threshold)
-        pe_lbl, pe_sim = find_match(head.project(emb), projected_db, threshold)
-        results.append({
-            "image": fname,
-            "baseline_fp": int(bl_lbl is not None),
-            "baseline_match": bl_lbl or "",
-            "baseline_sim": round(bl_sim, 6),
-            "personalized_fp": int(pe_lbl is not None),
-            "personalized_match": pe_lbl or "",
-            "personalized_sim": round(pe_sim, 6),
-        })
-    return results
-
-
-def _canonical_token(value: str) -> str:
-    v = (value or "").lower()
-    v = re.sub(r"[^a-z0-9]+", " ", v).strip()
-    return v
-
-
-def _parse_negative_excluded_labels(note: str, labels: List[str]) -> List[str]:
-    """
-    Extract labels to exclude for a negative sample from note text.
-
-    This enforces user-requested FP rigor: do not evaluate a negative sample against
-    a DB that contains the same-item identity if the note indicates that mapping.
-    """
-    note_norm = _canonical_token(note)
-    excluded: List[str] = []
-    for label in labels:
-        tok = _canonical_token(label).replace("_", " ")
-        if tok and tok in note_norm:
-            excluded.append(label)
-    # Generic hard-negative hints for wallets/keys/receipts classes.
-    if "wallet" in note_norm:
-        excluded.extend([l for l in labels if "wallet" in _canonical_token(l)])
-    if "keys" in note_norm:
-        excluded.extend([l for l in labels if "keys" in _canonical_token(l)])
-    if "receipt" in note_norm:
-        excluded.extend([l for l in labels if "receipt" in _canonical_token(l)])
-    return sorted(set(excluded))
-
-
-def _eval_negatives_strict(
-    neg_embedded: Dict[str, dict],
-    neg_rows: List[dict],
+def _eval_fp_holdout_from_test(
+    test_set: List[str],
+    embedded: Dict[str, dict],
     database: List[Tuple[str, torch.Tensor]],
     head: ProjectionHead,
     threshold: float,
 ) -> List[dict]:
     """
-    Evaluate negatives with per-sample exclusion from candidate DB.
+    Build 60 balanced FP tests from retrieval test images.
 
-    For each negative image, if its note indicates a related train identity/class,
-    remove those labels from candidate DB for that evaluation row.
+    For each test image, remove its true label from the candidate DB and check
+    whether any wrong label still matches. This mirrors "remove from DB, then query"
+    without requiring extra images.
     """
     head.eval()
     labels = sorted({lbl for lbl, _ in database})
-    results = []
-    row_by_image = {r["image"]: r for r in neg_rows}
-    for fname, data in neg_embedded.items():
-        row = row_by_image.get(fname, {})
-        excluded = _parse_negative_excluded_labels(str(row.get("note", "")), labels)
-        filtered_db = [(lbl, emb) for (lbl, emb) in database if lbl not in excluded]
+    results: List[dict] = []
+    for fname in test_set:
+        row = embedded[fname]
+        true_label = row["label"]
+        filtered_db = [(lbl, emb) for (lbl, emb) in database if lbl != true_label]
         projected_db = [(lbl, head.project(emb)) for (lbl, emb) in filtered_db]
-        emb = data["embedding"]
+        emb = row["embedding"]
         bl_lbl, bl_sim = find_match(emb, filtered_db, threshold)
         pe_lbl, pe_sim = find_match(head.project(emb), projected_db, threshold)
         results.append(
             {
                 "image": fname,
-                "excluded_labels": excluded,
+                "source": "test_holdout",
+                "true_label": true_label,
+                "excluded_labels": [true_label] if true_label in labels else [],
                 "baseline_fp": int(bl_lbl is not None),
                 "baseline_match": bl_lbl or "",
                 "baseline_sim": round(bl_sim, 6),
                 "personalized_fp": int(pe_lbl is not None),
                 "personalized_match": pe_lbl or "",
                 "personalized_sim": round(pe_sim, 6),
+            }
+        )
+    return results
+
+
+def _eval_fp_expanded_from_test(
+    test_set: List[str],
+    embedded: Dict[str, dict],
+    head: ProjectionHead,
+    threshold: float,
+) -> List[dict]:
+    """
+    Expanded FP benchmark from retrieval test images.
+
+    For each test image, evaluate against every embedded image from labels other than
+    the true label. This gives a dense negative pool (roughly ~108 negatives/image
+    with the 120-image benchmark set) and stress-tests false-positive behavior.
+    """
+    head.eval()
+    all_items: List[Tuple[str, str, torch.Tensor]] = [
+        (name, row["label"], row["embedding"]) for name, row in embedded.items()
+    ]
+    projected = {name: head.project(row["embedding"]) for name, row in embedded.items()}
+    results: List[dict] = []
+    for fname in test_set:
+        row = embedded[fname]
+        true_label = row["label"]
+        q = row["embedding"]
+        qh = projected[fname]
+
+        best_bl_sim = -1.0
+        best_pe_sim = -1.0
+        best_bl_match = ""
+        best_pe_match = ""
+        neg_count = 0
+        for cand_name, cand_label, cand_emb in all_items:
+            if cand_label == true_label:
+                continue
+            neg_count += 1
+            bl_sim = float(cosine_similarity(q, cand_emb).item())
+            if bl_sim > best_bl_sim:
+                best_bl_sim = bl_sim
+                best_bl_match = cand_name
+            pe_sim = float(cosine_similarity(qh, projected[cand_name]).item())
+            if pe_sim > best_pe_sim:
+                best_pe_sim = pe_sim
+                best_pe_match = cand_name
+
+        baseline_fp = int(neg_count > 0 and best_bl_sim >= threshold)
+        personalized_fp = int(neg_count > 0 and best_pe_sim >= threshold)
+        results.append(
+            {
+                "image": fname,
+                "source": "expanded_all_other_labels",
+                "true_label": true_label,
+                "excluded_labels": [true_label],
+                "negative_pool_size": neg_count,
+                "baseline_fp": baseline_fp,
+                "baseline_match": best_bl_match if baseline_fp else "",
+                "baseline_sim": round(max(best_bl_sim, 0.0), 6),
+                "personalized_fp": personalized_fp,
+                "personalized_match": best_pe_match if personalized_fp else "",
+                "personalized_sim": round(max(best_pe_sim, 0.0), 6),
             }
         )
     return results
@@ -942,6 +938,11 @@ _CSV_FIELDS = [
     "lat_pipeline_depth_s", "lat_pipeline_db_s",
     "darkness_level", "is_dark", "blur_score", "is_blurry",
     "text_likelihood", "should_skip_ocr",
+    "holdout_baseline_fp", "holdout_baseline_match", "holdout_baseline_sim",
+    "holdout_personalized_fp", "holdout_personalized_match", "holdout_personalized_sim",
+    "expanded_negative_pool_size",
+    "expanded_baseline_fp", "expanded_baseline_match", "expanded_baseline_sim",
+    "expanded_personalized_fp", "expanded_personalized_match", "expanded_personalized_sim",
 ]
 
 
@@ -949,13 +950,19 @@ def _merge_rows(
     retrieval: List[dict],
     dino: Dict[str, dict],
     depth: Dict[str, dict],
+    fp_holdout: Optional[List[dict]] = None,
+    fp_expanded: Optional[List[dict]] = None,
 ) -> List[dict]:
+    holdout_by_image = {r.get("image", ""): r for r in (fp_holdout or [])}
+    expanded_by_image = {r.get("image", ""): r for r in (fp_expanded or [])}
     rows = []
     for r in retrieval:
         fname = r["image"]
         d = dino.get(fname, {"detected": 0, "confidence": 0.0, "lat_detect": 0.0, "second_pass_prompt": None})
         dep = depth.get(fname, {"predicted_ft": None, "abs_error": None,
                                  "pct_error": None, "lat_depth": 0.0})
+        hold = holdout_by_image.get(fname, {})
+        expanded = expanded_by_image.get(fname, {})
         rows.append({
             "image": fname,
             "label": r["label"],
@@ -996,6 +1003,31 @@ def _merge_rows(
             "is_blurry": r["is_blurry"],
             "text_likelihood": r["text_likelihood"],
             "should_skip_ocr": r["should_skip_ocr"],
+            "holdout_baseline_fp": int(hold.get("baseline_fp", 0)),
+            "holdout_baseline_match": hold.get("baseline_match", "") or "",
+            "holdout_baseline_sim": (
+                round(float(hold.get("baseline_sim", 0.0)), 6)
+                if hold else ""
+            ),
+            "holdout_personalized_fp": int(hold.get("personalized_fp", 0)),
+            "holdout_personalized_match": hold.get("personalized_match", "") or "",
+            "holdout_personalized_sim": (
+                round(float(hold.get("personalized_sim", 0.0)), 6)
+                if hold else ""
+            ),
+            "expanded_negative_pool_size": int(expanded.get("negative_pool_size", 0)),
+            "expanded_baseline_fp": int(expanded.get("baseline_fp", 0)),
+            "expanded_baseline_match": expanded.get("baseline_match", "") or "",
+            "expanded_baseline_sim": (
+                round(float(expanded.get("baseline_sim", 0.0)), 6)
+                if expanded else ""
+            ),
+            "expanded_personalized_fp": int(expanded.get("personalized_fp", 0)),
+            "expanded_personalized_match": expanded.get("personalized_match", "") or "",
+            "expanded_personalized_sim": (
+                round(float(expanded.get("personalized_sim", 0.0)), 6)
+                if expanded else ""
+            ),
         })
     return rows
 
@@ -1016,7 +1048,6 @@ def _latency_stats(values: List[float], label_col: Optional[List[str]] = None):
 
 def _write_output(
     rows: List[dict],
-    neg_results: List[dict],
     args: argparse.Namespace,
     final_loss: float,
     threshold: float,
@@ -1025,6 +1056,10 @@ def _write_output(
     settings: Settings,
     split_integrity: dict,
     benchmark_guard: dict,
+    fp_holdout_results: List[dict],
+    fp_expanded_results: List[dict],
+    threshold_sweep: List[dict],
+    threshold_tuning: dict,
 ) -> None:
     _BENCHMARKS_DIR.mkdir(parents=True, exist_ok=True)
     csv_path = _BENCHMARKS_DIR / "results.csv"
@@ -1036,6 +1071,7 @@ def _write_output(
         writer.writerows(rows)
 
     metadata = {
+        "schema_version": _RESULTS_SCHEMA_VERSION,
         "split_strategy": "fixed_60_60_label_balanced_seeded",
         "seed": split_integrity.get("seed"),
         "train_per_label": split_integrity.get("train_per_label"),
@@ -1050,15 +1086,27 @@ def _write_output(
         "n_db": len(db_set),
         "n_triplet_train": len(train_set),
         "n_test": len(rows),
-        "n_negatives": len(neg_results),
+        "n_fp_holdout": len(fp_holdout_results),
+        "n_fp_expanded": len(fp_expanded_results),
         "final_triplet_loss": round(final_loss, 6),
         "split_integrity": split_integrity,
         "benchmark_guard": benchmark_guard,
+        "threshold_sweep": threshold_sweep,
+        "threshold_tuning": threshold_tuning,
         "pipeline_stage_latency_mode": "derived_from_component_phases",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     with open(json_path, "w") as f:
-        json.dump({"metadata": metadata, "results": rows, "negatives": neg_results}, f, indent=2)
+        json.dump(
+            {
+                "metadata": metadata,
+                "results": rows,
+                "fp_holdout": fp_holdout_results,
+                "fp_expanded": fp_expanded_results,
+            },
+            f,
+            indent=2,
+        )
 
     print(f"\nResults written to: {csv_path}, {json_path}")
 
@@ -1069,7 +1117,8 @@ def _pct(value: float) -> float:
 
 def _regression_guard(
     rows: List[dict],
-    neg_results: List[dict],
+    fp_holdout_results: List[dict],
+    fp_expanded_results: List[dict],
     baseline_path: Optional[Path],
     max_accuracy_drop_pp: float,
     max_fp_increase_pp: float,
@@ -1078,11 +1127,17 @@ def _regression_guard(
     n = max(len(rows), 1)
     pe_acc = sum(int(r.get("personalized_correct", 0)) for r in rows) / n
     pe_fn = 1.0 - pe_acc
-    neg_n = len(neg_results)
-    pe_fp = (
-        sum(int(r.get("personalized_fp", 0)) for r in neg_results) / max(neg_n, 1)
-        if neg_n > 0 else None
+    holdout_n = len(fp_holdout_results)
+    holdout_pe_fp = (
+        sum(int(r.get("personalized_fp", 0)) for r in fp_holdout_results) / max(holdout_n, 1)
+        if holdout_n > 0 else None
     )
+    expanded_n = len(fp_expanded_results)
+    expanded_pe_fp = (
+        sum(int(r.get("personalized_fp", 0)) for r in fp_expanded_results) / max(expanded_n, 1)
+        if expanded_n > 0 else None
+    )
+    pe_fp = expanded_pe_fp if expanded_pe_fp is not None else holdout_pe_fp
 
     summary = {
         "enabled": bool(baseline_path),
@@ -1091,6 +1146,8 @@ def _regression_guard(
             "personalized_accuracy_pct": _pct(pe_acc),
             "personalized_fn_rate_pct": _pct(pe_fn),
             "personalized_fp_rate_pct": _pct(pe_fp) if pe_fp is not None else None,
+            "personalized_fp_rate_holdout_pct": _pct(holdout_pe_fp) if holdout_pe_fp is not None else None,
+            "personalized_fp_rate_expanded_pct": _pct(expanded_pe_fp) if expanded_pe_fp is not None else None,
         },
         "thresholds": {
             "max_accuracy_drop_pp": float(max_accuracy_drop_pp),
@@ -1098,6 +1155,7 @@ def _regression_guard(
             "max_fn_increase_pp": float(max_fn_increase_pp),
         },
         "baseline": None,
+        "fp_gate_source": "expanded" if expanded_pe_fp is not None else ("holdout" if holdout_pe_fp is not None else "none"),
         "checks": [],
         "passed": True,
     }
@@ -1109,24 +1167,48 @@ def _regression_guard(
     with open(baseline_path, encoding="utf-8") as f:
         baseline = json.load(f)
     b_rows = baseline.get("results") or []
-    b_neg = baseline.get("negatives") or []
+    b_neg_holdout = baseline.get("fp_holdout") or baseline.get("negatives") or []
+    b_neg_expanded = baseline.get("fp_expanded") or []
     if not isinstance(b_rows, list) or not b_rows:
         raise ValueError(f"baseline results missing/invalid: {baseline_path}")
 
     bn = max(len(b_rows), 1)
     b_pe_acc = sum(int(r.get("personalized_correct", 0)) for r in b_rows) / bn
     b_pe_fn = 1.0 - b_pe_acc
-    b_neg_n = len(b_neg)
-    b_pe_fp = (
-        sum(int(r.get("personalized_fp", 0)) for r in b_neg) / max(b_neg_n, 1)
-        if b_neg_n > 0 else None
+    b_neg_holdout_n = len(b_neg_holdout)
+    b_holdout_pe_fp = (
+        sum(int(r.get("personalized_fp", 0)) for r in b_neg_holdout) / max(b_neg_holdout_n, 1)
+        if b_neg_holdout_n > 0 else None
     )
+    b_neg_expanded_n = len(b_neg_expanded)
+    b_expanded_pe_fp = (
+        sum(int(r.get("personalized_fp", 0)) for r in b_neg_expanded) / max(b_neg_expanded_n, 1)
+        if b_neg_expanded_n > 0 else None
+    )
+    b_pe_fp = b_expanded_pe_fp if b_expanded_pe_fp is not None else b_holdout_pe_fp
+    if expanded_pe_fp is not None and b_expanded_pe_fp is not None:
+        fp_gate_source = "expanded"
+        pe_fp = expanded_pe_fp
+        b_pe_fp = b_expanded_pe_fp
+    elif holdout_pe_fp is not None and b_holdout_pe_fp is not None:
+        fp_gate_source = "holdout"
+        pe_fp = holdout_pe_fp
+        b_pe_fp = b_holdout_pe_fp
+    else:
+        fp_gate_source = "none"
+        pe_fp = None
+        b_pe_fp = None
+    summary["fp_gate_source"] = fp_gate_source
+    summary["current"]["personalized_fp_rate_pct"] = _pct(pe_fp) if pe_fp is not None else None
     summary["baseline"] = {
         "personalized_accuracy_pct": _pct(b_pe_acc),
         "personalized_fn_rate_pct": _pct(b_pe_fn),
         "personalized_fp_rate_pct": _pct(b_pe_fp) if b_pe_fp is not None else None,
+        "personalized_fp_rate_holdout_pct": _pct(b_holdout_pe_fp) if b_holdout_pe_fp is not None else None,
+        "personalized_fp_rate_expanded_pct": _pct(b_expanded_pe_fp) if b_expanded_pe_fp is not None else None,
         "n_test": len(b_rows),
-        "n_negatives": b_neg_n,
+        "n_fp_holdout": b_neg_holdout_n,
+        "n_fp_expanded": b_neg_expanded_n,
     }
 
     acc_drop_pp = _pct(b_pe_acc - pe_acc)
@@ -1177,10 +1259,11 @@ def _print_summary(
     retrieval: List[dict],
     dino: Dict[str, dict],
     depth: Dict[str, dict],
-    neg_results: List[dict],
     final_loss: float,
     threshold: float,
     no_depth: bool,
+    fp_holdout_results: List[dict],
+    fp_expanded_results: List[dict],
 ) -> None:
     n = len(retrieval)
     bl_correct = sum(r["baseline_correct"] for r in retrieval)
@@ -1208,10 +1291,6 @@ def _print_summary(
     sign = "+" if delta_pp >= 0 else ""
     gap_sign = "+" if mean_gap >= 0 else ""
 
-    n_neg = len(neg_results)
-    bl_fp = sum(r["baseline_fp"] for r in neg_results)
-    pe_fp = sum(r["personalized_fp"] for r in neg_results)
-
     print("\n=== Benchmark Summary ===")
     print(f"Similarity threshold: {threshold:.2f}  (production value)")
     print(f"Test images:          {n}")
@@ -1229,7 +1308,7 @@ def _print_summary(
     print(f"Detection rate:       {det_count} / {det_total}  ({100*det_count/max(det_total,1):.1f}%)")
     print()
     print("--- Depth (conditional on detection) ---")
-    if no_depth or not _CHECKPOINT.exists():
+    if no_depth:
         print("                      skipped")
     elif not depth_evaluated:
         print(f"Evaluated on:         0 / {det_total} images")
@@ -1238,22 +1317,31 @@ def _print_summary(
         print(f"Mean abs. error:      {mean_abs:.1f} ft")
         print(f"Mean % error:         {mean_pct:.1f}%")
     print()
-    if n_neg > 0:
-        delta_fp = pe_fp - bl_fp
-        fp_sign = "+" if delta_fp > 0 else ""
-        print("--- False Positives (Negative Images) ---")
-        print(f"Baseline FP rate:     {bl_fp} / {n_neg}  ({100*bl_fp/n_neg:.1f}%)")
-        print(f"Personalized FP rate: {pe_fp} / {n_neg}  ({100*pe_fp/n_neg:.1f}%)")
-        print(f"Delta:                {fp_sign}{100*delta_fp/n_neg:.1f} pp")
-        if bl_fp or pe_fp:
-            for r in neg_results:
-                tags = []
-                if r["baseline_fp"]:
-                    tags.append(f"BL matched {r['baseline_match']} ({r['baseline_sim']:.3f})")
-                if r["personalized_fp"]:
-                    tags.append(f"PL matched {r['personalized_match']} ({r['personalized_sim']:.3f})")
-                if tags:
-                    print(f"  FP: {r['image']}; {', '.join(tags)}")
+    if fp_holdout_results:
+        n_hold = len(fp_holdout_results)
+        bl_hold_fp = sum(r["baseline_fp"] for r in fp_holdout_results)
+        pe_hold_fp = sum(r["personalized_fp"] for r in fp_holdout_results)
+        hold_delta = pe_hold_fp - bl_hold_fp
+        hold_sign = "+" if hold_delta > 0 else ""
+        print("--- False Positives (60-case holdout from test split) ---")
+        print(f"Baseline FP rate:     {bl_hold_fp} / {n_hold}  ({100*bl_hold_fp/max(n_hold,1):.1f}%)")
+        print(f"Personalized FP rate: {pe_hold_fp} / {n_hold}  ({100*pe_hold_fp/max(n_hold,1):.1f}%)")
+        print(f"Delta:                {hold_sign}{100*hold_delta/max(n_hold,1):.1f} pp")
+        print()
+    if fp_expanded_results:
+        n_exp = len(fp_expanded_results)
+        exp_pool_avg = (
+            sum(int(r.get("negative_pool_size", 0)) for r in fp_expanded_results) / max(n_exp, 1)
+        )
+        bl_exp_fp = sum(int(r.get("baseline_fp", 0)) for r in fp_expanded_results)
+        pe_exp_fp = sum(int(r.get("personalized_fp", 0)) for r in fp_expanded_results)
+        exp_delta = pe_exp_fp - bl_exp_fp
+        exp_sign = "+" if exp_delta > 0 else ""
+        print("--- False Positives (expanded all-other-label negatives) ---")
+        print(f"Avg negatives/query:  {exp_pool_avg:.1f}")
+        print(f"Baseline FP rate:     {bl_exp_fp} / {n_exp}  ({100*bl_exp_fp/max(n_exp,1):.1f}%)")
+        print(f"Personalized FP rate: {pe_exp_fp} / {n_exp}  ({100*pe_exp_fp/max(n_exp,1):.1f}%)")
+        print(f"Delta:                {exp_sign}{100*exp_delta/max(n_exp,1):.1f} pp")
         print()
     # Latency summary
     print("--- Latency ---")
@@ -1296,16 +1384,27 @@ def _print_summary(
 
 def main() -> None:
     args = _parse_args()
+    _set_reproducible(args.seed)
     settings = Settings()
-    threshold = (
+    depth_checkpoint = _resolve_depth_checkpoint(args)
+    sweep_min = _validate_similarity_threshold(float(args.threshold_sweep_min), "threshold sweep minimum")
+    sweep_max = _validate_similarity_threshold(float(args.threshold_sweep_max), "threshold sweep maximum")
+    if float(args.threshold_sweep_step) <= 0:
+        raise ValueError(f"threshold sweep step must be > 0, got {args.threshold_sweep_step}")
+    base_threshold = (
         float(args.similarity_threshold)
         if args.similarity_threshold is not None
         else settings.similarity_threshold
+    )
+    threshold = _validate_similarity_threshold(
+        base_threshold,
+        "manual similarity threshold" if args.similarity_threshold is not None else "settings similarity threshold",
     )
     monitor = MemoryMonitor()
 
     print(f"Dataset: {args.dataset}")
     print(f"Images:  {args.images}")
+    print(f"Depth checkpoint: {depth_checkpoint}")
     print(f"Thresholds: similarity={threshold:.3f}, darkness={settings.darkness_threshold:.1f}, "
           f"ocr_text_likelihood={settings.ocr_text_likelihood_threshold:.2f}, "
           f"blur={BLUR_THRESHOLD:.1f}")
@@ -1394,11 +1493,6 @@ def main() -> None:
     print("\n[3/7] Building reference database from 1ft_bright_clean images...")
     database = _build_database(db_set, embedded)
     print(f"  {len(database)} entries")
-    if args.similarity_threshold is None:
-        calibrated = _calibrate_threshold(train_set, embedded, database, test_set)
-        # Recompute with trained head later; this pretrain value is a floor.
-        threshold = max(threshold, calibrated)
-        print(f"  auto-calibrated similarity threshold (pre-train): {threshold:.3f}")
 
     # Phase 4: Train
     _enforce_memory_guard(monitor, "phase 4")
@@ -1413,29 +1507,36 @@ def main() -> None:
         augment_train=not args.no_train_augment,
     )
     print(f"  final loss: {final_loss:.4f}")
-    if args.similarity_threshold is None:
-        threshold = _calibrate_threshold(train_set, embedded, database, test_set)
-        print(f"  auto-calibrated similarity threshold (post-train): {threshold:.3f}")
-
-    # Prepare negative embeddings before retrieval so threshold can use negatives.
-    neg_rows: List[dict] = []
-    neg_embedded: Dict[str, dict] = {}
-    if args.negative_dataset.exists():
-        neg_rows = _load_negative_dataset(args.negative_dataset)
-        if neg_rows:
-            _enforce_memory_guard(monitor, "negative pre-embed")
-            neg_embedded = _embed_rows(neg_rows, args.images_neg, args.no_ocr, settings, monitor=monitor)
-
-    if args.similarity_threshold is None and neg_embedded:
-        threshold = _calibrate_threshold_with_negatives(
-            test_set=test_set,
-            embedded=embedded,
-            neg_embedded=neg_embedded,
-            neg_rows=neg_rows,
-            database=database,
-            head=head,
+    threshold_sweep: List[dict] = []
+    threshold_tuning: dict = {}
+    similarity_stats = _build_similarity_stats(test_set, embedded, database, head)
+    if args.similarity_threshold is not None:
+        threshold_tuning = {
+            "selection_reason": "manual_override",
+            "selected_threshold": float(round(threshold, 3)),
+            "manual_override": True,
+        }
+        threshold_sweep = [
+            _metrics_at_threshold(stats=similarity_stats, threshold=t)
+            for t in [
+                _validate_similarity_threshold(float(round(v, 3)), "threshold sweep candidate")
+                for v in np.arange(sweep_min, sweep_max + 1e-9, args.threshold_sweep_step)
+            ]
+        ]
+        print(f"  using manual similarity threshold override: {threshold:.3f}")
+    else:
+        threshold, threshold_sweep, threshold_tuning = _tune_threshold_with_holdout(
+            stats=similarity_stats,
+            floor=sweep_min,
+            ceiling=sweep_max,
+            step=float(args.threshold_sweep_step),
+            target_holdout_fp=float(args.target_holdout_fp),
+            min_personalized_accuracy=float(args.min_personalized_accuracy),
         )
-        print(f"  auto-calibrated similarity threshold (with negatives): {threshold:.3f}")
+        print(
+            f"  tuned similarity threshold from sweep: {threshold:.3f} "
+            f"(reason={threshold_tuning.get('selection_reason', 'unknown')})"
+        )
 
     # Phase 5: Retrieval
     _enforce_memory_guard(monitor, "phase 5")
@@ -1451,33 +1552,49 @@ def main() -> None:
     _enforce_memory_guard(monitor, "phase 7")
     print("\n[7/7] Evaluating depth estimation...")
     depth_results = _eval_depth(
-        test_set, embedded, dino_results, args.focal_length, args.no_depth, monitor=monitor)
+        test_set,
+        embedded,
+        dino_results,
+        args.focal_length,
+        args.no_depth,
+        depth_checkpoint,
+        monitor=monitor,
+    )
 
-    # Negative FP evaluation
-    neg_results: List[dict] = []
-    if args.negative_dataset.exists():
-        print("\n[neg] Evaluating false positive rate on negative images...")
-        if neg_embedded:
-            neg_results = _eval_negatives_strict(neg_embedded, neg_rows, database, head, threshold)
-            print(f"  {len(neg_results)} negative images evaluated")
-    else:
-        print(f"\n[neg] negative_dataset.csv not found; skipping FP evaluation")
+    fp_holdout_results: List[dict] = []
+    if not args.no_fp_holdout_tests:
+        print("\n[fp] Evaluating 60-case holdout FP tests from detection split...")
+        fp_holdout_results = _eval_fp_holdout_from_test(test_set, embedded, database, head, threshold)
+        print(f"  {len(fp_holdout_results)} holdout FP cases evaluated")
+    fp_expanded_results: List[dict] = []
+    if not args.no_fp_expanded_tests:
+        print("\n[fp] Evaluating expanded FP tests against all other-label samples...")
+        fp_expanded_results = _eval_fp_expanded_from_test(test_set, embedded, head, threshold)
+        if fp_expanded_results:
+            avg_neg = sum(int(r.get("negative_pool_size", 0)) for r in fp_expanded_results) / len(fp_expanded_results)
+            print(f"  {len(fp_expanded_results)} expanded FP cases evaluated (avg negatives/query: {avg_neg:.1f})")
 
     # Output
-    merged = _merge_rows(retrieval_results, dino_results, depth_results)
+    merged = _merge_rows(
+        retrieval_results,
+        dino_results,
+        depth_results,
+        fp_holdout=fp_holdout_results,
+        fp_expanded=fp_expanded_results,
+    )
     benchmark_guard = _regression_guard(
         rows=merged,
-        neg_results=neg_results,
+        fp_holdout_results=fp_holdout_results,
+        fp_expanded_results=fp_expanded_results,
         baseline_path=args.regression_baseline,
         max_accuracy_drop_pp=args.max_accuracy_drop_pp,
         max_fp_increase_pp=args.max_fp_increase_pp,
         max_fn_increase_pp=args.max_fn_increase_pp,
     )
     _print_summary(retrieval_results, dino_results, depth_results,
-                   neg_results, final_loss, threshold, args.no_depth)
+                   final_loss, threshold, args.no_depth, fp_holdout_results, fp_expanded_results)
     _write_output(
         merged,
-        neg_results,
         args,
         final_loss,
         threshold,
@@ -1486,12 +1603,16 @@ def main() -> None:
         settings,
         split_integrity=split_integrity,
         benchmark_guard=benchmark_guard,
+        fp_holdout_results=fp_holdout_results,
+        fp_expanded_results=fp_expanded_results,
+        threshold_sweep=threshold_sweep,
+        threshold_tuning=threshold_tuning,
     )
     if benchmark_guard["enabled"]:
         print("\n[guard] Benchmark regression checks:")
         for check in benchmark_guard["checks"]:
             if check.get("skipped"):
-                print(f"  - {check['name']}: skipped (insufficient negative baseline)")
+                print(f"  - {check['name']}: skipped (insufficient holdout baseline)")
                 continue
             status = "PASS" if check["ok"] else "FAIL"
             print(

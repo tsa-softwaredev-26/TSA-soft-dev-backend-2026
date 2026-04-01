@@ -1,13 +1,14 @@
-"""Generate BENCHMARKS.md at project root from benchmarks/results.json.
+"""Generate BENCHMARKS.md at project root from benchmarks/results.csv.
 
 Usage:
     python -m visual_memory.benchmarks.format_results
-    python -m visual_memory.benchmarks.format_results --results benchmarks/results.json
+    python -m visual_memory.benchmarks.format_results --results benchmarks/results.csv
     python -m visual_memory.benchmarks.format_results --output BENCHMARKS.md
 """
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 from collections import defaultdict
 from pathlib import Path
@@ -21,9 +22,88 @@ _BENCHMARKS_DIR = _PROJECT_ROOT / "benchmarks"
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Format benchmark results into BENCHMARKS.md")
-    p.add_argument("--results", type=Path, default=_BENCHMARKS_DIR / "results.json")
+    p.add_argument("--results", type=Path, default=_BENCHMARKS_DIR / "results.csv")
+    p.add_argument("--metadata", type=Path, default=_BENCHMARKS_DIR / "results.json")
     p.add_argument("--output", type=Path, default=_PROJECT_ROOT / "BENCHMARKS.md")
     return p.parse_args()
+
+
+def _to_int(row: dict, key: str, default: int = 0) -> int:
+    raw = row.get(key, default)
+    if raw in ("", None):
+        return default
+    if isinstance(raw, str):
+        low = raw.strip().lower()
+        if low in ("true", "yes"):
+            return 1
+        if low in ("false", "no"):
+            return 0
+    return int(float(raw))
+
+
+def _to_float(row: dict, key: str, default: float = 0.0) -> float:
+    raw = row.get(key, default)
+    if raw in ("", None):
+        return default
+    return float(raw)
+
+
+def _load_results_csv(path: Path) -> List[dict]:
+    with open(path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        out: List[dict] = []
+        for row in reader:
+            out.append(
+                {
+                    "image": row.get("image", ""),
+                    "label": row.get("label", ""),
+                    "ground_truth_distance_ft": _to_float(row, "ground_truth_distance_ft"),
+                    "baseline_similarity": _to_float(row, "baseline_similarity"),
+                    "personalized_similarity": _to_float(row, "personalized_similarity"),
+                    "similarity_gap": _to_float(row, "similarity_gap"),
+                    "baseline_correct": _to_int(row, "baseline_correct"),
+                    "personalized_correct": _to_int(row, "personalized_correct"),
+                    "dino_detected": _to_int(row, "dino_detected"),
+                    "dino_confidence": _to_float(row, "dino_confidence"),
+                    "depth_absolute_error": row.get("depth_absolute_error", ""),
+                    "depth_percentage_error": row.get("depth_percentage_error", ""),
+                    "lat_embed_img_s": _to_float(row, "lat_embed_img_s"),
+                    "lat_ocr_s": _to_float(row, "lat_ocr_s"),
+                    "lat_embed_txt_s": _to_float(row, "lat_embed_txt_s"),
+                    "lat_retrieve_bl_s": _to_float(row, "lat_retrieve_bl_s"),
+                    "lat_retrieve_pe_s": _to_float(row, "lat_retrieve_pe_s"),
+                    "lat_detect_s": _to_float(row, "lat_detect_s"),
+                    "lat_depth_s": _to_float(row, "lat_depth_s"),
+                    "lat_pipeline_prepare_s": _to_float(row, "lat_pipeline_prepare_s"),
+                    "lat_pipeline_detect_s": _to_float(row, "lat_pipeline_detect_s"),
+                    "lat_pipeline_embed_s": _to_float(row, "lat_pipeline_embed_s"),
+                    "lat_pipeline_ocr_s": _to_float(row, "lat_pipeline_ocr_s"),
+                    "lat_pipeline_match_s": _to_float(row, "lat_pipeline_match_s"),
+                    "lat_pipeline_dedup_s": _to_float(row, "lat_pipeline_dedup_s"),
+                    "lat_pipeline_depth_s": _to_float(row, "lat_pipeline_depth_s"),
+                    "lat_pipeline_db_s": _to_float(row, "lat_pipeline_db_s"),
+                    "darkness_level": _to_float(row, "darkness_level"),
+                    "is_dark": _to_int(row, "is_dark"),
+                    "blur_score": _to_float(row, "blur_score"),
+                    "is_blurry": _to_int(row, "is_blurry"),
+                    "text_likelihood": _to_float(row, "text_likelihood"),
+                    "should_skip_ocr": _to_int(row, "should_skip_ocr"),
+                    "holdout_baseline_fp": _to_int(row, "holdout_baseline_fp"),
+                    "holdout_baseline_match": row.get("holdout_baseline_match", ""),
+                    "holdout_baseline_sim": row.get("holdout_baseline_sim", ""),
+                    "holdout_personalized_fp": _to_int(row, "holdout_personalized_fp"),
+                    "holdout_personalized_match": row.get("holdout_personalized_match", ""),
+                    "holdout_personalized_sim": row.get("holdout_personalized_sim", ""),
+                    "expanded_negative_pool_size": _to_int(row, "expanded_negative_pool_size"),
+                    "expanded_baseline_fp": _to_int(row, "expanded_baseline_fp"),
+                    "expanded_baseline_match": row.get("expanded_baseline_match", ""),
+                    "expanded_baseline_sim": row.get("expanded_baseline_sim", ""),
+                    "expanded_personalized_fp": _to_int(row, "expanded_personalized_fp"),
+                    "expanded_personalized_match": row.get("expanded_personalized_match", ""),
+                    "expanded_personalized_sim": row.get("expanded_personalized_sim", ""),
+                }
+            )
+    return out
 
 
 # stats helpers
@@ -107,12 +187,27 @@ def _sep(*widths: int) -> str:
     return "|" + "|".join("-" * (w + 2) for w in widths) + "|"
 
 
-def generate(results_path: Path, output_path: Path) -> None:
-    with open(results_path) as f:
-        data = json.load(f)
-
-    meta = data["metadata"]
-    results = data["results"]
+def generate(results_path: Path, metadata_path: Path, output_path: Path) -> None:
+    results = _load_results_csv(results_path)
+    meta = {
+        "timestamp": "",
+        "similarity_threshold": 0.0,
+        "epochs": 0,
+        "lr": 0.0,
+        "final_triplet_loss": 0.0,
+        "seed": "default",
+        "n_triplet_train": "N/A",
+        "n_test": len(results),
+        "darkness_threshold": 30.0,
+        "blur_threshold": 100.0,
+        "ocr_text_likelihood_threshold": 0.30,
+    }
+    if metadata_path.exists():
+        with open(metadata_path, encoding="utf-8") as f:
+            payload = json.load(f)
+        m = payload.get("metadata", {})
+        if isinstance(m, dict):
+            meta.update(m)
 
     by_label = _per_label(results)
     by_cond = _per_condition(results)
@@ -156,7 +251,15 @@ def generate(results_path: Path, output_path: Path) -> None:
         bfp = baseline.get('personalized_fp_rate_pct')
         cfp = current.get('personalized_fp_rate_pct')
         if bfp is not None and cfp is not None:
-            a(f"- Personalized FP rate (negatives): {bfp}% -> {cfp}%")
+            a(f"- Personalized FP rate (gated): {bfp}% -> {cfp}%")
+        bfp_hold = baseline.get('personalized_fp_rate_holdout_pct')
+        cfp_hold = current.get('personalized_fp_rate_holdout_pct')
+        if bfp_hold is not None and cfp_hold is not None:
+            a(f"- Personalized FP rate (holdout): {bfp_hold}% -> {cfp_hold}%")
+        bfp_exp = baseline.get('personalized_fp_rate_expanded_pct')
+        cfp_exp = current.get('personalized_fp_rate_expanded_pct')
+        if bfp_exp is not None and cfp_exp is not None:
+            a(f"- Personalized FP rate (expanded): {bfp_exp}% -> {cfp_exp}%")
         a("")
         a(_row("Check", "Actual (pp)", "Limit (pp)", "Status"))
         a(_sep(24, 12, 11, 8))
@@ -417,26 +520,93 @@ def generate(results_path: Path, output_path: Path) -> None:
     a("")
 
     # false positive table
-    negatives = data.get("negatives", [])
-    a("## False Positive Rate (Negative Images)")
+    fp_holdout = []
+    for r in results:
+        bl_sim_raw = r.get("holdout_baseline_sim", "")
+        pe_sim_raw = r.get("holdout_personalized_sim", "")
+        fp_holdout.append(
+            {
+                "image": r["image"],
+                "excluded_labels": [r["label"]] if r.get("label") else [],
+                "baseline_fp": int(r.get("holdout_baseline_fp", 0)),
+                "baseline_match": r.get("holdout_baseline_match", ""),
+                "baseline_sim": float(bl_sim_raw) if bl_sim_raw not in ("", None) else 0.0,
+                "personalized_fp": int(r.get("holdout_personalized_fp", 0)),
+                "personalized_match": r.get("holdout_personalized_match", ""),
+                "personalized_sim": float(pe_sim_raw) if pe_sim_raw not in ("", None) else 0.0,
+            }
+        )
+    a("## False Positive Rate (60-case holdout)")
     a("")
-    if not negatives:
-        a("No negative dataset evaluated.")
+    if not fp_holdout:
+        a("No holdout FP dataset evaluated.")
     else:
-        n_neg = len(negatives)
-        bl_fp = sum(r["baseline_fp"] for r in negatives)
-        pe_fp = sum(r["personalized_fp"] for r in negatives)
+        n_hold = len(fp_holdout)
+        bl_fp = sum(r["baseline_fp"] for r in fp_holdout)
+        pe_fp = sum(r["personalized_fp"] for r in fp_holdout)
         delta_fp = pe_fp - bl_fp
         fp_sign = "+" if delta_fp > 0 else ""
-        a(f"Baseline FP rate: **{bl_fp}/{n_neg} ({100*bl_fp/n_neg:.1f}%)**  "
-          f"Personalized: **{pe_fp}/{n_neg} ({100*pe_fp/n_neg:.1f}%)**  "
-          f"Delta: **{fp_sign}{100*delta_fp/n_neg:.1f} pp**")
+        a(f"Baseline FP rate: **{bl_fp}/{n_hold} ({100*bl_fp/n_hold:.1f}%)**  "
+          f"Personalized: **{pe_fp}/{n_hold} ({100*pe_fp/n_hold:.1f}%)**  "
+          f"Delta: **{fp_sign}{100*delta_fp/n_hold:.1f} pp**")
         a("")
-        a(_row("Image", "BL match", "BL sim", "BL FP", "PL match", "PL sim", "PL FP"))
-        a(_sep(30, 20, 8, 6, 20, 8, 6))
-        for r in negatives:
+        a(_row("Image", "Excluded", "BL match", "BL sim", "BL FP", "PL match", "PL sim", "PL FP"))
+        a(_sep(30, 16, 20, 8, 6, 20, 8, 6))
+        for r in fp_holdout:
+            excluded = ",".join(r.get("excluded_labels", [])) or "-"
             a(_row(
                 r["image"],
+                excluded,
+                r["baseline_match"] or "-",
+                _fmt_sim(r["baseline_sim"]) if r["baseline_fp"] else "-",
+                "FP" if r["baseline_fp"] else "ok",
+                r["personalized_match"] or "-",
+                _fmt_sim(r["personalized_sim"]) if r["personalized_fp"] else "-",
+                "FP" if r["personalized_fp"] else "ok",
+            ))
+    a("")
+    a("---")
+    a("")
+    expanded = []
+    has_expanded = int(meta.get("n_fp_expanded", 0)) > 0
+    if has_expanded:
+        for r in results:
+            bl_sim_raw = r.get("expanded_baseline_sim", "")
+            pe_sim_raw = r.get("expanded_personalized_sim", "")
+            expanded.append(
+                {
+                    "image": r["image"],
+                    "negative_pool_size": int(r.get("expanded_negative_pool_size", 0)),
+                    "baseline_fp": int(r.get("expanded_baseline_fp", 0)),
+                    "baseline_match": r.get("expanded_baseline_match", ""),
+                    "baseline_sim": float(bl_sim_raw) if bl_sim_raw not in ("", None) else 0.0,
+                    "personalized_fp": int(r.get("expanded_personalized_fp", 0)),
+                    "personalized_match": r.get("expanded_personalized_match", ""),
+                    "personalized_sim": float(pe_sim_raw) if pe_sim_raw not in ("", None) else 0.0,
+                }
+            )
+    a("## False Positive Rate (expanded all-other-label negatives)")
+    a("")
+    if not has_expanded or not expanded:
+        a("No expanded FP dataset evaluated.")
+    else:
+        n_exp = len(expanded)
+        bl_fp = sum(r["baseline_fp"] for r in expanded)
+        pe_fp = sum(r["personalized_fp"] for r in expanded)
+        avg_pool = sum(r["negative_pool_size"] for r in expanded) / max(n_exp, 1)
+        delta_fp = pe_fp - bl_fp
+        fp_sign = "+" if delta_fp > 0 else ""
+        a(f"Avg negatives/query: **{avg_pool:.1f}**")
+        a(f"Baseline FP rate: **{bl_fp}/{n_exp} ({100*bl_fp/n_exp:.1f}%)**  "
+          f"Personalized: **{pe_fp}/{n_exp} ({100*pe_fp/n_exp:.1f}%)**  "
+          f"Delta: **{fp_sign}{100*delta_fp/n_exp:.1f} pp**")
+        a("")
+        a(_row("Image", "Negatives", "BL match", "BL sim", "BL FP", "PL match", "PL sim", "PL FP"))
+        a(_sep(30, 10, 20, 8, 6, 20, 8, 6))
+        for r in expanded:
+            a(_row(
+                r["image"],
+                str(r["negative_pool_size"]),
                 r["baseline_match"] or "-",
                 _fmt_sim(r["baseline_sim"]) if r["baseline_fp"] else "-",
                 "FP" if r["baseline_fp"] else "ok",
@@ -456,10 +626,10 @@ def generate(results_path: Path, output_path: Path) -> None:
 def main() -> None:
     args = _parse_args()
     if not args.results.exists():
-        print(f"results.json not found: {args.results}")
+        print(f"results.csv not found: {args.results}")
         print("Run full_benchmark.py first.")
         raise SystemExit(1)
-    generate(args.results, args.output)
+    generate(args.results, args.metadata, args.output)
 
 
 if __name__ == "__main__":
