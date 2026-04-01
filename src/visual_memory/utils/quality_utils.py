@@ -49,7 +49,34 @@ def estimate_text_likelihood(image: Image.Image) -> float:
     contrast = float(small.max() - small.min())
     if contrast < 10.0:
         return 0.0
-    return min(1.0, float(lap.mean()) / (contrast * 0.35))
+
+    edge20 = float((lap > 20.0).mean())
+    edge30 = float((lap > 30.0).mean())
+    edge_ratio = edge30 / (edge20 + 1e-6)
+    dark_pix = float((small < 70.0).mean())
+    bright_pix = float((small > 185.0).mean())
+    tr_h = float(np.mean(np.abs(np.diff((small > float(small.mean())).astype(np.int8), axis=1))))
+
+    # Calibrated on validation_images to keep text and textless classes separable.
+    z_dark = (dark_pix - 0.335113525390625) / 0.2534453210974587
+    z_mean = (float(lap.mean()) - 18.86269962086397) / 5.933804487238114
+    z_edge_ratio = (edge_ratio - 0.710287982583579) / 0.07591043361376067
+    z_edge20 = (edge20 - 0.2532187069163603) / 0.08748948814872878
+    z_tr_h = (tr_h - 0.052443984483557214) / 0.02713921427375173
+    z_bright = (bright_pix - 0.17881864659926472) / 0.1558409051027704
+    raw = (
+        0.36388 * (z_dark ** 2)
+        + 0.15803 * (z_mean * z_edge_ratio)
+        - 0.12188 * (z_edge20 * z_tr_h)
+        + 0.22956 * z_bright
+        + 0.27073
+    )
+    glare_penalty = max(0.0, edge20 - 0.45) * max(0.0, bright_pix - 0.18) * 100.0
+    raw -= glare_penalty
+
+    # Keep decision margin centered around the default 0.30 OCR threshold.
+    score = 0.3 + (raw - 0.519029235) * 0.5
+    return max(0.0, min(1.0, float(score)))
 
 
 def should_run_ocr(
