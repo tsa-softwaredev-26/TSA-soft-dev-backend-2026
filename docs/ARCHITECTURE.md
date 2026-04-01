@@ -313,14 +313,14 @@ Teach behavior:
 Detection quality tiers:
 - When the label has prior teaches: score is normalized by historical avg confidence for that label, so inherently hard-to-detect labels are not penalized vs their baseline.
 - Without history: absolute thresholds (`detection_quality_low_max`, `detection_quality_high_min`) apply.
-- Blur (`is_blurry`) is determined by Laplacian variance of the full image vs `blur_sharpness_threshold`.
+- Blur (`is_blurry`) is determined by Laplacian variance of the full image vs `blur_sharpness_threshold` and is used for quality messaging (it does not block storing a detection).
 - `detection_hint` is a function of both quality tier and blur, giving the most actionable user-facing message.
 
 Second-pass detection:
 - Triggers only when the first `detector.detect()` call returns None.
 - Tries templates in `_SECOND_PASS_TEMPLATES`: `"a {prompt}"`, `"{prompt} object"`, `"close up of a {prompt}"`.
 - Result includes `second_pass: true` and `second_pass_prompt` so the client can log or surface it.
-- Planned: if all second-pass templates also fail, run a local lightweight LLM (Llama 3.2 1B via Ollama) to suggest alternative phrasings, then retry once. No API tokens; runs offline. Hook point: end of `_detect_with_fallback()`.
+- If all second-pass templates also fail, remember mode runs a third pass via local Ollama prompt suggestions (`_detect_with_ollama_fallback`) and retries with those variants.
 
 Multi-image (POST /remember with `images[]`):
 - Frontend sends N frames (burst or sequential), backend runs `detect_score` on all, picks highest confidence, runs full pipeline only on the winner.
@@ -368,7 +368,7 @@ Multi-image (POST /remember with `images[]`):
 - Personalization: `projection_head_path` ("models/projection_head.pt"), `projection_head_dim` (1536)
 - Learning: `enable_learning` (`ENABLE_LEARNING`), `min_feedback_for_training` (10), `projection_head_weight` (1.0), `projection_head_ramp_at` (50), `projection_head_epochs` (20)
 - Detection quality (remember mode): `detection_quality_low_max` (0.40), `detection_quality_high_min` (0.65)
-- Image sharpness: `blur_sharpness_threshold` (100.0) - Laplacian variance below this = blurry
+- Image sharpness: `blur_sharpness_threshold` (120.0) - Laplacian variance below this = blurry
 - Second pass: `detection_second_pass_enabled` (True) - retry with reformulated prompts on failed detect
 - Darkness: `darkness_threshold` (30.0) - mean luminance below this = too dark; both modes; conservative, only genuine dark rooms (no lights on)
 - API: `api_host` ("127.0.0.1"), `api_port` (5000)
@@ -507,7 +507,7 @@ init:
     _load_head() -> _head_trained (True/False)      (DB first, file fallback)
 
 run(query_image):
-    -> mean_luminance(query_image)              -> darkness check; return early if dark
+    -> mean_luminance(query_image) > darkness check; return early if dark
     -> YoloeDetector.detect_all_batch([query_image]) or detect_all(query_image)
     -> PASS 1: for each box -> crop -> embed (combined 1536-dim)
         -> if _head_trained: project query + all DB embeddings via ProjectionHead
@@ -528,7 +528,7 @@ run(query_image):
 ### Model: Apple Depth Pro
 - Metric depth (absolute meters)
 - `f_px=None` -> model infers (~75% error at close range)
-- `f_px=tensor` -> calibrated (~26% error) -always use when available
+- `f_px=tensor` -> calibrated (~26% error) 
 - Checkpoint: `checkpoints/depth_pro.pt` -absolute path resolved via `Path(__file__)` in estimator.py
 
 ### Focal Length
@@ -538,7 +538,7 @@ f_px = (focalLengthMm / sensorWidthMm) * imageWidthPx
 Pass from Android camera API. iPhone 15 Plus reference: `f_mm=6.24`, `sensor_width=8.64mm` -> `f_px=3094.0`
 
 ### Test Results (18 images, iPhone 15 Plus)
-- Average error: 27.8% -acceptable for navigation
+- Average error: 27.8%, acceptable for navigation
 
 ---
 
@@ -609,9 +609,10 @@ Degradation curve artifacts are generated under:
 - `benchmarks/results/degradation_zones.csv`
 - `benchmarks/figures/*_degradation_curve.svg`
 
-If `benchmarks/results.csv` exists from a benchmark run, curves include measured
-retrieval and detection metrics by degradation level. If not, the script emits
-proxy-only curves with `data_status=proxy_only` and records fallback zones.
+Curves include measured retrieval/detection metrics by degradation level only when
+`benchmarks/results.csv` contains entries matching degraded-variant image names.
+Otherwise the script emits proxy-only curves with `data_status=proxy_only` and
+records fallback zones.
 
 Current practical fallback guidance (until measured degraded benchmark results
 are available):
@@ -641,7 +642,7 @@ Run from project root (`python -m visual_memory.tests.scripts.<name>`).
 
 ### Fast test suite (no model loading, ~20-25s)
 
-Covers all API endpoints and core utilities via Flask test client + stubs. No GPU required.
+Covers all API endpoints and core utilities via Flask test client + stubs. 
 
 ```bash
 # All unit + API tests
@@ -745,58 +746,6 @@ See `UX.md` for current onboarding narration and state-driven UX behavior.
 
 ---
 
-## Known Benchmark Data
-
-### Detection score data (ad-hoc, pre-full-benchmark)
-
-| model               | image                | prompt | max sigmoid       |
-|---------------------|----------------------|--------|-------------------|
-| grounding-dino-tiny | wallet_6ft_table.jpg | wallet | 0.1655            |
-| grounding-dino-tiny | skipper.HEIC         | wallet | 0.2286 (FP)       |
-| grounding-dino-base | wallet_6ft_table.jpg | wallet | 0.2036 (FN)       |
-| grounding-dino-base | skipper.HEIC         | wallet | 0.3308 (FP)       |
-
-6ft detection out of range for GDINO-base (FP > FN, no safe threshold). Use 1ft/3ft images.
-
-### DINOv3 + CLIPText similarity data (March 2026)
-
-Run via `python -m visual_memory.tests.scripts.benchmark_embedder`.
-
-**Section A - Intra vs inter-class similarity (DINOv3 image embeddings, full-scene input_images/)**
-
-| Embedder | Intra-class sim | Inter-class sim | Ratio |
-|----------|-----------------|-----------------|-------|
-| DINOv3   | 0.5133          | 0.5151          | 0.996 |
-
-Note: all 9 images share the same context (objects on a table). Full-scene intra/inter gap is not meaningful.
-Pipeline uses YOLOE crops before embedding - see pipeline scan test below.
-
-**Section A - Pipeline scan match (wallet_1ft_table.jpg YOLOE crops vs cropped_wallet.png reference)**
-
-| Detection | DINOv3 sim |
-|-----------|------------|
-| crop 1    | 0.3156     |
-| crop 2    | 0.3058     |
-| crop 3    | 0.2385     |
-
-All 3 crops above `similarity_threshold=0.2` in this benchmark slice.
-Runtime default is **0.14** in `config/settings.py`.
-
-**Section B - CLIPText similarity on OCR ground truth (text_demo/ images)**
-
-All 4 text_demo ground truth files share the same "The quick brown fox..." sentence.
-All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this test set.
-`text_similarity_threshold=0.3` kept - real OCR outputs will differ.
-
-**Section C - Combined embedding similarity (DINOv3 image + CLIPText, 1536-dim)**
-
-- Similar-text cluster (marker/pen/pencil/typed): similarity 0.78-0.95
-- Separate cluster (random_printed_notes, malarkey): similarity 0.18-0.30 vs similar-text cluster
-- Benchmark note: 0.2 separates these clusters cleanly.
-  Runtime default remains 0.14 for broader recall.
-
----
-
 ## Current Capabilities
 
 - Core engine complete and tested (depth, detection, embedding, OCR)
@@ -826,18 +775,6 @@ All pairwise similarities = 1.0000. Cross-text gap cannot be measured from this 
  - Canonical voice state contract: `build_state_contract()` + `resolve_voice_policy()` provide a single source of truth for mode/pending-action policy IDs used by WebSocket dispatch, Whisper context biasing, and Ollama prompt hints
 
 ---
-
-## Server Transition Notes
-
-All server-transition items are complete as of March 2026.
-
-1. [x] **Async /retrain** - `threading.Thread` with module-level `_status` dict; `GET /retrain/status` returns `{"running": bool, "last_result": {...}}`.
-2. [x] **Persist ML settings** - `PATCH /settings` saves full ML settings snapshot to `user_state.ml_settings` (JSON); `warm_all()` calls `_apply_persisted_ml_settings()` at startup.
-3. [x] **FeedbackStore -> SQLite** - `feedback` table in DatabaseStore; `FeedbackStore` is now a thin wrapper; flat `.pt` file approach removed.
-4. [x] **Automated unit install** - `deploy/install.sh` renders systemd templates with repo path and installs `spaitra-core` and `spaitra-ocr`.
-
----
-
 ## Production Readiness Roadmap
 
 ### 1. Blind-first frontend completion
@@ -909,15 +846,6 @@ All server-transition items are complete as of March 2026.
 
 ## Performance Tuning and Server-Side Optimization
 
-### Server-Only Heavy Workload Policy
-
-Intensive training, optimization, and benchmark workloads (text likelihood tuning, detection threshold calibration, similarity threshold sweeps) run **server-only** (via SSH on production hosts). This isolates:
-- GPU contention from user-facing services
-- VRAM pressure and model swapping from live requests
-- Noisy benchmark results from local network latency variance
-
-Local development uses small test sets only (5–10 images); production tuning and validation use full labelled datasets on server infrastructure.
-
 ### Single-GPU Contention Avoidance
 
 When tuning ML parameters on single-GPU systems:
@@ -928,17 +856,7 @@ When tuning ML parameters on single-GPU systems:
 4. Monitor GPU utilization and VRAM: `nvidia-smi dmon`
 5. Validate stability before restarting services: `systemctl start spaitra-core spaitra-ocr && sleep 5 && systemctl status spaitra-core spaitra-ocr`
 
-### Text/Textless Tuning Objective
-
-**Priority: Low false positives on textless images.** Textless images (pure visual content, no OCR text) form the majority of scan targets (product bottles, labels without text, photographs). Tuning strategy:
-
-- **Text likelihood threshold (`OCR_MIN_LIKELIHOOD`)**: Calibrate to minimize false-positive text detection on genuinely textless images. Default 0.10 is heuristic; run `src/visual_memory/benchmarks/text_likelihood_tuning.py` against labelled crops (text vs. textless) to find the optimal cutoff.
-- **Similarity threshold (`SIMILARITY_THRESHOLD`)**: Text-bearing and textless items must pass the same similarity bar to avoid misclassification of textless items as "high confidence text matches." Use `src/visual_memory/benchmarks/optimize_similarity_threshold.py` with separate test sets for textless items.
-- **Detection threshold (`DETECTION_CONFIDENCE_MIN`)**: Lower threshold (0.25–0.35) to catch subtle objects on clean backgrounds; higher threshold (0.40–0.50) on cluttered scenes. Use `src/visual_memory/benchmarks/optimize_detection_threshold.py` to sweep and report per-scene sensitivity.
-
-Run all tuning scripts on server after stopping services; results are committed to `benchmarks/` directory for historical tracking.
-
-### Pre-Release Integration Checklist
+### Checklist Whenever Making Engine Changes
 
 Before merging tuning/performance changes to `main`:
 

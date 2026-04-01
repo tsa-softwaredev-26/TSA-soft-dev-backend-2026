@@ -41,8 +41,9 @@ class Settings:
 
     # Image sharpness via Laplacian variance (remember mode).
     # Values below this threshold are flagged as blurry.
-    # Typical range: 50 (very blurry) to 500+ (sharp). 100 is a good general threshold.
-    blur_sharpness_threshold: float = 100.0
+    # Typical range: 50 (very blurry) to 500+ (sharp). Tuned to 120 based on
+    # current benchmark blur-score distribution to reduce over-flagging.
+    blur_sharpness_threshold: float = 120.0
 
     # Second-pass detection (remember mode): retry with reformulated prompts when
     # the first detection attempt returns nothing. Disable to save latency.
