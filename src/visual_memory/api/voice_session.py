@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from threading import Lock
 
 # States
 # idle - default, waiting for any command
@@ -44,12 +45,15 @@ class VoiceSession:
 
 
 _sessions: dict[str, VoiceSession] = {}
+_sessions_lock = Lock()
 
 def get_session(sid: str) -> VoiceSession:
-    if sid not in _sessions:
-        _sessions[sid] = VoiceSession(sid=sid)
-    return _sessions[sid]
+    with _sessions_lock:
+        if sid not in _sessions:
+            _sessions[sid] = VoiceSession(sid=sid)
+        return _sessions[sid]
 
 
 def clear_session(sid: str) -> None:
-    _sessions.pop(sid, None)
+    with _sessions_lock:
+        _sessions.pop(sid, None)

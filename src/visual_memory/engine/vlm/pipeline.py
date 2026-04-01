@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from pathlib import Path
+from threading import Lock
 from typing import Optional
 
 from PIL import Image
@@ -10,6 +11,7 @@ from visual_memory.utils import get_logger
 from visual_memory.utils.device_utils import get_device
 
 _log = get_logger(__name__)
+_pipeline_lock = Lock()
 
 
 class VLMPipeline:
@@ -19,6 +21,8 @@ class VLMPipeline:
         self._model = None
         self._tokenizer = None
         self._executor = ThreadPoolExecutor(max_workers=1)
+        self._closed = False
+        self._executor_lock = Lock()
 
     def _get_model(self):
         if self._model is None:
@@ -60,7 +64,7 @@ class VLMPipeline:
 
         timeout = max(float(timeout), 0.1)
         question = "Describe this object in one short sentence."
-        future = self._executor.submit(self._infer, path, question)
+        future = self._submit(self._infer, path, question)
         try:
             result = future.result(timeout=timeout)
         except FuturesTimeoutError as exc:
@@ -85,7 +89,7 @@ class VLMPipeline:
             raise ValueError("question is required")
 
         timeout = max(float(timeout), 0.1)
-        future = self._executor.submit(self._infer, path, prompt)
+        future = self._submit(self._infer, path, prompt)
         try:
             result = future.result(timeout=timeout)
         except FuturesTimeoutError as exc:
@@ -104,6 +108,29 @@ class VLMPipeline:
             raise RuntimeError("empty VLM answer")
         return result
 
+    def _submit(self, fn, *args):
+        with self._executor_lock:
+            if self._closed:
+                raise RuntimeError("VLM pipeline is shut down")
+            executor = self._executor
+        return executor.submit(fn, *args)
+
+    def shutdown(self, wait: bool = True) -> None:
+        with self._executor_lock:
+            if self._closed:
+                return
+            self._closed = True
+            executor = self._executor
+            self._executor = None
+        if executor is not None:
+            executor.shutdown(wait=wait)
+
+    def __del__(self):
+        try:
+            self.shutdown(wait=False)
+        except Exception:
+            pass
+
 
 _vlm_pipeline: Optional[VLMPipeline] = None
 
@@ -111,5 +138,7 @@ _vlm_pipeline: Optional[VLMPipeline] = None
 def get_vlm_pipeline() -> VLMPipeline:
     global _vlm_pipeline
     if _vlm_pipeline is None:
-        _vlm_pipeline = VLMPipeline()
+        with _pipeline_lock:
+            if _vlm_pipeline is None:
+                _vlm_pipeline = VLMPipeline()
     return _vlm_pipeline
