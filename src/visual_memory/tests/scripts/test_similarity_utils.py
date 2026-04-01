@@ -14,8 +14,10 @@ from visual_memory.tests.scripts.test_harness import TestRunner
 from visual_memory.utils.similarity_utils import (
     cosine_similarity,
     find_match,
+    find_match_dynamic_threshold,
     iou,
     deduplicate_matches,
+    is_document_like_label,
 )
 
 _runner = TestRunner("similarity_utils")
@@ -73,6 +75,18 @@ def test_find_match_returns_best():
     assert label == "wallet"
 
 
+def test_find_match_dynamic_threshold_prefers_best_eligible():
+    query = _norm(0)
+    db = [("wallet", _norm(0)), ("receipt", _norm(1))]
+    label, sim = find_match_dynamic_threshold(
+        query,
+        db,
+        lambda path: 0.95 if path == "wallet" else 0.0,
+    )
+    assert label == "wallet"
+    assert sim > 0.95
+
+
 def test_iou_identical_boxes():
     box = [0.0, 0.0, 100.0, 100.0]
     result = iou(box, box)
@@ -126,6 +140,17 @@ def test_deduplicate_no_overlap():
     assert len(result) == 2
 
 
+def test_is_document_like_label_positive():
+    assert is_document_like_label("receipt") is True
+    assert is_document_like_label("tax-document") is True
+    assert is_document_like_label("paper_note") is True
+
+
+def test_is_document_like_label_negative():
+    assert is_document_like_label("wallet") is False
+    assert is_document_like_label("keys") is False
+
+
 for name, fn in [
     ("sim:cosine_identical", test_cosine_similarity_identical),
     ("sim:cosine_orthogonal", test_cosine_similarity_orthogonal),
@@ -133,6 +158,7 @@ for name, fn in [
     ("sim:find_match_identical", test_find_match_identical_returns_match),
     ("sim:find_match_empty_db", test_find_match_empty_db),
     ("sim:find_match_returns_best", test_find_match_returns_best),
+    ("sim:find_match_dynamic_threshold", test_find_match_dynamic_threshold_prefers_best_eligible),
     ("sim:iou_identical", test_iou_identical_boxes),
     ("sim:iou_non_overlapping", test_iou_non_overlapping),
     ("sim:iou_partial_overlap", test_iou_partial_overlap),
@@ -140,6 +166,8 @@ for name, fn in [
     ("sim:dedup_different_labels_both_kept", test_deduplicate_different_labels_both_kept),
     ("sim:dedup_empty", test_deduplicate_empty),
     ("sim:dedup_no_overlap", test_deduplicate_no_overlap),
+    ("sim:document_label_positive", test_is_document_like_label_positive),
+    ("sim:document_label_negative", test_is_document_like_label_negative),
 ]:
     _runner.run(name, fn)
 

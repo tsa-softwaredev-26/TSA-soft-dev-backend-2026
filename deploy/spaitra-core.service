@@ -9,6 +9,7 @@ Group=spaitra
 UMask=0077
 WorkingDirectory=__REPO_ROOT__
 EnvironmentFile=/opt/spaitra/.env
+ExecCondition=/bin/sh -c '[ "${ENABLE_CORE_SERVICE:-1}" = "1" ]'
 ExecStart=__REPO_ROOT__/venv-core/bin/gunicorn \
     -w 1 \
     -k geventwebsocket.gunicorn.workers.GeventWebSocketWorker \

@@ -9,7 +9,18 @@ from visual_memory.engine.embedding import make_combined_embedding
 from visual_memory.engine.model_registry import registry
 from visual_memory.engine.text_recognition import TextRecognizer
 from visual_memory.learning import ProjectionHead
-from visual_memory.utils import crop_object, find_match, deduplicate_matches, get_logger, mean_luminance, blur_score, estimate_text_likelihood, should_run_ocr, collect_system_metrics
+from visual_memory.utils import (
+    crop_object,
+    find_match_dynamic_threshold,
+    deduplicate_matches,
+    get_logger,
+    mean_luminance,
+    blur_score,
+    estimate_text_likelihood,
+    should_run_ocr,
+    collect_system_metrics,
+    is_document_like_label,
+)
 from visual_memory.utils.logger import LogTag
 from visual_memory.database import DatabaseStore
 
@@ -18,6 +29,28 @@ _log = get_logger(__name__)
 
 _SCAN_CACHE_MAX = 50
 _CONFIDENCE_HIGH = 0.6   # mirrors estimator.CONFIDENCE_HIGH
+
+
+def _runtime_settings() -> Settings:
+    try:
+        from visual_memory.api.pipelines import get_settings
+        return get_settings()
+    except Exception:
+        return _settings
+
+
+def _runtime_similarity_threshold(is_personalized: bool) -> float:
+    settings = _runtime_settings()
+    if is_personalized:
+        return settings.get_similarity_threshold_personalized()
+    return settings.get_similarity_threshold_baseline()
+
+
+def _match_threshold_for_label(label: str, is_personalized: bool) -> float:
+    settings = _runtime_settings()
+    if is_document_like_label(label):
+        return settings.get_similarity_threshold_document()
+    return _runtime_similarity_threshold(is_personalized)
 
 
 def _vertical_zone(bbox: list, img_h: int) -> str:
@@ -57,6 +90,7 @@ class ScanPipeline:
         self._enable_learning: bool = _settings.enable_learning
         self._head_weight: float    = _settings.projection_head_weight
         self._head_ramp_at: int     = _settings.projection_head_ramp_at
+        self._head_ramp_power: float = _settings.projection_head_ramp_power
         # updated by reload_head() after each successful /retrain; drives auto-scaling blend
         self._triplet_count: int    = 0
 
@@ -188,14 +222,16 @@ class ScanPipeline:
         self._enable_learning = enabled
         self._projected_db = None
 
-    def set_head_weight(self, weight: float, ramp_at: int) -> None:
-        """Update the head blend weight ceiling and ramp target at runtime.
+    def set_head_weight(self, weight: float, ramp_at: int, ramp_power: float = 1.0) -> None:
+        """Update head blend weight ceiling and ramp controls at runtime.
 
         weight  - max blend fraction (0.0 = never use head, 1.0 = full projection)
         ramp_at - triplet count at which weight is fully reached
+        ramp_power - curvature of ramp progression (1.0 = linear)
         """
         self._head_weight = float(weight)
         self._head_ramp_at = int(ramp_at)
+        self._head_ramp_power = float(ramp_power)
         self._projected_db = None
 
     def set_triplet_count(self, triplet_count: int) -> None:
@@ -206,18 +242,16 @@ class ScanPipeline:
     def _apply_head(self, emb: torch.Tensor) -> torch.Tensor:
         """Blend raw embedding with projected embedding according to current weight.
 
-        Alpha ramps linearly from 0 to _head_weight as _triplet_count reaches
-        _head_ramp_at, then stays at _head_weight.  This gives the head more
-        influence automatically as the user accumulates feedback data.
+        Alpha ramps from 0 to _head_weight as _triplet_count reaches
+        _head_ramp_at, then stays at _head_weight. Ramp curvature is controlled
+        by _head_ramp_power (1.0 linear).
 
         Returns emb unchanged when learning is off or no weights are loaded.
         """
         if not self._head_trained or not self._enable_learning:
             return emb
-        alpha = min(
-            self._head_weight,
-            self._head_weight * self._triplet_count / max(self._head_ramp_at, 1),
-        )
+        progress = min(1.0, self._triplet_count / max(self._head_ramp_at, 1))
+        alpha = self._head_weight * (progress ** max(self._head_ramp_power, 0.01))
         if alpha <= 0.0:
             return emb
         with torch.no_grad():
@@ -357,21 +391,24 @@ class ScanPipeline:
             )
 
             projected_query = self._apply_head(combined)
-
+            learning_active = bool(self._enable_learning and self._head_trained)
             match_t0 = time.monotonic()
-            match_path, similarity = find_match(
+            match_path, similarity = find_match_dynamic_threshold(
                 projected_query,
                 projected_db,
-                _settings.similarity_threshold,
+                lambda path: _match_threshold_for_label(Path(path).stem, learning_active),
             )
             match_ms += (time.monotonic() - match_t0) * 1000
 
             if match_path:
                 matched_label = Path(match_path).stem
+                applied_threshold = _match_threshold_for_label(matched_label, learning_active)
                 _log.info({
                     "event": "scan_text_match",
                     "label": matched_label,
                     "similarity": round(similarity, 4),
+                    "threshold": round(applied_threshold, 4),
+                    "learning_active": learning_active,
                     "text_likelihood": round(text_likelihood, 3),
                     "crop_luminance": round(crop_luminance[i], 2),
                     "crop_blur_score": round(crop_blur_scores[i], 2),

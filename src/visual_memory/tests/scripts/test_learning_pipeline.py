@@ -76,6 +76,7 @@ def test_apply_head_blending_ramp():
     pipeline._enable_learning = True
     pipeline._head_weight = 1.0
     pipeline._head_ramp_at = 10
+    pipeline._head_ramp_power = 1.0
     with torch.no_grad():
         pipeline._head.linear.weight.fill_(0.01)
 
@@ -92,6 +93,29 @@ def test_apply_head_blending_ramp():
     pipeline.set_triplet_count(10)
     out_full = pipeline._apply_head(emb)
     assert out_full.shape == emb.shape
+
+
+def test_apply_head_blending_ramp_power_curve():
+    pipeline = _pm._scan_pipeline
+    pipeline._head_trained = True
+    pipeline._enable_learning = True
+    pipeline._head_weight = 1.0
+    pipeline._head_ramp_at = 10
+    pipeline._head_ramp_power = 2.0
+    with torch.no_grad():
+        pipeline._head.linear.weight.fill_(0.01)
+
+    emb = make_embedding(99)
+    pipeline.set_triplet_count(5)
+    out_pow2 = pipeline._apply_head(emb)
+    sim_pow2 = F.cosine_similarity(emb, out_pow2).item()
+
+    pipeline._head_ramp_power = 1.0
+    out_lin = pipeline._apply_head(emb)
+    sim_lin = F.cosine_similarity(emb, out_lin).item()
+
+    # power=2 should ramp more slowly than linear at midpoint, so output stays closer to input
+    assert sim_pow2 > sim_lin
 
 
 def test_reload_head_from_db():
@@ -178,6 +202,7 @@ for name, fn in [
     ("learning:feedback_store_roundtrip", test_feedback_store_roundtrip_and_triplets),
     ("learning:trainer_convergence", test_trainer_convergence),
     ("learning:apply_head_blend_ramp", test_apply_head_blending_ramp),
+    ("learning:apply_head_blend_ramp_power_curve", test_apply_head_blending_ramp_power_curve),
     ("learning:reload_head", test_reload_head_from_db),
     ("learning:e2e_feedback_retrain_settings", test_feedback_retrain_settings_flow),
 ]:

@@ -62,7 +62,9 @@ _SETTABLE_TYPES = _build_settable_types()
 _ML_PATCHABLE = [
     "enable_learning", "min_feedback_for_training",
     "projection_head_weight", "projection_head_ramp_at",
-    "projection_head_epochs",
+    "projection_head_ramp_power", "projection_head_epochs",
+    "triplet_margin", "triplet_positive_weight",
+    "triplet_negative_weight", "triplet_hard_negative_boost",
 ]
 
 
@@ -568,7 +570,11 @@ def debug_wipe():
         for key in _ML_PATCHABLE:
             setattr(s, key, getattr(defaults, key))
         get_scan_pipeline().set_enable_learning(s.enable_learning)
-        get_scan_pipeline().set_head_weight(s.projection_head_weight, s.projection_head_ramp_at)
+        get_scan_pipeline().set_head_weight(
+            s.projection_head_weight,
+            s.projection_head_ramp_at,
+            s.projection_head_ramp_power,
+        )
         report["ml_settings_reset"] = True
 
     if target == "user-settings":
@@ -634,8 +640,16 @@ def debug_patch_config():
     pipeline = get_scan_pipeline()
     if "enable_learning" in applied:
         pipeline.set_enable_learning(s.enable_learning)
-    if "projection_head_weight" in applied or "projection_head_ramp_at" in applied:
-        pipeline.set_head_weight(s.projection_head_weight, s.projection_head_ramp_at)
+    if (
+        "projection_head_weight" in applied
+        or "projection_head_ramp_at" in applied
+        or "projection_head_ramp_power" in applied
+    ):
+        pipeline.set_head_weight(
+            s.projection_head_weight,
+            s.projection_head_ramp_at,
+            s.projection_head_ramp_power,
+        )
 
     if persist:
         import dataclasses as _dc

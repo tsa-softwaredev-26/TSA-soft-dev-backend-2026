@@ -20,7 +20,14 @@ def _run_training(settings, store, pipeline) -> None:
     global _status
     try:
         triplets = store.load_triplets()
-        trainer = ProjectionTrainer(pipeline._head, lr=1e-4)
+        trainer = ProjectionTrainer(
+            pipeline._head,
+            lr=1e-4,
+            triplet_margin=settings.triplet_margin,
+            triplet_positive_weight=settings.triplet_positive_weight,
+            triplet_negative_weight=settings.triplet_negative_weight,
+            triplet_hard_negative_boost=settings.triplet_hard_negative_boost,
+        )
         final_loss = trainer.train(triplets, epochs=settings.projection_head_epochs)
 
         head_path = Path(settings.projection_head_path)

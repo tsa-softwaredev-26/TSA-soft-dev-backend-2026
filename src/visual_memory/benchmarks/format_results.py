@@ -58,9 +58,16 @@ def _load_results_csv(path: Path) -> List[dict]:
                     "image": row.get("image", ""),
                     "label": row.get("label", ""),
                     "ground_truth_distance_ft": _to_float(row, "ground_truth_distance_ft"),
+                    "distance_bucket": row.get("distance_bucket", ""),
+                    "lighting_bucket": row.get("lighting_bucket", ""),
+                    "cleanliness_bucket": row.get("cleanliness_bucket", ""),
+                    "condition_bucket": row.get("condition_bucket", ""),
+                    "is_document": _to_int(row, "is_document"),
                     "baseline_similarity": _to_float(row, "baseline_similarity"),
                     "personalized_similarity": _to_float(row, "personalized_similarity"),
                     "similarity_gap": _to_float(row, "similarity_gap"),
+                    "baseline_threshold_used": _to_float(row, "baseline_threshold_used"),
+                    "personalized_threshold_used": _to_float(row, "personalized_threshold_used"),
                     "baseline_correct": _to_int(row, "baseline_correct"),
                     "personalized_correct": _to_int(row, "personalized_correct"),
                     "dino_detected": _to_int(row, "dino_detected"),
@@ -220,7 +227,16 @@ def generate(results_path: Path, metadata_path: Path, output_path: Path) -> None
     a("")
     a(f"**Date**: {meta['timestamp'][:10]}")
     a(f"**Model**: DINOv3 ViT-L (1024-dim) + CLIP text encoder (512-dim), combined 1536-dim")
-    a(f"**Similarity threshold**: {meta['similarity_threshold']:.2f}")
+    thresholds = meta.get("similarity_thresholds") or {}
+    if isinstance(thresholds, dict) and thresholds:
+        a(
+            "**Similarity thresholds**: "
+            f"baseline={float(thresholds.get('baseline', meta.get('similarity_threshold', 0.0))):.2f}, "
+            f"personalized={float(thresholds.get('personalized', meta.get('similarity_threshold', 0.0))):.2f}, "
+            f"document={float(thresholds.get('document', meta.get('similarity_threshold', 0.0))):.2f}"
+        )
+    else:
+        a(f"**Similarity threshold**: {meta['similarity_threshold']:.2f}")
     n_train = meta.get('n_triplet_train', meta.get('n_train', 'N/A'))
     n_test = meta.get('n_test', 'N/A')
     seed = meta.get('seed', 'default')

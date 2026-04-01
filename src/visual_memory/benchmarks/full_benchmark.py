@@ -24,6 +24,7 @@ import hashlib
 import json
 import os
 import random
+import shutil
 import sys
 import time
 from datetime import datetime, timezone
@@ -63,6 +64,19 @@ _CHECKPOINT = _PROJECT_ROOT / "checkpoints" / "depth_pro.pt"
 _RESULTS_SCHEMA_VERSION = 2
 
 BLUR_THRESHOLD = 100.0
+DOCUMENT_LABEL_KEYWORDS = {
+    "receipt",
+    "ticket",
+    "document",
+    "paper",
+    "note",
+    "label",
+    "barcode",
+    "passport",
+    "license",
+    "id",
+    "card",
+}
 
 
 def _set_reproducible(seed: int) -> None:
@@ -123,6 +137,24 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--similarity-threshold", type=float, default=None,
                    help="Override retrieval threshold (default: Settings.similarity_threshold)")
     p.add_argument(
+        "--baseline-threshold",
+        type=float,
+        default=None,
+        help="Override baseline retrieval threshold (non-document samples)",
+    )
+    p.add_argument(
+        "--personalized-threshold",
+        type=float,
+        default=None,
+        help="Override personalized retrieval threshold (non-document samples)",
+    )
+    p.add_argument(
+        "--document-threshold",
+        type=float,
+        default=None,
+        help="Override retrieval threshold for document-like samples",
+    )
+    p.add_argument(
         "--regression-baseline",
         type=Path,
         default=None,
@@ -164,8 +196,8 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable expanded FP evaluation against all other-label images",
     )
-    p.add_argument("--threshold-sweep-min", type=float, default=0.50)
-    p.add_argument("--threshold-sweep-max", type=float, default=0.98)
+    p.add_argument("--threshold-sweep-min", type=float, default=0.10)
+    p.add_argument("--threshold-sweep-max", type=float, default=0.90)
     p.add_argument("--threshold-sweep-step", type=float, default=0.01)
     p.add_argument("--target-holdout-fp", type=float, default=0.40)
     p.add_argument("--min-personalized-accuracy", type=float, default=0.15)
@@ -275,6 +307,32 @@ def _split(
     db_set = [f for f in train_set if "_1ft_bright_clean." in f]
     test_set = [f for f in embedded if "_1ft_" not in f]
     return train_set, db_set, test_set
+
+
+def _condition_buckets(image_name: str, distance_ft: float, is_dark: bool) -> dict:
+    stem = image_name.rsplit(".", 1)[0]
+    tokens = stem.split("_")
+    distance_bucket = next((t for t in tokens if t.endswith("ft")), "")
+    lighting_bucket = next((t for t in tokens if t in {"bright", "dim", "dark"}), "")
+    cleanliness_bucket = next((t for t in tokens if t in {"clean", "messy"}), "")
+    if not distance_bucket:
+        distance_bucket = f"{int(round(distance_ft))}ft"
+    if not lighting_bucket:
+        lighting_bucket = "dim" if is_dark else "bright"
+    condition_bucket = "_".join(
+        [x for x in [distance_bucket, lighting_bucket, cleanliness_bucket] if x]
+    )
+    return {
+        "distance_bucket": distance_bucket,
+        "lighting_bucket": lighting_bucket,
+        "cleanliness_bucket": cleanliness_bucket,
+        "condition_bucket": condition_bucket,
+    }
+
+
+def _is_document_like(label: str, prompt: str) -> bool:
+    hay = f"{label} {prompt}".lower()
+    return any(k in hay for k in DOCUMENT_LABEL_KEYWORDS)
 
 
 def _split_fixed_60_60(
@@ -502,7 +560,7 @@ def _eval_retrieval(
     embedded: Dict[str, dict],
     database: List[Tuple[str, torch.Tensor]],
     head: ProjectionHead,
-    threshold: float,
+    thresholds: Dict[str, float],
     monitor: Optional[MemoryMonitor] = None,
 ) -> List[dict]:
     head.eval()
@@ -512,13 +570,16 @@ def _eval_retrieval(
         data = embedded[fname]
         test_emb = data["embedding"]
         true_label = data["label"]
+        is_document = bool(data.get("is_document", False))
+        baseline_threshold = thresholds["document"] if is_document else thresholds["baseline"]
+        personalized_threshold = thresholds["document"] if is_document else thresholds["personalized"]
 
         t0 = time.perf_counter()
-        bl_label, bl_sim = find_match(test_emb, database, threshold)
+        bl_label, bl_sim = find_match(test_emb, database, baseline_threshold)
         lat_bl = time.perf_counter() - t0
 
         t0 = time.perf_counter()
-        pe_label, pe_sim = find_match(head.project(test_emb), projected_db, threshold)
+        pe_label, pe_sim = find_match(head.project(test_emb), projected_db, personalized_threshold)
         lat_pe = time.perf_counter() - t0
 
         results.append({
@@ -542,6 +603,13 @@ def _eval_retrieval(
             "is_blurry": data["is_blurry"],
             "text_likelihood": data["text_likelihood"],
             "should_skip_ocr": data["should_skip_ocr"],
+            "distance_bucket": data.get("distance_bucket", ""),
+            "lighting_bucket": data.get("lighting_bucket", ""),
+            "cleanliness_bucket": data.get("cleanliness_bucket", ""),
+            "condition_bucket": data.get("condition_bucket", ""),
+            "is_document": int(is_document),
+            "baseline_threshold_used": round(baseline_threshold, 6),
+            "personalized_threshold_used": round(personalized_threshold, 6),
         })
         if monitor is not None and (i + 1) % 20 == 0:
             if monitor.suggest_throttle():
@@ -585,6 +653,15 @@ def _build_similarity_stats(
                 best_wrong_pe = max(best_wrong_pe, sim)
         stats.append(
             {
+                "image": fname,
+                "label": true_label,
+                "distance_ft": row["distance_ft"],
+                "is_dark": bool(row.get("is_dark", False)),
+                "is_document": bool(row.get("is_document", False)),
+                "distance_bucket": row.get("distance_bucket", ""),
+                "lighting_bucket": row.get("lighting_bucket", ""),
+                "cleanliness_bucket": row.get("cleanliness_bucket", ""),
+                "condition_bucket": row.get("condition_bucket", ""),
                 "best_true_bl": best_true_bl,
                 "best_wrong_bl": max(best_wrong_bl, 0.0),
                 "best_true_pe": best_true_pe,
@@ -594,18 +671,58 @@ def _build_similarity_stats(
     return stats
 
 
-def _metrics_at_threshold(stats: List[dict], threshold: float) -> dict:
+def _metrics_at_threshold(
+    stats: List[dict],
+    baseline_threshold: float,
+    personalized_threshold: float,
+    document_threshold: float,
+) -> dict:
     n = max(len(stats), 1)
-    bl_correct = sum(1 for s in stats if s["best_true_bl"] >= threshold and s["best_true_bl"] >= s["best_wrong_bl"])
-    pe_correct = sum(1 for s in stats if s["best_true_pe"] >= threshold and s["best_true_pe"] >= s["best_wrong_pe"])
-    bl_holdout_fp = sum(1 for s in stats if s["best_wrong_bl"] >= threshold)
-    pe_holdout_fp = sum(1 for s in stats if s["best_wrong_pe"] >= threshold)
+    bl_correct = 0
+    pe_correct = 0
+    bl_holdout_fp = 0
+    pe_holdout_fp = 0
+    weighted_recall_hits = 0.0
+    weighted_recall_total = 0.0
+    deprioritized_count = 0
+    for s in stats:
+        is_document = bool(s.get("is_document", False))
+        is_deprioritized = (
+            s.get("distance_bucket") == "6ft"
+            and s.get("lighting_bucket") == "dim"
+            and s.get("cleanliness_bucket", "") in {"messy", "clean"}
+        )
+        bl_t = document_threshold if is_document else baseline_threshold
+        pe_t = document_threshold if is_document else personalized_threshold
+        bl_ok = s["best_true_bl"] >= bl_t and s["best_true_bl"] >= s["best_wrong_bl"]
+        pe_ok = s["best_true_pe"] >= pe_t and s["best_true_pe"] >= s["best_wrong_pe"]
+        if bl_ok:
+            bl_correct += 1
+        if pe_ok:
+            pe_correct += 1
+        if s["best_wrong_bl"] >= bl_t:
+            bl_holdout_fp += 1
+        if s["best_wrong_pe"] >= pe_t:
+            pe_holdout_fp += 1
+        if s.get("distance_bucket") in {"1ft", "2ft", "3ft"} and s.get("lighting_bucket") == "bright":
+            w = 0.2 if is_deprioritized else 1.0
+            weighted_recall_total += w
+            if pe_ok:
+                weighted_recall_hits += w
+        if is_deprioritized:
+            deprioritized_count += 1
     return {
-        "threshold": float(round(threshold, 3)),
+        "baseline_threshold": float(round(baseline_threshold, 3)),
+        "personalized_threshold": float(round(personalized_threshold, 3)),
+        "document_threshold": float(round(document_threshold, 3)),
         "baseline_accuracy": bl_correct / n,
         "personalized_accuracy": pe_correct / n,
         "baseline_holdout_fp_rate": bl_holdout_fp / n,
         "personalized_holdout_fp_rate": pe_holdout_fp / n,
+        "priority_recall_1to3ft_bright": (
+            weighted_recall_hits / weighted_recall_total if weighted_recall_total > 0 else 0.0
+        ),
+        "deprioritized_samples": deprioritized_count,
     }
 
 
@@ -623,54 +740,98 @@ def _tune_threshold_with_holdout(
     step: float,
     target_holdout_fp: float,
     min_personalized_accuracy: float,
-) -> Tuple[float, List[dict], dict]:
+) -> Tuple[dict, List[dict], dict]:
     floor = _validate_similarity_threshold(floor, "threshold sweep minimum")
     ceiling = _validate_similarity_threshold(ceiling, "threshold sweep maximum")
     if not stats:
-        return floor, [], {"selection_reason": "fallback_no_stats", "selected_threshold": float(round(floor, 3))}
+        thr = float(round(floor, 3))
+        return (
+            {"baseline": thr, "personalized": thr, "document": thr},
+            [],
+            {
+                "selection_reason": "fallback_no_stats",
+                "selected_thresholds": {"baseline": thr, "personalized": thr, "document": thr},
+            },
+        )
     if ceiling < floor:
         floor, ceiling = ceiling, floor
     if step <= 0:
         step = 0.01
-    candidates = [
+    candidates: List[float] = [
         _validate_similarity_threshold(float(round(v, 3)), "threshold sweep candidate")
         for v in np.arange(floor, ceiling + 1e-9, step)
     ]
-    sweep = [_metrics_at_threshold(stats, t) for t in candidates]
+    sweep: List[dict] = []
+    for baseline_t in candidates:
+        for personalized_t in candidates:
+            for document_t in candidates:
+                sweep.append(
+                    _metrics_at_threshold(
+                        stats,
+                        baseline_threshold=baseline_t,
+                        personalized_threshold=personalized_t,
+                        document_threshold=document_t,
+                    )
+                )
     feasible = [
         r for r in sweep
         if r["personalized_holdout_fp_rate"] <= target_holdout_fp
         and r["personalized_accuracy"] >= min_personalized_accuracy
     ]
     if feasible:
-        best = max(feasible, key=lambda r: (r["personalized_accuracy"], -r["personalized_holdout_fp_rate"], r["threshold"]))
+        best = min(
+            feasible,
+            key=lambda r: (
+                r["personalized_holdout_fp_rate"],
+                -r["priority_recall_1to3ft_bright"],
+                -r["personalized_accuracy"],
+                -r["document_threshold"],
+                -r["personalized_threshold"],
+                -r["baseline_threshold"],
+            ),
+        )
         reason = "feasible"
     else:
         best = min(
             sweep,
             key=lambda r: (
-                max(0.0, r["personalized_holdout_fp_rate"] - target_holdout_fp)
-                + max(0.0, min_personalized_accuracy - r["personalized_accuracy"]),
-                -r["personalized_accuracy"],
+                2.0 * max(0.0, r["personalized_holdout_fp_rate"] - target_holdout_fp)
+                + max(0.0, min_personalized_accuracy - r["personalized_accuracy"])
+                + 0.75 * max(0.0, 0.70 - r["priority_recall_1to3ft_bright"]),
                 r["personalized_holdout_fp_rate"],
-                -r["threshold"],
+                -r["priority_recall_1to3ft_bright"],
+                -r["personalized_accuracy"],
+                -r["document_threshold"],
+                -r["personalized_threshold"],
+                -r["baseline_threshold"],
             ),
         )
         reason = "least_violation"
+    selected_thresholds = {
+        "baseline": best["baseline_threshold"],
+        "personalized": best["personalized_threshold"],
+        "document": best["document_threshold"],
+    }
     tuning = {
         "selection_reason": reason,
-        "selected_threshold": best["threshold"],
+        "selected_thresholds": selected_thresholds,
         "target_holdout_fp": target_holdout_fp,
         "min_personalized_accuracy": min_personalized_accuracy,
+        "priority_policy": {
+            "prioritize_low_fp": True,
+            "prioritize_recall_1to3ft_bright": True,
+            "deprioritize_6ft_dim_messy_clean": True,
+        },
         "selected_metrics": {
             "baseline_accuracy": round(best["baseline_accuracy"], 6),
             "personalized_accuracy": round(best["personalized_accuracy"], 6),
             "baseline_holdout_fp_rate": round(best["baseline_holdout_fp_rate"], 6),
             "personalized_holdout_fp_rate": round(best["personalized_holdout_fp_rate"], 6),
+            "priority_recall_1to3ft_bright": round(best["priority_recall_1to3ft_bright"], 6),
         },
         "n_candidates": len(sweep),
     }
-    return best["threshold"], sweep, tuning
+    return selected_thresholds, sweep, tuning
 
 
 # phase 6: grounding dino evaluation with full production fallback chain
@@ -823,7 +984,7 @@ def _eval_fp_holdout_from_test(
     embedded: Dict[str, dict],
     database: List[Tuple[str, torch.Tensor]],
     head: ProjectionHead,
-    threshold: float,
+    thresholds: Dict[str, float],
 ) -> List[dict]:
     """
     Build 60 balanced FP tests from retrieval test images.
@@ -841,8 +1002,11 @@ def _eval_fp_holdout_from_test(
         filtered_db = [(lbl, emb) for (lbl, emb) in database if lbl != true_label]
         projected_db = [(lbl, head.project(emb)) for (lbl, emb) in filtered_db]
         emb = row["embedding"]
-        bl_lbl, bl_sim = find_match(emb, filtered_db, threshold)
-        pe_lbl, pe_sim = find_match(head.project(emb), projected_db, threshold)
+        is_document = bool(row.get("is_document", False))
+        bl_t = thresholds["document"] if is_document else thresholds["baseline"]
+        pe_t = thresholds["document"] if is_document else thresholds["personalized"]
+        bl_lbl, bl_sim = find_match(emb, filtered_db, bl_t)
+        pe_lbl, pe_sim = find_match(head.project(emb), projected_db, pe_t)
         results.append(
             {
                 "image": fname,
@@ -855,6 +1019,12 @@ def _eval_fp_holdout_from_test(
                 "personalized_fp": int(pe_lbl is not None),
                 "personalized_match": pe_lbl or "",
                 "personalized_sim": round(pe_sim, 6),
+                "distance_bucket": row.get("distance_bucket", ""),
+                "lighting_bucket": row.get("lighting_bucket", ""),
+                "cleanliness_bucket": row.get("cleanliness_bucket", ""),
+                "is_document": int(is_document),
+                "baseline_threshold_used": round(bl_t, 6),
+                "personalized_threshold_used": round(pe_t, 6),
             }
         )
     return results
@@ -864,7 +1034,7 @@ def _eval_fp_expanded_from_test(
     test_set: List[str],
     embedded: Dict[str, dict],
     head: ProjectionHead,
-    threshold: float,
+    thresholds: Dict[str, float],
 ) -> List[dict]:
     """
     Expanded FP benchmark from retrieval test images.
@@ -884,6 +1054,9 @@ def _eval_fp_expanded_from_test(
         true_label = row["label"]
         q = row["embedding"]
         qh = projected[fname]
+        is_document = bool(row.get("is_document", False))
+        bl_t = thresholds["document"] if is_document else thresholds["baseline"]
+        pe_t = thresholds["document"] if is_document else thresholds["personalized"]
 
         best_bl_sim = -1.0
         best_pe_sim = -1.0
@@ -903,8 +1076,8 @@ def _eval_fp_expanded_from_test(
                 best_pe_sim = pe_sim
                 best_pe_match = cand_name
 
-        baseline_fp = int(neg_count > 0 and best_bl_sim >= threshold)
-        personalized_fp = int(neg_count > 0 and best_pe_sim >= threshold)
+        baseline_fp = int(neg_count > 0 and best_bl_sim >= bl_t)
+        personalized_fp = int(neg_count > 0 and best_pe_sim >= pe_t)
         results.append(
             {
                 "image": fname,
@@ -918,6 +1091,12 @@ def _eval_fp_expanded_from_test(
                 "personalized_fp": personalized_fp,
                 "personalized_match": best_pe_match if personalized_fp else "",
                 "personalized_sim": round(max(best_pe_sim, 0.0), 6),
+                "distance_bucket": row.get("distance_bucket", ""),
+                "lighting_bucket": row.get("lighting_bucket", ""),
+                "cleanliness_bucket": row.get("cleanliness_bucket", ""),
+                "is_document": int(is_document),
+                "baseline_threshold_used": round(bl_t, 6),
+                "personalized_threshold_used": round(pe_t, 6),
             }
         )
     return results
@@ -927,7 +1106,9 @@ def _eval_fp_expanded_from_test(
 
 _CSV_FIELDS = [
     "image", "label", "ground_truth_distance_ft",
+    "distance_bucket", "lighting_bucket", "cleanliness_bucket", "condition_bucket", "is_document",
     "baseline_similarity", "personalized_similarity", "similarity_gap",
+    "baseline_threshold_used", "personalized_threshold_used",
     "baseline_correct", "personalized_correct",
     "dino_detected", "dino_confidence", "dino_second_pass_prompt",
     "predicted_distance_ft", "depth_absolute_error", "depth_percentage_error",
@@ -967,9 +1148,16 @@ def _merge_rows(
             "image": fname,
             "label": r["label"],
             "ground_truth_distance_ft": r["distance_ft"],
+            "distance_bucket": r.get("distance_bucket", ""),
+            "lighting_bucket": r.get("lighting_bucket", ""),
+            "cleanliness_bucket": r.get("cleanliness_bucket", ""),
+            "condition_bucket": r.get("condition_bucket", ""),
+            "is_document": int(r.get("is_document", 0)),
             "baseline_similarity": round(r["baseline_similarity"], 6),
             "personalized_similarity": round(r["personalized_similarity"], 6),
             "similarity_gap": round(r["similarity_gap"], 6),
+            "baseline_threshold_used": round(float(r.get("baseline_threshold_used", 0.0)), 6),
+            "personalized_threshold_used": round(float(r.get("personalized_threshold_used", 0.0)), 6),
             "baseline_correct": r["baseline_correct"],
             "personalized_correct": r["personalized_correct"],
             "dino_detected": d["detected"],
@@ -1050,7 +1238,7 @@ def _write_output(
     rows: List[dict],
     args: argparse.Namespace,
     final_loss: float,
-    threshold: float,
+    thresholds: Dict[str, float],
     db_set: List[str],
     train_set: List[str],
     settings: Settings,
@@ -1077,7 +1265,18 @@ def _write_output(
         "train_per_label": split_integrity.get("train_per_label"),
         "epochs": args.epochs,
         "lr": args.lr,
-        "similarity_threshold": threshold,
+        "similarity_threshold": float(round(thresholds["personalized"], 3)),
+        "similarity_thresholds": {
+            "baseline": float(round(thresholds["baseline"], 3)),
+            "personalized": float(round(thresholds["personalized"], 3)),
+            "document": float(round(thresholds["document"], 3)),
+        },
+        "threshold_overrides": {
+            "similarity_threshold": args.similarity_threshold,
+            "baseline_threshold": args.baseline_threshold,
+            "personalized_threshold": args.personalized_threshold,
+            "document_threshold": args.document_threshold,
+        },
         "darkness_threshold": settings.darkness_threshold,
         "ocr_text_likelihood_threshold": settings.ocr_text_likelihood_threshold,
         "blur_threshold": BLUR_THRESHOLD,
@@ -1108,7 +1307,136 @@ def _write_output(
             indent=2,
         )
 
+    _archive_results(
+        csv_path=csv_path,
+        json_path=json_path,
+        metadata=metadata,
+        rows=rows,
+        fp_holdout_results=fp_holdout_results,
+        fp_expanded_results=fp_expanded_results,
+        benchmark_guard=benchmark_guard,
+        threshold_tuning=threshold_tuning,
+    )
+
     print(f"\nResults written to: {csv_path}, {json_path}")
+
+
+def _archive_results(
+    csv_path: Path,
+    json_path: Path,
+    metadata: dict,
+    rows: List[dict],
+    fp_holdout_results: List[dict],
+    fp_expanded_results: List[dict],
+    benchmark_guard: dict,
+    threshold_tuning: dict,
+) -> None:
+    archive_root = _BENCHMARKS_DIR / "baselines" / "full_benchmark"
+    archive_root.mkdir(parents=True, exist_ok=True)
+    run_id_base = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    run_id = run_id_base
+    suffix = 1
+    while (archive_root / run_id).exists():
+        run_id = f"{run_id_base}_{suffix:02d}"
+        suffix += 1
+    run_dir = archive_root / run_id
+    run_dir.mkdir(parents=True, exist_ok=False)
+    shutil.copy2(csv_path, run_dir / "results.csv")
+    shutil.copy2(json_path, run_dir / "results.json")
+
+    n = max(len(rows), 1)
+    bl_acc = sum(int(r.get("baseline_correct", 0)) for r in rows) / n
+    pe_acc = sum(int(r.get("personalized_correct", 0)) for r in rows) / n
+
+    hold_n = len(fp_holdout_results)
+    hold_bl = (
+        sum(int(r.get("baseline_fp", 0)) for r in fp_holdout_results) / max(hold_n, 1)
+        if hold_n > 0 else None
+    )
+    hold_pe = (
+        sum(int(r.get("personalized_fp", 0)) for r in fp_holdout_results) / max(hold_n, 1)
+        if hold_n > 0 else None
+    )
+
+    exp_n = len(fp_expanded_results)
+    exp_bl = (
+        sum(int(r.get("baseline_fp", 0)) for r in fp_expanded_results) / max(exp_n, 1)
+        if exp_n > 0 else None
+    )
+    exp_pe = (
+        sum(int(r.get("personalized_fp", 0)) for r in fp_expanded_results) / max(exp_n, 1)
+        if exp_n > 0 else None
+    )
+
+    if benchmark_guard.get("enabled"):
+        good_run = bool(benchmark_guard.get("passed"))
+    else:
+        target_fp = float((threshold_tuning or {}).get("target_holdout_fp", 0.40))
+        good_run = pe_acc >= bl_acc and (hold_pe is None or hold_pe <= target_fp)
+    quality_label = "good" if good_run else "review"
+
+    summary = {
+        "run_id": run_id,
+        "timestamp": metadata.get("timestamp"),
+        "quality_label": quality_label,
+        "good_run": bool(good_run),
+        "selection_reason": (threshold_tuning or {}).get("selection_reason", ""),
+        "thresholds": metadata.get("similarity_thresholds", {}),
+        "accuracy_baseline_pct": round(bl_acc * 100.0, 3),
+        "accuracy_personalized_pct": round(pe_acc * 100.0, 3),
+        "fp_holdout_baseline_pct": round(hold_bl * 100.0, 3) if hold_bl is not None else None,
+        "fp_holdout_personalized_pct": round(hold_pe * 100.0, 3) if hold_pe is not None else None,
+        "fp_expanded_baseline_pct": round(exp_bl * 100.0, 3) if exp_bl is not None else None,
+        "fp_expanded_personalized_pct": round(exp_pe * 100.0, 3) if exp_pe is not None else None,
+        "benchmark_guard_passed": bool((benchmark_guard or {}).get("passed", False)),
+        "benchmark_guard_enabled": bool((benchmark_guard or {}).get("enabled", False)),
+    }
+    with open(run_dir / "summary.json", "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+
+    index_path = archive_root / "run_index.csv"
+    index_fields = [
+        "run_id",
+        "timestamp",
+        "quality_label",
+        "good_run",
+        "selection_reason",
+        "threshold_baseline",
+        "threshold_personalized",
+        "threshold_document",
+        "accuracy_baseline_pct",
+        "accuracy_personalized_pct",
+        "fp_holdout_baseline_pct",
+        "fp_holdout_personalized_pct",
+        "fp_expanded_baseline_pct",
+        "fp_expanded_personalized_pct",
+        "benchmark_guard_enabled",
+        "benchmark_guard_passed",
+    ]
+    row = {
+        "run_id": run_id,
+        "timestamp": metadata.get("timestamp", ""),
+        "quality_label": quality_label,
+        "good_run": int(bool(good_run)),
+        "selection_reason": (threshold_tuning or {}).get("selection_reason", ""),
+        "threshold_baseline": metadata.get("similarity_thresholds", {}).get("baseline", ""),
+        "threshold_personalized": metadata.get("similarity_thresholds", {}).get("personalized", ""),
+        "threshold_document": metadata.get("similarity_thresholds", {}).get("document", ""),
+        "accuracy_baseline_pct": round(bl_acc * 100.0, 3),
+        "accuracy_personalized_pct": round(pe_acc * 100.0, 3),
+        "fp_holdout_baseline_pct": round(hold_bl * 100.0, 3) if hold_bl is not None else "",
+        "fp_holdout_personalized_pct": round(hold_pe * 100.0, 3) if hold_pe is not None else "",
+        "fp_expanded_baseline_pct": round(exp_bl * 100.0, 3) if exp_bl is not None else "",
+        "fp_expanded_personalized_pct": round(exp_pe * 100.0, 3) if exp_pe is not None else "",
+        "benchmark_guard_enabled": int(bool((benchmark_guard or {}).get("enabled", False))),
+        "benchmark_guard_passed": int(bool((benchmark_guard or {}).get("passed", False))),
+    }
+    write_header = not index_path.exists()
+    with open(index_path, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=index_fields)
+        if write_header:
+            writer.writeheader()
+        writer.writerow(row)
 
 
 def _pct(value: float) -> float:
@@ -1260,7 +1588,7 @@ def _print_summary(
     dino: Dict[str, dict],
     depth: Dict[str, dict],
     final_loss: float,
-    threshold: float,
+    thresholds: Dict[str, float],
     no_depth: bool,
     fp_holdout_results: List[dict],
     fp_expanded_results: List[dict],
@@ -1292,7 +1620,12 @@ def _print_summary(
     gap_sign = "+" if mean_gap >= 0 else ""
 
     print("\n=== Benchmark Summary ===")
-    print(f"Similarity threshold: {threshold:.2f}  (production value)")
+    print(
+        "Similarity thresholds: "
+        f"baseline={thresholds['baseline']:.2f}, "
+        f"personalized={thresholds['personalized']:.2f}, "
+        f"document={thresholds['document']:.2f}"
+    )
     print(f"Test images:          {n}")
     print()
     print("--- Retrieval ---")
@@ -1391,21 +1724,38 @@ def main() -> None:
     sweep_max = _validate_similarity_threshold(float(args.threshold_sweep_max), "threshold sweep maximum")
     if float(args.threshold_sweep_step) <= 0:
         raise ValueError(f"threshold sweep step must be > 0, got {args.threshold_sweep_step}")
-    base_threshold = (
-        float(args.similarity_threshold)
-        if args.similarity_threshold is not None
-        else settings.similarity_threshold
-    )
-    threshold = _validate_similarity_threshold(
-        base_threshold,
-        "manual similarity threshold" if args.similarity_threshold is not None else "settings similarity threshold",
-    )
+    if args.similarity_threshold is not None:
+        legacy_threshold = _validate_similarity_threshold(
+            float(args.similarity_threshold),
+            "manual similarity threshold",
+        )
+        thresholds: Dict[str, float] = {
+            "baseline": legacy_threshold,
+            "personalized": legacy_threshold,
+            "document": legacy_threshold,
+        }
+    else:
+        thresholds = {
+            "baseline": _validate_similarity_threshold(
+                float(settings.get_similarity_threshold_baseline()),
+                "settings baseline similarity threshold",
+            ),
+            "personalized": _validate_similarity_threshold(
+                float(settings.get_similarity_threshold_personalized()),
+                "settings personalized similarity threshold",
+            ),
+            "document": _validate_similarity_threshold(
+                float(settings.get_similarity_threshold_document()),
+                "settings document similarity threshold",
+            ),
+        }
     monitor = MemoryMonitor()
 
     print(f"Dataset: {args.dataset}")
     print(f"Images:  {args.images}")
     print(f"Depth checkpoint: {depth_checkpoint}")
-    print(f"Thresholds: similarity={threshold:.3f}, darkness={settings.darkness_threshold:.1f}, "
+    print(f"Thresholds: baseline={thresholds['baseline']:.3f}, personalized={thresholds['personalized']:.3f}, "
+          f"document={thresholds['document']:.3f}, darkness={settings.darkness_threshold:.1f}, "
           f"ocr_text_likelihood={settings.ocr_text_likelihood_threshold:.2f}, "
           f"blur={BLUR_THRESHOLD:.1f}")
 
@@ -1417,6 +1767,14 @@ def main() -> None:
     if not embedded:
         print("No images found. Check --images path.", file=sys.stderr)
         sys.exit(1)
+    for fname, row in embedded.items():
+        buckets = _condition_buckets(
+            image_name=fname,
+            distance_ft=float(row.get("distance_ft", 0.0)),
+            is_dark=bool(row.get("is_dark", False)),
+        )
+        row.update(buckets)
+        row["is_document"] = _is_document_like(str(row.get("label", "")), str(row.get("dino_prompt", "")))
 
     # Phase 2: Split
     _enforce_memory_guard(monitor, "phase 2")
@@ -1456,6 +1814,24 @@ def main() -> None:
         print(f"  wrote split manifest: {manifest_path}")
     train_labels = sorted({embedded[f]["label"] for f in train_set})
     test_labels = sorted({embedded[f]["label"] for f in test_set})
+    file_overlap = sorted(set(train_set).intersection(test_set))
+    db_not_in_train = sorted(set(db_set).difference(train_set))
+    db_in_test = sorted(set(db_set).intersection(test_set))
+    if file_overlap:
+        raise ValueError(
+            "split leakage detected: train/test image overlap found "
+            f"({len(file_overlap)} files)"
+        )
+    if db_not_in_train:
+        raise ValueError(
+            "split integrity error: DB includes images not present in train split "
+            f"({len(db_not_in_train)} files)"
+        )
+    if db_in_test:
+        raise ValueError(
+            "split leakage detected: DB contains test images "
+            f"({len(db_in_test)} files)"
+        )
     split_integrity = {
         "strategy": "fixed_60_60_label_balanced_seeded",
         "manifest_path": str(manifest_path),
@@ -1469,6 +1845,9 @@ def main() -> None:
         "test_labels": test_labels,
         "label_overlap": sorted(set(train_labels).intersection(test_labels)),
         "db_labels": sorted({embedded[f]["label"] for f in db_set}),
+        "train_test_file_overlap_count": len(file_overlap),
+        "db_not_in_train_count": len(db_not_in_train),
+        "db_in_test_count": len(db_in_test),
     }
     print(
         f"  db (teach): {len(db_set)}, triplet train: {len(train_set)}, "
@@ -1510,22 +1889,50 @@ def main() -> None:
     threshold_sweep: List[dict] = []
     threshold_tuning: dict = {}
     similarity_stats = _build_similarity_stats(test_set, embedded, database, head)
-    if args.similarity_threshold is not None:
+    if (
+        args.similarity_threshold is not None
+        or args.baseline_threshold is not None
+        or args.personalized_threshold is not None
+        or args.document_threshold is not None
+    ):
+        if args.baseline_threshold is not None:
+            thresholds["baseline"] = _validate_similarity_threshold(float(args.baseline_threshold), "manual baseline threshold")
+        if args.personalized_threshold is not None:
+            thresholds["personalized"] = _validate_similarity_threshold(
+                float(args.personalized_threshold), "manual personalized threshold"
+            )
+        if args.document_threshold is not None:
+            thresholds["document"] = _validate_similarity_threshold(float(args.document_threshold), "manual document threshold")
         threshold_tuning = {
             "selection_reason": "manual_override",
-            "selected_threshold": float(round(threshold, 3)),
+            "selected_thresholds": {
+                "baseline": float(round(thresholds["baseline"], 3)),
+                "personalized": float(round(thresholds["personalized"], 3)),
+                "document": float(round(thresholds["document"], 3)),
+            },
             "manual_override": True,
         }
-        threshold_sweep = [
-            _metrics_at_threshold(stats=similarity_stats, threshold=t)
-            for t in [
-                _validate_similarity_threshold(float(round(v, 3)), "threshold sweep candidate")
-                for v in np.arange(sweep_min, sweep_max + 1e-9, args.threshold_sweep_step)
-            ]
+        candidates = [
+            _validate_similarity_threshold(float(round(v, 3)), "threshold sweep candidate")
+            for v in np.arange(sweep_min, sweep_max + 1e-9, args.threshold_sweep_step)
         ]
-        print(f"  using manual similarity threshold override: {threshold:.3f}")
+        threshold_sweep = [
+            _metrics_at_threshold(
+                stats=similarity_stats,
+                baseline_threshold=t,
+                personalized_threshold=t,
+                document_threshold=t,
+            )
+            for t in candidates
+        ]
+        print(
+            "  using manual threshold override: "
+            f"baseline={thresholds['baseline']:.3f}, "
+            f"personalized={thresholds['personalized']:.3f}, "
+            f"document={thresholds['document']:.3f}"
+        )
     else:
-        threshold, threshold_sweep, threshold_tuning = _tune_threshold_with_holdout(
+        thresholds, threshold_sweep, threshold_tuning = _tune_threshold_with_holdout(
             stats=similarity_stats,
             floor=sweep_min,
             ceiling=sweep_max,
@@ -1534,14 +1941,17 @@ def main() -> None:
             min_personalized_accuracy=float(args.min_personalized_accuracy),
         )
         print(
-            f"  tuned similarity threshold from sweep: {threshold:.3f} "
+            "  tuned thresholds from sweep: "
+            f"baseline={thresholds['baseline']:.3f}, "
+            f"personalized={thresholds['personalized']:.3f}, "
+            f"document={thresholds['document']:.3f} "
             f"(reason={threshold_tuning.get('selection_reason', 'unknown')})"
         )
 
     # Phase 5: Retrieval
     _enforce_memory_guard(monitor, "phase 5")
     print("\n[5/7] Evaluating retrieval (3ft/6ft test set against 1ft_bright_clean DB)...")
-    retrieval_results = _eval_retrieval(test_set, embedded, database, head, threshold, monitor=monitor)
+    retrieval_results = _eval_retrieval(test_set, embedded, database, head, thresholds, monitor=monitor)
 
     # Phase 6: Detection
     _enforce_memory_guard(monitor, "phase 6")
@@ -1564,12 +1974,12 @@ def main() -> None:
     fp_holdout_results: List[dict] = []
     if not args.no_fp_holdout_tests:
         print("\n[fp] Evaluating 60-case holdout FP tests from detection split...")
-        fp_holdout_results = _eval_fp_holdout_from_test(test_set, embedded, database, head, threshold)
+        fp_holdout_results = _eval_fp_holdout_from_test(test_set, embedded, database, head, thresholds)
         print(f"  {len(fp_holdout_results)} holdout FP cases evaluated")
     fp_expanded_results: List[dict] = []
     if not args.no_fp_expanded_tests:
         print("\n[fp] Evaluating expanded FP tests against all other-label samples...")
-        fp_expanded_results = _eval_fp_expanded_from_test(test_set, embedded, head, threshold)
+        fp_expanded_results = _eval_fp_expanded_from_test(test_set, embedded, head, thresholds)
         if fp_expanded_results:
             avg_neg = sum(int(r.get("negative_pool_size", 0)) for r in fp_expanded_results) / len(fp_expanded_results)
             print(f"  {len(fp_expanded_results)} expanded FP cases evaluated (avg negatives/query: {avg_neg:.1f})")
@@ -1592,12 +2002,12 @@ def main() -> None:
         max_fn_increase_pp=args.max_fn_increase_pp,
     )
     _print_summary(retrieval_results, dino_results, depth_results,
-                   final_loss, threshold, args.no_depth, fp_holdout_results, fp_expanded_results)
+                   final_loss, thresholds, args.no_depth, fp_holdout_results, fp_expanded_results)
     _write_output(
         merged,
         args,
         final_loss,
-        threshold,
+        thresholds,
         db_set,
         train_set,
         settings,

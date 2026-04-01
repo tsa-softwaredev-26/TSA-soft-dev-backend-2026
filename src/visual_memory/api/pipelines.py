@@ -85,7 +85,16 @@ def _apply_persisted_ml_settings():
         "min_feedback_for_training": int,
         "projection_head_weight": float,
         "projection_head_ramp_at": int,
+        "projection_head_ramp_power": float,
         "projection_head_epochs": int,
+        "triplet_margin": float,
+        "triplet_positive_weight": float,
+        "triplet_negative_weight": float,
+        "triplet_hard_negative_boost": float,
+        "similarity_threshold": float,
+        "similarity_threshold_baseline": float,
+        "similarity_threshold_personalized": float,
+        "similarity_threshold_document": float,
     }
     for key, cast in _PATCHABLE_TYPES.items():
         if key in saved:
@@ -94,4 +103,8 @@ def _apply_persisted_ml_settings():
             except (TypeError, ValueError):
                 pass
     pipeline.set_enable_learning(s.enable_learning)
-    pipeline.set_head_weight(s.projection_head_weight, s.projection_head_ramp_at)
+    pipeline.set_head_weight(
+        s.projection_head_weight,
+        s.projection_head_ramp_at,
+        s.projection_head_ramp_power,
+    )

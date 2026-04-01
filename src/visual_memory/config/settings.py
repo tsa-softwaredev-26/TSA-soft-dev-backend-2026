@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 import os
+from typing import Optional
 
 
 @dataclass
@@ -20,7 +21,10 @@ class Settings:
     embedder_model: str = "openai/clip-vit-base-patch32"
 
     # Similarity matching (scan mode)
-    similarity_threshold: float = 0.14
+    similarity_threshold: float = 0.79
+    similarity_threshold_baseline: Optional[float] = None
+    similarity_threshold_personalized: Optional[float] = None
+    similarity_threshold_document: Optional[float] = None
     dedup_iou_threshold: float = 0.5
 
     # Narration (scan mode)
@@ -107,8 +111,21 @@ class Settings:
     projection_head_weight: float = 1.0
     # triplet count at which projection_head_weight is fully reached (linear ramp from 0)
     projection_head_ramp_at: int = 50
+    # ramp curve power for projection head blend progression:
+    # alpha = projection_head_weight * (progress ** projection_head_ramp_power),
+    # where progress = clamp(triplet_count / projection_head_ramp_at, 0..1).
+    # 1.0 = linear, >1.0 = slower early ramp, <1.0 = faster early ramp.
+    projection_head_ramp_power: float = 1.0
     # training epochs for each /retrain call
     projection_head_epochs: int = 20
+    # Triplet loss parameters for projection head training.
+    # Defaults preserve current behavior.
+    triplet_margin: float = 0.2
+    triplet_positive_weight: float = 1.0
+    triplet_negative_weight: float = 1.0
+    # Optional emphasis on hard negatives (negatives too close to anchor).
+    # 0.0 disables emphasis.
+    triplet_hard_negative_boost: float = 0.0
 
     # Ollama LLM (used by /ask and /item/ask for query parsing, and remember mode
     # enhanced second-pass detection prompt generation)
@@ -134,6 +151,21 @@ class Settings:
         if mode == "accurate":
             return self.ollama_model_accurate
         return self.ollama_model_balanced
+
+    def get_similarity_threshold_baseline(self) -> float:
+        if self.similarity_threshold_baseline is not None:
+            return float(self.similarity_threshold_baseline)
+        return float(self.similarity_threshold)
+
+    def get_similarity_threshold_personalized(self) -> float:
+        if self.similarity_threshold_personalized is not None:
+            return float(self.similarity_threshold_personalized)
+        return self.get_similarity_threshold_baseline()
+
+    def get_similarity_threshold_document(self) -> float:
+        if self.similarity_threshold_document is not None:
+            return float(self.similarity_threshold_document)
+        return self.get_similarity_threshold_baseline()
 
     # Whisper speech recognition (voice input)
     whisper_model: str = "openai/whisper-large-v3-turbo"

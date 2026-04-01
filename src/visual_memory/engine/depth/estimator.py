@@ -8,6 +8,7 @@ Instantiate once per process via model_registry.
 from __future__ import annotations
 
 import dataclasses
+import os
 from pathlib import Path
 
 import torch
@@ -15,9 +16,15 @@ import depth_pro
 from depth_pro.depth_pro import DEFAULT_MONODEPTH_CONFIG_DICT
 from PIL import Image
 
-# Absolute path to the checkpoint; resolved at import time from this file's location,
-# so it works regardless of the current working directory or platform.
-_CHECKPOINT_PATH = Path(__file__).resolve().parents[4] / "checkpoints" / "depth_pro.pt"
+# Absolute default checkpoint path; can be overridden via DEPTH_CHECKPOINT_PATH.
+_DEFAULT_CHECKPOINT_PATH = Path(__file__).resolve().parents[4] / "checkpoints" / "depth_pro.pt"
+
+
+def _checkpoint_path() -> Path:
+    override = os.environ.get("DEPTH_CHECKPOINT_PATH", "").strip()
+    if override:
+        return Path(override).expanduser()
+    return _DEFAULT_CHECKPOINT_PATH
 
 CONFIDENCE_HIGH = 0.6
 
@@ -47,7 +54,7 @@ class DepthEstimator:
         from visual_memory.utils.device_utils import get_device
         self.device = torch.device(get_device())
 
-        config = dataclasses.replace(DEFAULT_MONODEPTH_CONFIG_DICT, checkpoint_uri=str(_CHECKPOINT_PATH))
+        config = dataclasses.replace(DEFAULT_MONODEPTH_CONFIG_DICT, checkpoint_uri=str(_checkpoint_path()))
         self.model, self.transform = depth_pro.create_model_and_transforms(config=config, device=self.device)
         self.model.eval()
 
@@ -67,7 +74,7 @@ class DepthEstimator:
 
     def estimate(self, image: Image.Image, focal_length_px: float = None) -> torch.Tensor:
         # focal_length_px from Android: (focalLengthMm / sensorWidthMm) * imageWidthPx
-        # None = Depth Pro infers (~75% error vs ~26% calibrated at close range)
+        # None = Depth Pro infers (~75% error vs ~26% calibrated at close range per our testing)
         # Call once per query image; reuse depth_map for all matched objects
         # depth_pro.load_rgb expects a file path, so we use transform directly on the PIL image
         image_tensor = self.transform(image).to(self.device)

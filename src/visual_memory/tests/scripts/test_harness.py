@@ -113,6 +113,7 @@ class StubScanPipeline:
     _enable_learning: bool = True
     _head_weight: float = 1.0
     _head_ramp_at: int = 50
+    _head_ramp_power: float = 1.0
     _triplet_count: int = 0
     _head_trained: bool = False
 
@@ -127,9 +128,10 @@ class StubScanPipeline:
     def set_enable_learning(self, v: bool) -> None:
         self._enable_learning = v
 
-    def set_head_weight(self, w: float, r: int) -> None:
+    def set_head_weight(self, w: float, r: int, rp: float = 1.0) -> None:
         self._head_weight = w
         self._head_ramp_at = r
+        self._head_ramp_power = rp
 
     def set_triplet_count(self, c: int) -> None:
         self._triplet_count = int(max(0, c))
@@ -140,7 +142,8 @@ class StubScanPipeline:
             return emb
         alpha = min(
             self._head_weight,
-            self._head_weight * self._triplet_count / max(self._head_ramp_at, 1),
+            self._head_weight
+            * (min(1.0, self._triplet_count / max(self._head_ramp_at, 1)) ** max(self._head_ramp_power, 0.01)),
         )
         if alpha <= 0.0:
             return emb

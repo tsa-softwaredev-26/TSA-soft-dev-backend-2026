@@ -27,7 +27,11 @@ def test_get_settings_fields():
     assert_status(resp, 200)
     data = resp.get_json()
     for field in ("enable_learning", "min_feedback_for_training", "projection_head_weight",
-                  "projection_head_ramp_at", "projection_head_epochs",
+                  "projection_head_ramp_at", "projection_head_ramp_power", "projection_head_epochs",
+                  "triplet_margin", "triplet_positive_weight", "triplet_negative_weight",
+                  "triplet_hard_negative_boost", "similarity_threshold",
+                  "similarity_threshold_baseline", "similarity_threshold_personalized",
+                  "similarity_threshold_document",
                   "head_trained", "triplet_count", "feedback_counts"):
         assert field in data, f"missing field: {field}"
 
@@ -66,6 +70,71 @@ def test_patch_settings_valid_head_weight():
     assert_status(resp, 200)
     data = resp.get_json()
     assert data.get("projection_head_weight") == 0.5
+
+
+def test_patch_settings_valid_new_ml_fields():
+    payload = {
+        "projection_head_ramp_power": 1.5,
+        "triplet_margin": 0.3,
+        "triplet_positive_weight": 1.2,
+        "triplet_negative_weight": 0.9,
+        "triplet_hard_negative_boost": 0.25,
+    }
+    resp = client.patch("/settings", json=payload)
+    assert_status(resp, 200)
+    data = resp.get_json()
+    for key, value in payload.items():
+        assert data.get(key) == value
+
+
+def test_patch_settings_invalid_new_ml_fields():
+    resp = client.patch("/settings", json={"projection_head_ramp_power": 0.0})
+    assert_status(resp, 400)
+    resp = client.patch("/settings", json={"triplet_positive_weight": 0.0})
+    assert_status(resp, 400)
+    resp = client.patch("/settings", json={"triplet_negative_weight": -1.0})
+    assert_status(resp, 400)
+    resp = client.patch("/settings", json={"triplet_hard_negative_boost": -0.1})
+    assert_status(resp, 400)
+
+
+def test_patch_settings_persists_new_ml_fields():
+    payload = {
+        "projection_head_ramp_power": 1.25,
+        "triplet_margin": 0.25,
+        "triplet_positive_weight": 1.1,
+        "triplet_negative_weight": 1.05,
+        "triplet_hard_negative_boost": 0.1,
+    }
+    resp = client.patch("/settings", json=payload)
+    assert_status(resp, 200)
+    saved = db.load_ml_settings() or {}
+    for key, value in payload.items():
+        assert saved.get(key) == value
+
+
+def test_patch_settings_similarity_thresholds():
+    payload = {
+        "similarity_threshold": 0.71,
+        "similarity_threshold_baseline": 0.72,
+        "similarity_threshold_personalized": 0.73,
+        "similarity_threshold_document": 0.74,
+    }
+    resp = client.patch("/settings", json=payload)
+    assert_status(resp, 200)
+    data = resp.get_json()
+    for key, value in payload.items():
+        assert data.get(key) == value
+    saved = db.load_ml_settings() or {}
+    for key, value in payload.items():
+        assert saved.get(key) == value
+
+
+def test_patch_settings_invalid_similarity_threshold():
+    resp = client.patch("/settings", json={"similarity_threshold_document": 1.1})
+    assert_status(resp, 400)
+    data = resp.get_json()
+    assert "errors" in data
 
 
 def test_patch_settings_invalid_json():
@@ -154,6 +223,11 @@ for name, fn in [
     ("settings:patch_invalid_min_feedback", test_patch_settings_invalid_min_feedback),
     ("settings:patch_unrecognized_field_ignored", test_patch_settings_unrecognized_field_ignored),
     ("settings:patch_valid_head_weight", test_patch_settings_valid_head_weight),
+    ("settings:patch_valid_new_ml_fields", test_patch_settings_valid_new_ml_fields),
+    ("settings:patch_invalid_new_ml_fields", test_patch_settings_invalid_new_ml_fields),
+    ("settings:patch_persists_new_ml_fields", test_patch_settings_persists_new_ml_fields),
+    ("settings:patch_similarity_thresholds", test_patch_settings_similarity_thresholds),
+    ("settings:patch_invalid_similarity_threshold", test_patch_settings_invalid_similarity_threshold),
     ("settings:patch_invalid_json", test_patch_settings_invalid_json),
     ("user_settings:get_fields", test_get_user_settings_fields),
     ("user_settings:patch_performance_mode", test_patch_user_settings_performance_mode),

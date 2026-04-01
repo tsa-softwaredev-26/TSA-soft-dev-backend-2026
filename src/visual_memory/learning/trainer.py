@@ -20,18 +20,36 @@ def triplet_loss(
     positive: torch.Tensor,
     negative: torch.Tensor,
     margin: float = 0.2,
+    positive_weight: float = 1.0,
+    negative_weight: float = 1.0,
+    hard_negative_boost: float = 0.0,
 ) -> torch.Tensor:
     pos_dist = 1.0 - F.cosine_similarity(anchor, positive)
     neg_dist = 1.0 - F.cosine_similarity(anchor, negative)
-    return F.relu(pos_dist - neg_dist + margin).mean()
+    hard_neg = F.relu(margin - neg_dist)
+    weighted_pos = positive_weight * pos_dist
+    weighted_neg = negative_weight * neg_dist
+    return F.relu(weighted_pos - weighted_neg + margin + hard_negative_boost * hard_neg).mean()
 
 
 class ProjectionTrainer:
-    def __init__(self, head: ProjectionHead, lr: float = 1e-4):
+    def __init__(
+        self,
+        head: ProjectionHead,
+        lr: float = 1e-4,
+        triplet_margin: float = 0.2,
+        triplet_positive_weight: float = 1.0,
+        triplet_negative_weight: float = 1.0,
+        triplet_hard_negative_boost: float = 0.0,
+    ):
         self.head = head
         self.optimizer = torch.optim.Adam(
             head.parameters(), lr=lr, weight_decay=1e-4
         )
+        self.triplet_margin = float(triplet_margin)
+        self.triplet_positive_weight = float(triplet_positive_weight)
+        self.triplet_negative_weight = float(triplet_negative_weight)
+        self.triplet_hard_negative_boost = float(triplet_hard_negative_boost)
 
     def train_step(
         self,
@@ -46,6 +64,10 @@ class ProjectionTrainer:
             self.head(anchor),
             self.head(positive),
             self.head(negative),
+            margin=self.triplet_margin,
+            positive_weight=self.triplet_positive_weight,
+            negative_weight=self.triplet_negative_weight,
+            hard_negative_boost=self.triplet_hard_negative_boost,
         ) * weight
         loss.backward()
         self.optimizer.step()
@@ -111,7 +133,7 @@ def _build_parser(settings: Settings) -> argparse.ArgumentParser:
     parser.add_argument(
         "--feedback-dir",
         default=None,
-        help="Deprecated legacy option. Feedback is loaded from --db-path.",
+        help="Deprecated option. Use --db-path only.",
     )
     return parser
 
@@ -121,7 +143,8 @@ def main() -> int:
     args = _build_parser(settings).parse_args()
 
     if args.feedback_dir:
-        print("warning: --feedback-dir is deprecated and ignored; using --db-path")
+        print("error: --feedback-dir has been removed. Use --db-path for feedback storage.")
+        return 2
 
     db = DatabaseStore(args.db_path)
     store = FeedbackStore(db)
@@ -136,7 +159,14 @@ def main() -> int:
         return 1
 
     head = ProjectionHead(dim=args.dim)
-    trainer = ProjectionTrainer(head, lr=args.lr)
+    trainer = ProjectionTrainer(
+        head,
+        lr=args.lr,
+        triplet_margin=settings.triplet_margin,
+        triplet_positive_weight=settings.triplet_positive_weight,
+        triplet_negative_weight=settings.triplet_negative_weight,
+        triplet_hard_negative_boost=settings.triplet_hard_negative_boost,
+    )
     final_loss = trainer.train(triplets, epochs=args.epochs)
     trainer.save(Path(args.output))
 

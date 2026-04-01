@@ -47,6 +47,22 @@ def test_triplet_loss_nonzero():
     assert loss > 0.0, f"loss={loss:.4f}, expected >0.0"
 
 
+def test_triplet_loss_weighting_and_boost_nonnegative():
+    a = torch.randn(1, 64)
+    p = torch.randn(1, 64)
+    n = torch.randn(1, 64)
+    loss = triplet_loss(
+        a,
+        p,
+        n,
+        margin=0.2,
+        positive_weight=1.2,
+        negative_weight=0.9,
+        hard_negative_boost=0.5,
+    ).item()
+    assert loss >= 0.0, f"loss={loss:.6f}, expected >= 0.0"
+
+
 # Test 4: FeedbackStore roundtrip
 
 def test_feedback_store_roundtrip():
@@ -95,6 +111,7 @@ if __name__ == "__main__":
         ("projection:identity_at_init", test_identity_at_init),
         ("projection:triplet_loss_zero", test_triplet_loss_zero),
         ("projection:triplet_loss_nonzero", test_triplet_loss_nonzero),
+        ("projection:triplet_loss_weighting_and_boost_nonnegative", test_triplet_loss_weighting_and_boost_nonnegative),
         ("projection:feedback_store_roundtrip", test_feedback_store_roundtrip),
         ("projection:trainer_loss_decreases", test_trainer_loss_decreases),
     ]:

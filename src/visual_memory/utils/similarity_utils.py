@@ -1,10 +1,18 @@
 """Similarity utilities for embedding search and box filtering."""
 
-from typing import Optional, Tuple, List, Dict, Any
+from typing import Optional, Tuple, List, Dict, Any, Callable
 import torch
 import torch.nn as nn
+import re
 
 _cos_sim = nn.CosineSimilarity(dim=1, eps=1e-8)
+_DOCUMENT_LABEL_PATTERN = re.compile(
+    r"\b("
+    r"receipt|document|invoice|bill|statement|form|contract|letter|memo|note|"
+    r"paper|passport|license|id|card|menu|ticket|coupon|label|text"
+    r")s?\b",
+    flags=re.IGNORECASE,
+)
 
 def cosine_similarity(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     """Return cosine similarity between two (1, dim) tensors."""
@@ -39,6 +47,41 @@ def find_match(
         return None, 0.0
 
     return best_path, best_similarity.item()
+
+
+def find_match_dynamic_threshold(
+    query_embedding: torch.Tensor,
+    database_embeddings: List[Tuple[str, torch.Tensor]],
+    threshold_for_path: Callable[[str], float],
+) -> Tuple[Optional[str], float]:
+    """Return best match where each candidate can have its own threshold."""
+    if not database_embeddings:
+        return None, 0.0
+
+    best_path = None
+    best_similarity = -1.0
+
+    for path, db_embedding in database_embeddings:
+        threshold = float(threshold_for_path(path))
+        if not 0.0 <= threshold <= 1.0:
+            raise ValueError("Threshold must be between 0 and 1.")
+        sim = float(cosine_similarity(query_embedding, db_embedding))
+        if sim >= threshold and sim > best_similarity:
+            best_similarity = sim
+            best_path = path
+
+    if best_path is None:
+        return None, 0.0
+
+    return best_path, best_similarity
+
+
+def is_document_like_label(label: str) -> bool:
+    """Return True when label likely refers to a document/text-heavy object."""
+    if not label:
+        return False
+    normalized = str(label).replace("_", " ").replace("-", " ")
+    return _DOCUMENT_LABEL_PATTERN.search(normalized) is not None
 
 def iou(box1: List[float], box2: List[float]) -> float:
     """Compute Intersection-over-Union between two boxes."""
