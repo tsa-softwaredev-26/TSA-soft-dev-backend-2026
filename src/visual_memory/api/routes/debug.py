@@ -65,6 +65,10 @@ _ML_PATCHABLE = [
     "projection_head_ramp_power", "projection_head_epochs",
     "triplet_margin", "triplet_positive_weight",
     "triplet_negative_weight", "triplet_hard_negative_boost",
+    "similarity_threshold", "similarity_threshold_baseline",
+    "similarity_threshold_personalized", "similarity_threshold_document",
+    "scan_similarity_margin", "scan_similarity_margin_document",
+    "remember_max_prototypes_per_label",
 ]
 
 

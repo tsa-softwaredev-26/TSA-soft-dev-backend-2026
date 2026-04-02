@@ -173,6 +173,29 @@ def test_delete_items_by_label():
     assert db.get_all_items() == []
 
 
+def test_prune_items_by_label_max_count_keeps_newest():
+    db, _ = _make_db()
+    db.add_item(label="wallet", combined_embedding=make_embedding(0), confidence=0.8, timestamp=1.0)
+    db.add_item(label="wallet", combined_embedding=make_embedding(1), confidence=0.7, timestamp=2.0)
+    db.add_item(label="wallet", combined_embedding=make_embedding(2), confidence=0.6, timestamp=3.0)
+    pruned = db.prune_items_by_label_max_count("wallet", 2)
+    assert pruned == 1
+    items = db.get_items_metadata(label="wallet")
+    assert len(items) == 2
+    kept_timestamps = sorted(i["timestamp"] for i in items)
+    assert kept_timestamps == [2.0, 3.0]
+
+
+def test_prune_items_by_label_max_count_invalid_limit():
+    db, _ = _make_db()
+    db.add_item(label="wallet", combined_embedding=make_embedding(0), confidence=0.8, timestamp=1.0)
+    try:
+        db.prune_items_by_label_max_count("wallet", 0)
+        raise AssertionError("Expected ValueError for invalid max_count")
+    except ValueError:
+        pass
+
+
 def test_get_items_metadata_filter():
     db, _ = _make_db()
     db.add_item(label="wallet", combined_embedding=make_embedding(0), confidence=0.8, timestamp=time.time())
@@ -217,6 +240,8 @@ for name, fn in [
     ("db:add_feedback_and_count", test_add_feedback_and_count),
     ("db:load_feedback_triplets", test_load_feedback_triplets),
     ("db:delete_items_by_label", test_delete_items_by_label),
+    ("db:prune_items_by_label_max_count", test_prune_items_by_label_max_count_keeps_newest),
+    ("db:prune_items_by_label_invalid_limit", test_prune_items_by_label_max_count_invalid_limit),
     ("db:get_items_metadata_filter", test_get_items_metadata_filter),
     ("db:get_known_item_labels", test_get_known_item_labels_includes_items_and_sightings),
     ("db:get_recent_room_names", test_get_recent_room_names_unique_sorted),

@@ -53,27 +53,37 @@ def find_match_dynamic_threshold(
     query_embedding: torch.Tensor,
     database_embeddings: List[Tuple[str, torch.Tensor]],
     threshold_for_path: Callable[[str], float],
-) -> Tuple[Optional[str], float]:
-    """Return best match where each candidate can have its own threshold."""
+    margin_for_path: Optional[Callable[[str], float]] = None,
+) -> Tuple[Optional[str], float, float]:
+    """Return best match where each candidate can have its own threshold and top1-top2 margin."""
     if not database_embeddings:
-        return None, 0.0
+        return None, 0.0, 0.0
 
-    best_path = None
-    best_similarity = -1.0
+    ranked: List[Tuple[float, str, float, float]] = []
 
     for path, db_embedding in database_embeddings:
         threshold = float(threshold_for_path(path))
         if not 0.0 <= threshold <= 1.0:
             raise ValueError("Threshold must be between 0 and 1.")
+        margin = float(margin_for_path(path)) if margin_for_path is not None else 0.0
+        if margin < 0.0:
+            raise ValueError("Margin must be >= 0.")
         sim = float(cosine_similarity(query_embedding, db_embedding))
-        if sim >= threshold and sim > best_similarity:
-            best_similarity = sim
-            best_path = path
+        ranked.append((sim, path, threshold, margin))
 
-    if best_path is None:
-        return None, 0.0
+    eligible = [row for row in ranked if row[0] >= row[2]]
+    if not eligible:
+        return None, 0.0, 0.0
 
-    return best_path, best_similarity
+    eligible.sort(key=lambda row: row[0], reverse=True)
+    best_similarity, best_path, _best_threshold, best_margin = eligible[0]
+    second_similarity = max((row[0] for row in ranked if row[1] != best_path), default=0.0)
+    similarity_margin = best_similarity - second_similarity
+
+    if similarity_margin < best_margin:
+        return None, 0.0, similarity_margin
+
+    return best_path, best_similarity, similarity_margin
 
 
 def is_document_like_label(label: str) -> bool:

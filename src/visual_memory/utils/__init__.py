@@ -1,4 +1,4 @@
-from .image_utils import crop_object, load_image, load_folder_images
+from .image_utils import crop_object, load_image, load_folder_images, refine_crop_with_scan_detector
 from .similarity_utils import cosine_similarity, find_match, find_match_dynamic_threshold, iou, deduplicate_matches, is_document_like_label
 from .logger import get_logger, tail_logs, log_mark
 from .device_utils import get_device

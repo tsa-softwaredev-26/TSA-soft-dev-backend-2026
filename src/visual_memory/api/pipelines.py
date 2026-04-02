@@ -42,6 +42,47 @@ def get_scan_pipeline():
     return _scan_pipeline
 
 
+def get_loaded_scan_pipeline():
+    """Return the scan pipeline only if it is already initialized."""
+    return _scan_pipeline
+
+
+def reload_scan_database_if_loaded() -> bool:
+    """Reload scan DB cache when pipeline is warm; never forces model load."""
+    pipeline = get_loaded_scan_pipeline()
+    if pipeline is None:
+        return False
+    pipeline.reload_database()
+    return True
+
+
+def reload_scan_head_if_loaded() -> bool:
+    """Reload projection head when scan pipeline is warm; never forces model load."""
+    pipeline = get_loaded_scan_pipeline()
+    if pipeline is None:
+        return False
+    pipeline.reload_head()
+    return True
+
+
+def apply_scan_learning_if_loaded(enabled: bool) -> bool:
+    """Apply learning toggle to a warm scan pipeline without forcing initialization."""
+    pipeline = get_loaded_scan_pipeline()
+    if pipeline is None:
+        return False
+    pipeline.set_enable_learning(enabled)
+    return True
+
+
+def apply_scan_head_weight_if_loaded(weight: float, ramp_at: int, ramp_power: float) -> bool:
+    """Apply head blend params to warm scan pipeline without forcing initialization."""
+    pipeline = get_loaded_scan_pipeline()
+    if pipeline is None:
+        return False
+    pipeline.set_head_weight(weight, ramp_at, ramp_power)
+    return True
+
+
 def get_feedback_store():
     global _feedback_store
     if _feedback_store is None:

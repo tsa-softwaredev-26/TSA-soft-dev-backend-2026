@@ -78,13 +78,31 @@ def test_find_match_returns_best():
 def test_find_match_dynamic_threshold_prefers_best_eligible():
     query = _norm(0)
     db = [("wallet", _norm(0)), ("receipt", _norm(1))]
-    label, sim = find_match_dynamic_threshold(
+    label, sim, margin = find_match_dynamic_threshold(
         query,
         db,
         lambda path: 0.95 if path == "wallet" else 0.0,
     )
     assert label == "wallet"
     assert sim > 0.95
+    assert margin >= 0.0
+
+
+def test_find_match_dynamic_threshold_rejects_on_margin_gate():
+    query = F.normalize(torch.tensor([[1.0, 0.0, 0.0, 0.0]]), dim=1)
+    db = [
+        ("label_a", F.normalize(torch.tensor([[0.95, 0.31, 0.0, 0.0]]), dim=1)),
+        ("label_b", F.normalize(torch.tensor([[0.94, 0.34, 0.0, 0.0]]), dim=1)),
+    ]
+    label, sim, margin = find_match_dynamic_threshold(
+        query,
+        db,
+        lambda _: 0.0,
+        lambda _: 0.05,
+    )
+    assert label is None
+    assert sim == 0.0
+    assert margin < 0.05
 
 
 def test_iou_identical_boxes():
@@ -159,6 +177,7 @@ for name, fn in [
     ("sim:find_match_empty_db", test_find_match_empty_db),
     ("sim:find_match_returns_best", test_find_match_returns_best),
     ("sim:find_match_dynamic_threshold", test_find_match_dynamic_threshold_prefers_best_eligible),
+    ("sim:find_match_dynamic_threshold_margin_gate", test_find_match_dynamic_threshold_rejects_on_margin_gate),
     ("sim:iou_identical", test_iou_identical_boxes),
     ("sim:iou_non_overlapping", test_iou_non_overlapping),
     ("sim:iou_partial_overlap", test_iou_partial_overlap),

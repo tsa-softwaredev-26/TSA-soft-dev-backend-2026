@@ -1,6 +1,13 @@
 from flask import Blueprint, request, jsonify
 
-from visual_memory.api.pipelines import get_database, get_feedback_store, get_scan_pipeline, get_settings
+from visual_memory.api.pipelines import (
+    apply_scan_head_weight_if_loaded,
+    apply_scan_learning_if_loaded,
+    get_database,
+    get_feedback_store,
+    get_scan_pipeline,
+    get_settings,
+)
 from ._json_utils import coerce_json_value, read_json_dict
 
 settings_bp = Blueprint("settings", __name__)
@@ -165,15 +172,15 @@ def patch_settings():
     for key, value in applied.items():
         setattr(s, key, value)
 
-    pipeline = get_scan_pipeline()
+    # Never force heavy scan-model initialization from /settings PATCH.
     if "enable_learning" in applied:
-        pipeline.set_enable_learning(s.enable_learning)
+        apply_scan_learning_if_loaded(s.enable_learning)
     if (
         "projection_head_weight" in applied
         or "projection_head_ramp_at" in applied
         or "projection_head_ramp_power" in applied
     ):
-        pipeline.set_head_weight(
+        apply_scan_head_weight_if_loaded(
             s.projection_head_weight,
             s.projection_head_ramp_at,
             s.projection_head_ramp_power,

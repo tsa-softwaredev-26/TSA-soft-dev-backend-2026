@@ -138,12 +138,12 @@ def test_ask_blocks_unsafe_query():
 def test_ask_document_primary_fallback_to_fuzzy():
     settings = _pm.get_settings()
     old_llm = settings.llm_query_fallback_enabled
-    old_fuzzy = _ask_route._fuzzy_label_match
-    old_ocr = _ask_route._ocr_content_match
+    old_fuzzy_scored = _ask_route._fuzzy_label_match_scored
+    old_ocr_scored = _ask_route._ocr_content_match_scored
     try:
         settings.llm_query_fallback_enabled = False
-        _ask_route._ocr_content_match = lambda query, threshold: None
-        _ask_route._fuzzy_label_match = lambda query, threshold: ["receipt"]
+        _ask_route._ocr_content_match_scored = lambda query, threshold: []
+        _ask_route._fuzzy_label_match_scored = lambda query, threshold: [("receipt", 0.91)]
         resp = client.post("/ask", json={"query": "document with office chair"})
         assert_status(resp, 200)
         data = resp.get_json()
@@ -151,34 +151,52 @@ def test_ask_document_primary_fallback_to_fuzzy():
         assert data.get("document_query") is True
         assert data.get("matched_label") == "receipt"
         assert data.get("matched_by") == "fuzzy_label_fallback"
-        assert data.get("strategies_tried") == ["exact", "ocr_semantic", "fuzzy_label"]
+        assert data.get("strategies_tried") == ["exact", "document_semantic", "fuzzy_label"]
     finally:
         settings.llm_query_fallback_enabled = old_llm
-        _ask_route._fuzzy_label_match = old_fuzzy
-        _ask_route._ocr_content_match = old_ocr
+        _ask_route._fuzzy_label_match_scored = old_fuzzy_scored
+        _ask_route._ocr_content_match_scored = old_ocr_scored
 
 
 def test_ask_item_primary_fallback_to_ocr():
     settings = _pm.get_settings()
     old_llm = settings.llm_query_fallback_enabled
-    old_fuzzy = _ask_route._fuzzy_label_match
-    old_ocr = _ask_route._ocr_content_match
+    old_fuzzy_scored = _ask_route._fuzzy_label_match_scored
+    old_ocr_scored = _ask_route._ocr_content_match_scored
     try:
         settings.llm_query_fallback_enabled = False
-        _ask_route._fuzzy_label_match = lambda query, threshold: []
-        _ask_route._ocr_content_match = lambda query, threshold: "wallet"
+        _ask_route._fuzzy_label_match_scored = lambda query, threshold: []
+        _ask_route._ocr_content_match_scored = lambda query, threshold: [("wallet", 0.88)]
         resp = client.post("/ask", json={"query": "where is my billfold"})
         assert_status(resp, 200)
         data = resp.get_json()
         assert data.get("found") is True
         assert data.get("document_query") is False
         assert data.get("matched_label") == "wallet"
-        assert data.get("matched_by") == "ocr_semantic_fallback"
-        assert data.get("strategies_tried") == ["exact", "fuzzy_label", "ocr_semantic"]
+        assert data.get("matched_by") == "document_semantic_fallback"
+        assert data.get("strategies_tried") == ["exact", "fuzzy_label", "document_semantic"]
     finally:
         settings.llm_query_fallback_enabled = old_llm
-        _ask_route._fuzzy_label_match = old_fuzzy
-        _ask_route._ocr_content_match = old_ocr
+        _ask_route._fuzzy_label_match_scored = old_fuzzy_scored
+        _ask_route._ocr_content_match_scored = old_ocr_scored
+
+
+def test_ask_ambiguous_near_tie_prompts_disambiguation():
+    settings = _pm.get_settings()
+    old_llm = settings.llm_query_fallback_enabled
+    old_fuzzy_scored = _ask_route._fuzzy_label_match_scored
+    try:
+        settings.llm_query_fallback_enabled = False
+        _ask_route._fuzzy_label_match_scored = lambda query, threshold: [("keys_safe", 0.82), ("keys_house", 0.81)]
+        resp = client.post("/ask", json={"query": "where are my keys"})
+        assert_status(resp, 200)
+        data = resp.get_json()
+        assert data.get("found") is False
+        assert data.get("reason") == "ambiguous_match"
+        assert data.get("candidates") == ["keys_safe", "keys_house"]
+    finally:
+        settings.llm_query_fallback_enabled = old_llm
+        _ask_route._fuzzy_label_match_scored = old_fuzzy_scored
 
 
 def test_item_ask_read_ocr():
@@ -268,6 +286,7 @@ for name, fn in [
     ("ask_mode:ask_blocks_unsafe_query", test_ask_blocks_unsafe_query),
     ("ask_mode:ask_document_primary_fallback_to_fuzzy", test_ask_document_primary_fallback_to_fuzzy),
     ("ask_mode:ask_item_primary_fallback_to_ocr", test_ask_item_primary_fallback_to_ocr),
+    ("ask_mode:ask_ambiguous_near_tie_prompts_disambiguation", test_ask_ambiguous_near_tie_prompts_disambiguation),
     ("ask_mode:item_read_ocr", test_item_ask_read_ocr),
     ("ask_mode:item_read_ocr_empty", test_item_ask_read_ocr_empty),
     ("ask_mode:item_find", test_item_ask_find),

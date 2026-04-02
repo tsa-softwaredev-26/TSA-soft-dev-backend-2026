@@ -1,6 +1,11 @@
 from flask import Blueprint, request, jsonify
 
-from visual_memory.api.pipelines import get_database, get_scan_pipeline, get_settings, get_user_settings
+from visual_memory.api.pipelines import (
+    apply_scan_learning_if_loaded,
+    get_database,
+    get_settings,
+    get_user_settings,
+)
 from visual_memory.config.user_settings import PerformanceMode, _BUTTON_LAYOUTS
 from ._json_utils import coerce_json_value, read_json_dict
 
@@ -88,9 +93,10 @@ def patch_user_settings():
     for key, value in applied.items():
         setattr(us, key, value)
 
-    # propagate learning toggle to scan pipeline immediately
+    # Propagate learning toggle to scan pipeline only when it is already warm.
+    # Never force heavy scan-model initialization from settings endpoints.
     if "learning_enabled" in applied:
-        get_scan_pipeline().set_enable_learning(us.learning_enabled)
+        apply_scan_learning_if_loaded(us.learning_enabled)
 
     # fast mode disables second pass to cut remember-mode latency
     # and disables LLM query fallback. Balanced/accurate keep both enabled.

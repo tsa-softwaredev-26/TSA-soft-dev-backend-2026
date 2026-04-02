@@ -1,9 +1,11 @@
 from flask import Blueprint, request, jsonify
 
-from visual_memory.api.pipelines import get_database, get_scan_pipeline
+from visual_memory.api.pipelines import get_database, reload_scan_database_if_loaded
+from visual_memory.utils import get_logger
 from ._json_utils import read_json_dict
 
 items_bp = Blueprint("items", __name__)
+_log = get_logger(__name__)
 
 
 @items_bp.get("/items")
@@ -23,10 +25,17 @@ def delete_item(label):
     count = db.delete_items_by_label(label)
     if count == 0:
         return jsonify({"error": "not found"}), 404
+
+    # Deletion already succeeded in DB; only refresh in-memory scan cache if pipeline is warm.
     try:
-        get_scan_pipeline().reload_database()
+        reload_scan_database_if_loaded()
     except Exception as exc:
-        return jsonify({"error": "database sync failed", "detail": str(exc)}), 500
+        _log.warning({
+            "event": "delete_item_cache_reload_failed",
+            "label": label,
+            "deleted_count": count,
+            "error": str(exc),
+        })
     return jsonify({"deleted": True, "label": label, "count": count})
 
 
@@ -73,9 +82,14 @@ def rename_item(label):
 
     result = db.rename_label(label, new_label)
     try:
-        get_scan_pipeline().reload_database()
+        reload_scan_database_if_loaded()
     except Exception as exc:
-        return jsonify({"error": "database sync failed", "detail": str(exc)}), 500
+        _log.warning({
+            "event": "rename_item_cache_reload_failed",
+            "old_label": label,
+            "new_label": new_label,
+            "error": str(exc),
+        })
     return jsonify({
         "renamed": True,
         "old_label": label,

@@ -2,7 +2,7 @@
 Image utility functions for loading and processing images.
 """
 
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from pathlib import Path
 from PIL import Image, ImageOps
 
@@ -110,3 +110,33 @@ def load_folder_images(folder_path: str) -> List[Tuple[str, Image.Image]]:
         images.append((str(file_path), img))
 
     return images
+
+
+def refine_crop_with_scan_detector(
+    image: Image.Image,
+    fallback_box: List[float],
+    detector: Optional[object],
+) -> tuple[Image.Image, List[float], bool]:
+    """
+    Refine crop using scan-style prompt-free detector by selecting the best-score box.
+
+    Falls back to fallback_box crop when detector is unavailable or returns no valid box.
+    Returns (crop, box_used, refined_flag).
+    """
+    if detector is None:
+        return crop_object(image, fallback_box), fallback_box, False
+    try:
+        batch = detector.detect_all_batch([image])
+    except Exception:
+        return crop_object(image, fallback_box), fallback_box, False
+    if not batch:
+        return crop_object(image, fallback_box), fallback_box, False
+    boxes, scores = batch[0]
+    if not boxes or not scores:
+        return crop_object(image, fallback_box), fallback_box, False
+    try:
+        best_idx = max(range(len(scores)), key=lambda i: float(scores[i]))
+        best_box = boxes[best_idx]
+        return crop_object(image, best_box), best_box, True
+    except Exception:
+        return crop_object(image, fallback_box), fallback_box, False

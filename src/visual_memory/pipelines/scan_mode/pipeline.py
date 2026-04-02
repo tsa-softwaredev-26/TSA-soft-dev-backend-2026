@@ -53,6 +53,13 @@ def _match_threshold_for_label(label: str, is_personalized: bool) -> float:
     return _runtime_similarity_threshold(is_personalized)
 
 
+def _match_margin_for_label(label: str) -> float:
+    settings = _runtime_settings()
+    if is_document_like_label(label):
+        return settings.get_scan_similarity_margin_document()
+    return settings.get_scan_similarity_margin()
+
+
 def _vertical_zone(bbox: list, img_h: int) -> str:
     cy = (bbox[1] + bbox[3]) / 2
     ny = cy / img_h
@@ -393,21 +400,25 @@ class ScanPipeline:
             projected_query = self._apply_head(combined)
             learning_active = bool(self._enable_learning and self._head_trained)
             match_t0 = time.monotonic()
-            match_path, similarity = find_match_dynamic_threshold(
+            match_path, similarity, similarity_margin = find_match_dynamic_threshold(
                 projected_query,
                 projected_db,
                 lambda path: _match_threshold_for_label(Path(path).stem, learning_active),
+                lambda path: _match_margin_for_label(Path(path).stem),
             )
             match_ms += (time.monotonic() - match_t0) * 1000
 
             if match_path:
                 matched_label = Path(match_path).stem
                 applied_threshold = _match_threshold_for_label(matched_label, learning_active)
+                applied_margin = _match_margin_for_label(matched_label)
                 _log.info({
                     "event": "scan_text_match",
                     "label": matched_label,
                     "similarity": round(similarity, 4),
                     "threshold": round(applied_threshold, 4),
+                    "similarity_margin": round(similarity_margin, 4),
+                    "margin_threshold": round(applied_margin, 4),
                     "learning_active": learning_active,
                     "text_likelihood": round(text_likelihood, 3),
                     "crop_luminance": round(crop_luminance[i], 2),
@@ -430,6 +441,8 @@ class ScanPipeline:
                             "text_likelihood": round(text_likelihood, 3),
                             "ocr_ran": i in ocr_conf_by_index,
                             "ocr_confidence": round(float(ocr_conf_by_index.get(i, 0.0)), 4),
+                            "similarity_margin": round(float(similarity_margin), 6),
+                            "margin_threshold": round(float(applied_margin), 6),
                         }
                 direction_auto = _direction_from_box(box, query_image.width)
                 self.db.add_sighting(
@@ -441,6 +454,7 @@ class ScanPipeline:
                     "box": box,
                     "label": matched_label,
                     "similarity": similarity,
+                    "similarity_margin": round(float(similarity_margin), 6),
                     "text_likelihood": round(text_likelihood, 3),
                     "_crop": crops[i],
                 }

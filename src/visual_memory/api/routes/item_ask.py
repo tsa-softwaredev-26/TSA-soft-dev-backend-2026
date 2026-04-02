@@ -15,7 +15,13 @@ import re
 import time
 from flask import Blueprint, request, jsonify
 
-from visual_memory.api.pipelines import get_database, get_scan_pipeline, get_settings, get_user_settings
+from visual_memory.api.pipelines import (
+    get_database,
+    get_scan_pipeline,
+    get_settings,
+    get_user_settings,
+    reload_scan_database_if_loaded,
+)
 from visual_memory.api.routes.find import _format_sighting, build_narration
 from visual_memory.engine.visual_attributes import describe_from_attributes
 from visual_memory.engine.vlm import get_vlm_pipeline
@@ -296,14 +302,14 @@ def process_item_ask_request(
 
         result = db.rename_label(label, new_label)
         try:
-            get_scan_pipeline().reload_database()
+            reload_scan_database_if_loaded()
         except Exception as exc:
-            return {
-                "action": "rename",
-                "error": "database sync failed",
-                "detail": str(exc),
-                "narration": "Renamed, but I could not sync scan state yet.",
-            }, 500
+            _log.warning({
+                "event": "item_ask_rename_cache_reload_failed",
+                "label": label,
+                "new_label": new_label,
+                "error": str(exc),
+            })
 
         return {
             "action": "rename",

@@ -6,7 +6,17 @@ import pillow_heif
 from PIL import Image
 
 from visual_memory.config import Settings
-from visual_memory.utils import load_image, crop_object, get_logger, mean_luminance, blur_score, estimate_text_likelihood, should_run_ocr, collect_system_metrics
+from visual_memory.utils import (
+    load_image,
+    crop_object,
+    refine_crop_with_scan_detector,
+    get_logger,
+    mean_luminance,
+    blur_score,
+    estimate_text_likelihood,
+    should_run_ocr,
+    collect_system_metrics,
+)
 from visual_memory.utils.logger import LogTag
 from visual_memory.engine.embedding import make_combined_embedding
 from visual_memory.engine.visual_attributes import extract_visual_attributes
@@ -87,6 +97,7 @@ def _quality_hint(quality: str, is_blurry: bool) -> str:
 class RememberPipeline:
     def __init__(self):
         self.detector        = registry.gdino_detector
+        self.scan_detector   = registry.yoloe_detector
         self.img_embedder    = registry.img_embedder
         self.text_embedder   = registry.text_embedder   if _settings.enable_ocr else None
         self.ocr_client      = TextRecognizer() if _settings.enable_ocr else None
@@ -360,8 +371,14 @@ class RememberPipeline:
         label = prompt
         score = detection["score"]
 
-        # Crop detected region
-        cropped = crop_object(image, box)
+        # Crop detected region, then refine using scan-like detector crop policy.
+        fallback_crop = crop_object(image, box)
+        refined_crop, refined_box, refined = refine_crop_with_scan_detector(
+            image,
+            box,
+            self.scan_detector,
+        )
+        cropped = refined_crop if refined else fallback_crop
 
         # Create image embedding
         stage_start = time.monotonic()
@@ -424,11 +441,7 @@ class RememberPipeline:
         # Query historical average BEFORE writing the new item
         avg_conf = self.db.get_label_avg_confidence(label)
 
-        # Auto-replace: remove any previous teaches for this label before storing
-        # the new one. Queried avg_conf already captured the history above.
         db_t0 = time.monotonic()
-        replaced_count = self.db.delete_items_by_label(label)
-
         self.add_to_database(
             combined,
             metadata={
@@ -441,6 +454,10 @@ class RememberPipeline:
                 "label_embedding": label_embedding,
                 "visual_attributes": extract_visual_attributes(image_path),
             }
+        )
+        pruned_count = self.db.prune_items_by_label_max_count(
+            label,
+            _settings.remember_max_prototypes_per_label,
         )
         timing["db_ms"] = round((time.monotonic() - db_t0) * 1000)
 
@@ -455,7 +472,12 @@ class RememberPipeline:
             "is_blurry": is_blurry,
             "is_dark": False,
             "darkness_level": round(lum, 2),
-            "replaced_previous": replaced_count > 0,
+            "replaced_previous": pruned_count > 0,
+            "pruned_previous": pruned_count > 0,
+            "pruned_count": int(pruned_count),
+            "prototype_limit": int(_settings.remember_max_prototypes_per_label),
+            "embedding_crop_refined": bool(refined),
+            "embedding_box": refined_box if refined else box,
             "second_pass": second_pass_prompt is not None,
             "second_pass_prompt": second_pass_prompt,
             "box": box,
@@ -471,6 +493,8 @@ class RememberPipeline:
             "label": label,
             "detection_quality": quality,
             "second_pass": second_pass_prompt is not None,
+            "embedding_crop_refined": bool(refined),
+            "pruned_count": int(pruned_count),
             "duration_ms": round((time.monotonic() - t0) * 1000),
             **timing,
             **collect_system_metrics(),

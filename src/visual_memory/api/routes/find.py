@@ -78,6 +78,15 @@ def build_narration(label: str, sighting: dict) -> str:
 
 def _fuzzy_label_match(query: str, threshold: float) -> list[str]:
     """Return known labels whose text embedding is within `threshold` of the query."""
+    matched = _fuzzy_label_match_scored(query, threshold)
+    return [lbl for lbl, _ in matched]
+
+
+def _fuzzy_label_match_scored(query: str, threshold: float) -> list[tuple[str, float]]:
+    """Return known labels whose text embedding is within `threshold` of the query.
+
+    Results are sorted by cosine similarity descending.
+    """
     from visual_memory.api.pipelines import get_scan_pipeline
     from visual_memory.utils.similarity_utils import cosine_similarity
 
@@ -106,7 +115,7 @@ def _fuzzy_label_match(query: str, threshold: float) -> list[str]:
         if sim >= threshold:
             matched.append((lbl, sim))
     matched.sort(key=lambda x: x[1], reverse=True)
-    return [lbl for lbl, _ in matched]
+    return matched
 
 
 def _ocr_content_match(query: str, threshold: float) -> Optional[str]:
@@ -117,6 +126,17 @@ def _ocr_content_match(query: str, threshold: float) -> Optional[str]:
     embedding, so the function is backward-compatible with existing databases.
 
     Returns the best-matching label above threshold, or None.
+    """
+    matched = _ocr_content_match_scored(query, threshold)
+    if not matched:
+        return None
+    return matched[0][0]
+
+
+def _ocr_content_match_scored(query: str, threshold: float) -> list[tuple[str, float]]:
+    """Search OCR text of taught items for semantic matches with similarity scores.
+
+    Returns a similarity-sorted list of (label, similarity) above threshold.
     """
     from visual_memory.api.pipelines import get_scan_pipeline
     from visual_memory.utils.similarity_utils import cosine_similarity
@@ -132,19 +152,18 @@ def _ocr_content_match(query: str, threshold: float) -> Optional[str]:
 
     query_emb = pipeline.text_embedder.embed_text(query)
 
-    best_label: Optional[str] = None
-    best_sim = -1.0
+    matched: list[tuple[str, float]] = []
     for item in items:
         ocr_emb = item.get("ocr_embedding")
         if ocr_emb is None:
             # Backward compat: item was taught before OCR pre-embedding was added
             ocr_emb = pipeline.text_embedder.embed_text(item["ocr_text"])
         sim = cosine_similarity(query_emb, ocr_emb).item()
-        if sim >= threshold and sim > best_sim:
-            best_sim = sim
-            best_label = item["label"]
+        if sim >= threshold:
+            matched.append((item["label"], sim))
 
-    return best_label
+    matched.sort(key=lambda x: x[1], reverse=True)
+    return matched
 
 
 def _parse_float_param(value: str, name: str):

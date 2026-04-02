@@ -16,6 +16,7 @@ from PIL import Image
 from visual_memory.api.pipelines import (
     get_database,
     get_feedback_store,
+    reload_scan_database_if_loaded,
     get_scan_pipeline,
     get_user_settings,
 )
@@ -671,7 +672,7 @@ def _handle_confirmation(session: VoiceSession, command_text: str) -> None:
             lbl = pending.get("label", "")
             try:
                 deleted = get_database().delete_items_by_label(lbl)
-                get_scan_pipeline().reload_database()
+                reload_scan_database_if_loaded()
                 if deleted > 0:
                     _emit_turn(session, tts_narration=f"{lbl.capitalize()} deleted.")
                 else:

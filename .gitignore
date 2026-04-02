@@ -80,3 +80,13 @@ src/visual_memory/benchmarks/redact_receipt.py
 src/visual_memory/benchmarks/query_sets/
 benchmarks/baselines/stress_tests/
 src/visual_memory/tests/input_audio/
+
+# Local benchmark/eval artifacts (temporary)
+benchmarks/baselines/*.csv
+benchmarks/baselines/*.json
+benchmarks/baselines/*.log
+benchmarks/baselines/full_benchmark/
+benchmarks/fast_eval/
+
+# Experimental prototype workspace (temporary)
+src/visual_memory/benchmarks/experiments/

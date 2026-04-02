@@ -31,6 +31,7 @@ from visual_memory.utils.voice_state_context import build_state_contract
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _BENCHMARKS_DIR = _PROJECT_ROOT / "benchmarks"
+_QUERY_SETS_DIR = Path(__file__).resolve().parent / "query_sets"
 _SECOND_PASS_TEMPLATES = [
     "a {prompt}",
     "{prompt} object",
@@ -56,7 +57,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--output", type=Path, default=_BENCHMARKS_DIR / "ask_results.csv")
     p.add_argument(
         "--query-set",
-        choices=["core_120", "ux_blind_120", "both_240"],
+        choices=["core_120", "ux_blind_120", "ux_docs_120", "both_240", "all_360"],
         default="core_120",
         help="Which query suite to run",
     )
@@ -508,13 +509,43 @@ def _build_queries_ux_blind_120() -> list[dict]:
     return out
 
 
+def _build_queries_ux_docs_120() -> list[dict]:
+    path = _QUERY_SETS_DIR / "ux_docs_120.json"
+    with open(path, encoding="utf-8") as f:
+        payload = json.load(f)
+    raw_queries = payload.get("queries", [])
+    if not isinstance(raw_queries, list):
+        raise ValueError(f"invalid query payload: {path}")
+
+    out = []
+    for item in raw_queries:
+        if not isinstance(item, dict):
+            continue
+        out.append(
+            {
+                "query_set": "ux_docs_120",
+                "query": str(item.get("query", "") or ""),
+                "expected_label": str(item.get("expected_label", "") or ""),
+                "current_mode": str(item.get("current_mode", "idle") or "idle"),
+                "context": item.get("context", {}) if isinstance(item.get("context"), dict) else {},
+            }
+        )
+    if len(out) != 120:
+        raise ValueError(f"query set size mismatch: expected 120, got {len(out)}")
+    return out
+
+
 def _build_queries(query_set: str) -> list[dict]:
     if query_set == "core_120":
         return _build_queries_core_120()
     if query_set == "ux_blind_120":
         return _build_queries_ux_blind_120()
+    if query_set == "ux_docs_120":
+        return _build_queries_ux_docs_120()
     if query_set == "both_240":
         return _build_queries_core_120() + _build_queries_ux_blind_120()
+    if query_set == "all_360":
+        return _build_queries_core_120() + _build_queries_ux_blind_120() + _build_queries_ux_docs_120()
     raise ValueError(f"unsupported query_set: {query_set}")
 
 
@@ -547,10 +578,6 @@ def main() -> None:
     api_pipelines._scan_pipeline.reload_database()
     known_labels = db.get_known_labels()
 
-    state_contract = build_state_contract(
-        mode="idle",
-        context={"known_labels": known_labels},
-    )
     queries = _build_queries(args.query_set)
 
     fieldnames = [
@@ -558,6 +585,8 @@ def main() -> None:
         "query_id",
         "query",
         "expected_label",
+        "state_mode",
+        "state_context",
         "status_code",
         "latency_ms",
         "found",
@@ -575,6 +604,11 @@ def main() -> None:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for idx, item in enumerate(queries, start=1):
+            state_mode = str(item.get("current_mode", "idle") or "idle")
+            state_context = item.get("context", {}) if isinstance(item.get("context"), dict) else {}
+            if not isinstance(state_context.get("known_labels"), list):
+                state_context["known_labels"] = known_labels
+            state_contract = build_state_contract(mode=state_mode, context=state_context)
             t0 = time.perf_counter()
             result, status = process_ask_query(item["query"], state_context=state_contract)
             lat_ms = round((time.perf_counter() - t0) * 1000.0, 2)
@@ -585,6 +619,8 @@ def main() -> None:
                     "query_id": idx,
                     "query": item["query"],
                     "expected_label": item["expected_label"],
+                    "state_mode": state_mode,
+                    "state_context": json.dumps(state_context),
                     "status_code": status,
                     "latency_ms": lat_ms,
                     "found": bool(result.get("found", False)),

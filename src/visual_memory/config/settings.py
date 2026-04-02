@@ -25,6 +25,8 @@ class Settings:
     similarity_threshold_baseline: Optional[float] = None
     similarity_threshold_personalized: Optional[float] = None
     similarity_threshold_document: Optional[float] = None
+    scan_similarity_margin: float = 0.0
+    scan_similarity_margin_document: Optional[float] = None
     dedup_iou_threshold: float = 0.5
 
     # Narration (scan mode)
@@ -168,6 +170,14 @@ class Settings:
             return float(self.similarity_threshold_document)
         return self.get_similarity_threshold_baseline()
 
+    def get_scan_similarity_margin(self) -> float:
+        return float(self.scan_similarity_margin)
+
+    def get_scan_similarity_margin_document(self) -> float:
+        if self.scan_similarity_margin_document is not None:
+            return float(self.scan_similarity_margin_document)
+        return self.get_scan_similarity_margin()
+
     # Whisper speech recognition (voice input)
     whisper_model: str = "openai/whisper-large-v3-turbo"
     whisper_sample_rate: int = 16000
@@ -180,6 +190,7 @@ class Settings:
 
     # Database
     db_path: str = "data/memory.db"
+    remember_max_prototypes_per_label: int = 3
     # Per-scan cache TTL for feedback/crop lookup.
     scan_cache_ttl_seconds: int = field(default_factory=lambda: int(os.environ.get("SCAN_CACHE_TTL_SECONDS", "600")))
 

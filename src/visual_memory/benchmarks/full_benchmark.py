@@ -56,7 +56,7 @@ from visual_memory.learning import ProjectionHead, ProjectionTrainer
 from visual_memory.utils.image_utils import load_image
 from visual_memory.utils.memory_monitor import MemoryMonitor
 from visual_memory.utils.quality_utils import mean_luminance, estimate_text_likelihood
-from visual_memory.utils.similarity_utils import cosine_similarity, find_match
+from visual_memory.utils.similarity_utils import cosine_similarity, find_match_dynamic_threshold
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _BENCHMARKS_DIR = _PROJECT_ROOT / "benchmarks"
@@ -77,6 +77,34 @@ DOCUMENT_LABEL_KEYWORDS = {
     "id",
     "card",
 }
+
+
+def _threshold_for_label(label: str, is_document: bool, thresholds: Dict[str, float], mode: str) -> float:
+    if is_document:
+        return float(thresholds["document"])
+    return float(thresholds["personalized"] if mode == "personalized" else thresholds["baseline"])
+
+
+def _margin_for_label(label: str, is_document: bool, settings: Settings) -> float:
+    if is_document:
+        return float(settings.get_scan_similarity_margin_document())
+    return float(settings.get_scan_similarity_margin())
+
+
+def _match_with_runtime_gates(
+    query_embedding: torch.Tensor,
+    database_embeddings: List[Tuple[str, torch.Tensor]],
+    is_document_sample: bool,
+    thresholds: Dict[str, float],
+    settings: Settings,
+    mode: str,
+) -> tuple[Optional[str], float, float]:
+    return find_match_dynamic_threshold(
+        query_embedding,
+        database_embeddings,
+        lambda lbl: _threshold_for_label(lbl, is_document_sample, thresholds, mode=mode),
+        lambda lbl: _margin_for_label(lbl, is_document_sample, settings),
+    )
 
 
 def _set_reproducible(seed: int) -> None:
@@ -561,6 +589,7 @@ def _eval_retrieval(
     database: List[Tuple[str, torch.Tensor]],
     head: ProjectionHead,
     thresholds: Dict[str, float],
+    settings: Settings,
     monitor: Optional[MemoryMonitor] = None,
 ) -> List[dict]:
     head.eval()
@@ -571,15 +600,31 @@ def _eval_retrieval(
         test_emb = data["embedding"]
         true_label = data["label"]
         is_document = bool(data.get("is_document", False))
-        baseline_threshold = thresholds["document"] if is_document else thresholds["baseline"]
-        personalized_threshold = thresholds["document"] if is_document else thresholds["personalized"]
+        baseline_threshold = _threshold_for_label(true_label, is_document, thresholds, mode="baseline")
+        personalized_threshold = _threshold_for_label(true_label, is_document, thresholds, mode="personalized")
+        baseline_margin_threshold = _margin_for_label(true_label, is_document, settings)
+        personalized_margin_threshold = _margin_for_label(true_label, is_document, settings)
 
         t0 = time.perf_counter()
-        bl_label, bl_sim = find_match(test_emb, database, baseline_threshold)
+        bl_label, bl_sim, bl_margin = _match_with_runtime_gates(
+            test_emb,
+            database,
+            is_document,
+            thresholds,
+            settings,
+            mode="baseline",
+        )
         lat_bl = time.perf_counter() - t0
 
         t0 = time.perf_counter()
-        pe_label, pe_sim = find_match(head.project(test_emb), projected_db, personalized_threshold)
+        pe_label, pe_sim, pe_margin = _match_with_runtime_gates(
+            head.project(test_emb),
+            projected_db,
+            is_document,
+            thresholds,
+            settings,
+            mode="personalized",
+        )
         lat_pe = time.perf_counter() - t0
 
         results.append({
@@ -610,6 +655,10 @@ def _eval_retrieval(
             "is_document": int(is_document),
             "baseline_threshold_used": round(baseline_threshold, 6),
             "personalized_threshold_used": round(personalized_threshold, 6),
+            "baseline_margin_threshold_used": round(baseline_margin_threshold, 6),
+            "personalized_margin_threshold_used": round(personalized_margin_threshold, 6),
+            "baseline_similarity_margin": round(bl_margin, 6),
+            "personalized_similarity_margin": round(pe_margin, 6),
         })
         if monitor is not None and (i + 1) % 20 == 0:
             if monitor.suggest_throttle():
@@ -985,6 +1034,7 @@ def _eval_fp_holdout_from_test(
     database: List[Tuple[str, torch.Tensor]],
     head: ProjectionHead,
     thresholds: Dict[str, float],
+    settings: Settings,
 ) -> List[dict]:
     """
     Build 60 balanced FP tests from retrieval test images.
@@ -1003,10 +1053,26 @@ def _eval_fp_holdout_from_test(
         projected_db = [(lbl, head.project(emb)) for (lbl, emb) in filtered_db]
         emb = row["embedding"]
         is_document = bool(row.get("is_document", False))
-        bl_t = thresholds["document"] if is_document else thresholds["baseline"]
-        pe_t = thresholds["document"] if is_document else thresholds["personalized"]
-        bl_lbl, bl_sim = find_match(emb, filtered_db, bl_t)
-        pe_lbl, pe_sim = find_match(head.project(emb), projected_db, pe_t)
+        bl_t = _threshold_for_label(true_label, is_document, thresholds, mode="baseline")
+        pe_t = _threshold_for_label(true_label, is_document, thresholds, mode="personalized")
+        bl_margin_t = _margin_for_label(true_label, is_document, settings)
+        pe_margin_t = _margin_for_label(true_label, is_document, settings)
+        bl_lbl, bl_sim, bl_margin = _match_with_runtime_gates(
+            emb,
+            filtered_db,
+            is_document,
+            thresholds,
+            settings,
+            mode="baseline",
+        )
+        pe_lbl, pe_sim, pe_margin = _match_with_runtime_gates(
+            head.project(emb),
+            projected_db,
+            is_document,
+            thresholds,
+            settings,
+            mode="personalized",
+        )
         results.append(
             {
                 "image": fname,
@@ -1025,6 +1091,10 @@ def _eval_fp_holdout_from_test(
                 "is_document": int(is_document),
                 "baseline_threshold_used": round(bl_t, 6),
                 "personalized_threshold_used": round(pe_t, 6),
+                "baseline_margin_threshold_used": round(bl_margin_t, 6),
+                "personalized_margin_threshold_used": round(pe_margin_t, 6),
+                "baseline_similarity_margin": round(bl_margin, 6),
+                "personalized_similarity_margin": round(pe_margin, 6),
             }
         )
     return results
@@ -1035,6 +1105,7 @@ def _eval_fp_expanded_from_test(
     embedded: Dict[str, dict],
     head: ProjectionHead,
     thresholds: Dict[str, float],
+    settings: Settings,
 ) -> List[dict]:
     """
     Expanded FP benchmark from retrieval test images.
@@ -1055,11 +1126,15 @@ def _eval_fp_expanded_from_test(
         q = row["embedding"]
         qh = projected[fname]
         is_document = bool(row.get("is_document", False))
-        bl_t = thresholds["document"] if is_document else thresholds["baseline"]
-        pe_t = thresholds["document"] if is_document else thresholds["personalized"]
+        bl_t = _threshold_for_label(true_label, is_document, thresholds, mode="baseline")
+        pe_t = _threshold_for_label(true_label, is_document, thresholds, mode="personalized")
+        bl_margin_t = _margin_for_label(true_label, is_document, settings)
+        pe_margin_t = _margin_for_label(true_label, is_document, settings)
 
         best_bl_sim = -1.0
+        second_bl_sim = -1.0
         best_pe_sim = -1.0
+        second_pe_sim = -1.0
         best_bl_match = ""
         best_pe_match = ""
         neg_count = 0
@@ -1069,15 +1144,23 @@ def _eval_fp_expanded_from_test(
             neg_count += 1
             bl_sim = float(cosine_similarity(q, cand_emb).item())
             if bl_sim > best_bl_sim:
+                second_bl_sim = best_bl_sim
                 best_bl_sim = bl_sim
                 best_bl_match = cand_name
+            elif bl_sim > second_bl_sim:
+                second_bl_sim = bl_sim
             pe_sim = float(cosine_similarity(qh, projected[cand_name]).item())
             if pe_sim > best_pe_sim:
+                second_pe_sim = best_pe_sim
                 best_pe_sim = pe_sim
                 best_pe_match = cand_name
+            elif pe_sim > second_pe_sim:
+                second_pe_sim = pe_sim
 
-        baseline_fp = int(neg_count > 0 and best_bl_sim >= bl_t)
-        personalized_fp = int(neg_count > 0 and best_pe_sim >= pe_t)
+        baseline_margin = max(0.0, best_bl_sim - second_bl_sim) if neg_count > 1 else max(best_bl_sim, 0.0)
+        personalized_margin = max(0.0, best_pe_sim - second_pe_sim) if neg_count > 1 else max(best_pe_sim, 0.0)
+        baseline_fp = int(neg_count > 0 and best_bl_sim >= bl_t and baseline_margin >= bl_margin_t)
+        personalized_fp = int(neg_count > 0 and best_pe_sim >= pe_t and personalized_margin >= pe_margin_t)
         results.append(
             {
                 "image": fname,
@@ -1097,6 +1180,10 @@ def _eval_fp_expanded_from_test(
                 "is_document": int(is_document),
                 "baseline_threshold_used": round(bl_t, 6),
                 "personalized_threshold_used": round(pe_t, 6),
+                "baseline_margin_threshold_used": round(bl_margin_t, 6),
+                "personalized_margin_threshold_used": round(pe_margin_t, 6),
+                "baseline_similarity_margin": round(baseline_margin, 6),
+                "personalized_similarity_margin": round(personalized_margin, 6),
             }
         )
     return results
@@ -1951,7 +2038,7 @@ def main() -> None:
     # Phase 5: Retrieval
     _enforce_memory_guard(monitor, "phase 5")
     print("\n[5/7] Evaluating retrieval (3ft/6ft test set against 1ft_bright_clean DB)...")
-    retrieval_results = _eval_retrieval(test_set, embedded, database, head, thresholds, monitor=monitor)
+    retrieval_results = _eval_retrieval(test_set, embedded, database, head, thresholds, settings, monitor=monitor)
 
     # Phase 6: Detection
     _enforce_memory_guard(monitor, "phase 6")
@@ -1974,12 +2061,16 @@ def main() -> None:
     fp_holdout_results: List[dict] = []
     if not args.no_fp_holdout_tests:
         print("\n[fp] Evaluating 60-case holdout FP tests from detection split...")
-        fp_holdout_results = _eval_fp_holdout_from_test(test_set, embedded, database, head, thresholds)
+        fp_holdout_results = _eval_fp_holdout_from_test(
+            test_set, embedded, database, head, thresholds, settings
+        )
         print(f"  {len(fp_holdout_results)} holdout FP cases evaluated")
     fp_expanded_results: List[dict] = []
     if not args.no_fp_expanded_tests:
         print("\n[fp] Evaluating expanded FP tests against all other-label samples...")
-        fp_expanded_results = _eval_fp_expanded_from_test(test_set, embedded, head, thresholds)
+        fp_expanded_results = _eval_fp_expanded_from_test(
+            test_set, embedded, head, thresholds, settings
+        )
         if fp_expanded_results:
             avg_neg = sum(int(r.get("negative_pool_size", 0)) for r in fp_expanded_results) / len(fp_expanded_results)
             print(f"  {len(fp_expanded_results)} expanded FP cases evaluated (avg negatives/query: {avg_neg:.1f})")

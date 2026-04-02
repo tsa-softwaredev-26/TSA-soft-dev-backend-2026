@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from flask import Blueprint, jsonify, request
 
-from visual_memory.api.pipelines import get_remember_pipeline, get_scan_pipeline
+from visual_memory.api.pipelines import get_remember_pipeline, reload_scan_database_if_loaded
 from visual_memory.utils import get_logger
 
 
@@ -32,13 +32,12 @@ def _remember_single(image_file, prompt: str) -> tuple[dict, int]:
 
     if result.get("success"):
         try:
-            get_scan_pipeline().reload_database()
+            reload_scan_database_if_loaded()
         except Exception as exc:
-            return {
-                "error": "database sync failed",
-                "detail": str(exc),
-                "result": result,
-            }, 500
+            _log.warning({
+                "event": "remember_cache_reload_failed",
+                "error": str(exc),
+            })
     return result, 200
 
 
@@ -100,13 +99,12 @@ def _remember_multi(image_files, prompt: str) -> tuple[dict, int]:
 
     if result.get("success"):
         try:
-            get_scan_pipeline().reload_database()
+            reload_scan_database_if_loaded()
         except Exception as exc:
-            return {
-                "error": "database sync failed",
-                "detail": str(exc),
-                "result": result,
-            }, 500
+            _log.warning({
+                "event": "remember_multi_cache_reload_failed",
+                "error": str(exc),
+            })
         result["images_tried"] = len(tmp_paths)
         result["images_with_detection"] = detected_count
 

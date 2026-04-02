@@ -332,6 +332,30 @@ class DatabaseStore:
         return cur.rowcount
 
     @_synchronized
+    def prune_items_by_label_max_count(self, label: str, max_count: int) -> int:
+        """
+        Keep at most max_count newest items for label, evicting oldest first.
+        Returns number of deleted rows.
+        """
+        limit = int(max_count)
+        if limit < 1:
+            raise ValueError("max_count must be >= 1")
+        rows = self._conn.execute(
+            "SELECT id FROM items WHERE label = ? ORDER BY timestamp DESC, id DESC",
+            (label,),
+        ).fetchall()
+        if len(rows) <= limit:
+            return 0
+        drop_ids = [row[0] for row in rows[limit:]]
+        placeholders = ",".join("?" for _ in drop_ids)
+        cur = self._conn.execute(
+            f"DELETE FROM items WHERE id IN ({placeholders})",
+            tuple(drop_ids),
+        )
+        self._conn.commit()
+        return cur.rowcount
+
+    @_synchronized
     def save_projection_head(self, state_dict: dict) -> None:
         buf = io.BytesIO()
         torch.save(state_dict, buf)
