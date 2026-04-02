@@ -19,9 +19,13 @@ from PIL import Image
 
 import visual_memory.api.pipelines as _pm
 from visual_memory.api.pipelines import (
+    apply_scan_head_weight_if_loaded,
+    apply_scan_learning_if_loaded,
     get_database,
     get_scan_pipeline,
     get_settings,
+    reload_scan_database_if_loaded,
+    reload_scan_head_if_loaded,
 )
 from visual_memory.config.settings import Settings as _Settings
 from visual_memory.utils.device_utils import get_device
@@ -545,7 +549,7 @@ def debug_wipe():
 
     if target in ("all", "items"):
         report["items_deleted"] = db.clear_items()
-        get_scan_pipeline().reload_database()
+        reload_scan_database_if_loaded()
 
     if target in ("all", "sightings"):
         report["sightings_deleted"] = db.clear_sightings()
@@ -564,7 +568,7 @@ def debug_wipe():
             report["weights_file_deleted"] = True
         else:
             report["weights_file_deleted"] = False
-        get_scan_pipeline().reload_head()
+        reload_scan_head_if_loaded()
         report["weights_db_cleared"] = True
 
     if target == "settings":
@@ -573,8 +577,8 @@ def debug_wipe():
         s = get_settings()
         for key in _ML_PATCHABLE:
             setattr(s, key, getattr(defaults, key))
-        get_scan_pipeline().set_enable_learning(s.enable_learning)
-        get_scan_pipeline().set_head_weight(
+        apply_scan_learning_if_loaded(s.enable_learning)
+        apply_scan_head_weight_if_loaded(
             s.projection_head_weight,
             s.projection_head_ramp_at,
             s.projection_head_ramp_power,
@@ -640,16 +644,15 @@ def debug_patch_config():
     for key, value in applied.items():
         setattr(s, key, value)
 
-    # Propagate ML learning fields to pipeline so they take effect immediately
-    pipeline = get_scan_pipeline()
+    # Propagate ML learning fields only when scan pipeline is already warm.
     if "enable_learning" in applied:
-        pipeline.set_enable_learning(s.enable_learning)
+        apply_scan_learning_if_loaded(s.enable_learning)
     if (
         "projection_head_weight" in applied
         or "projection_head_ramp_at" in applied
         or "projection_head_ramp_power" in applied
     ):
-        pipeline.set_head_weight(
+        apply_scan_head_weight_if_loaded(
             s.projection_head_weight,
             s.projection_head_ramp_at,
             s.projection_head_ramp_power,

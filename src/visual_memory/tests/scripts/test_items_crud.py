@@ -75,6 +75,17 @@ def test_delete_existing_item():
     assert len(reload_called) >= 1
 
 
+def test_delete_existing_item_without_loaded_scan_pipeline():
+    orig_scan = _pm._scan_pipeline
+    _pm._scan_pipeline = None
+    seed_item(db, "camera", emb_seed=22)
+    resp = client.delete("/items/camera")
+    _pm._scan_pipeline = orig_scan
+    assert_status(resp, 200)
+    data = resp.get_json()
+    assert data.get("deleted") is True
+
+
 def test_delete_nonexistent_item():
     resp = client.delete("/items/doesnotexist_xyz")
     assert_status(resp, 404)
@@ -92,6 +103,18 @@ def test_rename_success():
     assert data.get("old_label") == "wallet"
     assert data.get("new_label") == "my wallet"
     assert len(reload_called) >= 1
+
+
+def test_rename_success_without_loaded_scan_pipeline():
+    orig_scan = _pm._scan_pipeline
+    _pm._scan_pipeline = None
+    seed_item(db, "hat", emb_seed=23)
+    resp = client.post("/items/hat/rename", json={"new_label": "cap"})
+    _pm._scan_pipeline = orig_scan
+    assert_status(resp, 200)
+    data = resp.get_json()
+    assert data.get("renamed") is True
+    assert data.get("new_label") == "cap"
 
 
 def test_rename_same_label():
@@ -146,8 +169,10 @@ for name, fn in [
     ("items:list_empty", test_list_items_empty),
     ("items:filter_by_label", test_list_items_filter_by_label),
     ("items:delete_existing", test_delete_existing_item),
+    ("items:delete_existing_no_scan_pipeline", test_delete_existing_item_without_loaded_scan_pipeline),
     ("items:delete_nonexistent", test_delete_nonexistent_item),
     ("items:rename_success", test_rename_success),
+    ("items:rename_success_no_scan_pipeline", test_rename_success_without_loaded_scan_pipeline),
     ("items:rename_same_label", test_rename_same_label),
     ("items:rename_empty_label", test_rename_empty_label),
     ("items:rename_missing_field", test_rename_missing_new_label),

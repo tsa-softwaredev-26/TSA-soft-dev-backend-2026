@@ -5,7 +5,7 @@ from visual_memory.api.pipelines import (
     apply_scan_learning_if_loaded,
     get_database,
     get_feedback_store,
-    get_scan_pipeline,
+    get_loaded_scan_pipeline,
     get_settings,
 )
 from ._json_utils import coerce_json_value, read_json_dict
@@ -64,15 +64,22 @@ def get_settings_route():
         }
     """
     s = get_settings()
-    pipeline = get_scan_pipeline()
+    pipeline = get_loaded_scan_pipeline()
     counts = get_feedback_store().count()
 
+    enable_learning = pipeline._enable_learning if pipeline is not None else s.enable_learning
+    projection_head_weight = pipeline._head_weight if pipeline is not None else s.projection_head_weight
+    projection_head_ramp_at = pipeline._head_ramp_at if pipeline is not None else s.projection_head_ramp_at
+    projection_head_ramp_power = pipeline._head_ramp_power if pipeline is not None else s.projection_head_ramp_power
+    head_trained = pipeline._head_trained if pipeline is not None else False
+    triplet_count = pipeline._triplet_count if pipeline is not None else 0
+
     return jsonify({
-        "enable_learning": pipeline._enable_learning,
+        "enable_learning": enable_learning,
         "min_feedback_for_training": s.min_feedback_for_training,
-        "projection_head_weight": pipeline._head_weight,
-        "projection_head_ramp_at": pipeline._head_ramp_at,
-        "projection_head_ramp_power": pipeline._head_ramp_power,
+        "projection_head_weight": projection_head_weight,
+        "projection_head_ramp_at": projection_head_ramp_at,
+        "projection_head_ramp_power": projection_head_ramp_power,
         "projection_head_epochs": s.projection_head_epochs,
         "triplet_margin": s.triplet_margin,
         "triplet_positive_weight": s.triplet_positive_weight,
@@ -85,8 +92,8 @@ def get_settings_route():
         "scan_similarity_margin": s.scan_similarity_margin,
         "scan_similarity_margin_document": s.scan_similarity_margin_document,
         "remember_max_prototypes_per_label": s.remember_max_prototypes_per_label,
-        "head_trained": pipeline._head_trained,
-        "triplet_count": pipeline._triplet_count,
+        "head_trained": head_trained,
+        "triplet_count": triplet_count,
         "feedback_counts": counts,
     })
 

@@ -215,6 +215,16 @@ def test_patch_user_settings_learning_enabled():
     assert data.get("learning_enabled") is False
 
 
+def test_patch_user_settings_learning_enabled_without_loaded_scan_pipeline():
+    orig_scan = _pm._scan_pipeline
+    _pm._scan_pipeline = None
+    resp = client.patch("/user-settings", json={"learning_enabled": True})
+    _pm._scan_pipeline = orig_scan
+    assert_status(resp, 200)
+    data = resp.get_json()
+    assert data.get("learning_enabled") is True
+
+
 def test_patch_user_settings_button_layout():
     resp = client.patch("/user-settings", json={"button_layout": "swapped"})
     assert_status(resp, 200)
@@ -238,6 +248,28 @@ def test_patch_user_settings_all_fields_and_persistence():
     saved = db.load_user_settings() or {}
     for key, value in payload.items():
         assert saved.get(key) == value
+
+
+def test_get_settings_without_loaded_scan_pipeline():
+    orig_scan = _pm._scan_pipeline
+    _pm._scan_pipeline = None
+    resp = client.get("/settings")
+    _pm._scan_pipeline = orig_scan
+    assert_status(resp, 200)
+    data = resp.get_json()
+    assert data.get("enable_learning") == _pm._settings.enable_learning
+    assert data.get("projection_head_weight") == _pm._settings.projection_head_weight
+
+
+def test_patch_settings_without_loaded_scan_pipeline():
+    orig_scan = _pm._scan_pipeline
+    _pm._scan_pipeline = None
+    resp = client.patch("/settings", json={"enable_learning": False, "projection_head_weight": 0.6})
+    _pm._scan_pipeline = orig_scan
+    assert_status(resp, 200)
+    data = resp.get_json()
+    assert data.get("enable_learning") is False
+    assert data.get("projection_head_weight") == 0.6
 
 
 def test_patch_user_settings_invalid_json():
@@ -295,8 +327,11 @@ for name, fn in [
     ("user_settings:patch_invalid_voice_speed", test_patch_user_settings_invalid_voice_speed),
     ("user_settings:patch_valid_voice_speed", test_patch_user_settings_valid_voice_speed),
     ("user_settings:patch_learning_enabled", test_patch_user_settings_learning_enabled),
+    ("user_settings:patch_learning_enabled_no_scan_pipeline", test_patch_user_settings_learning_enabled_without_loaded_scan_pipeline),
     ("user_settings:patch_button_layout", test_patch_user_settings_button_layout),
     ("user_settings:patch_all_fields_and_persist", test_patch_user_settings_all_fields_and_persistence),
+    ("settings:get_no_scan_pipeline", test_get_settings_without_loaded_scan_pipeline),
+    ("settings:patch_no_scan_pipeline", test_patch_settings_without_loaded_scan_pipeline),
     ("user_settings:patch_invalid_json", test_patch_user_settings_invalid_json),
     ("user_settings:fast_mode_disables_second_pass", test_fast_mode_disables_second_pass),
     ("user_settings:accurate_mode_enables_second_pass", test_accurate_mode_enables_second_pass),
