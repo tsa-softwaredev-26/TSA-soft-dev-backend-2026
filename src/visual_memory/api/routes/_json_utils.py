@@ -25,3 +25,36 @@ def read_json_dict(request: Request, *, allow_empty: bool = True) -> tuple[dict[
     if not isinstance(data, dict):
         return {}, ({"error": "json body must be an object"}, 400)
     return data, None
+
+
+def coerce_json_value(raw: Any, expected_type: type) -> tuple[Any | None, str | None]:
+    """Coerce a JSON field with strict bool/int/float semantics."""
+    if expected_type is bool:
+        if isinstance(raw, bool):
+            return raw, None
+        return None, "expected boolean"
+
+    if expected_type is int:
+        # bool is a subclass of int; reject it explicitly.
+        if isinstance(raw, bool):
+            return None, "expected integer"
+        if isinstance(raw, int):
+            return raw, None
+        return None, "expected integer"
+
+    if expected_type is float:
+        if isinstance(raw, bool):
+            return None, "expected number"
+        if isinstance(raw, (int, float)):
+            return float(raw), None
+        return None, "expected number"
+
+    if expected_type is str:
+        if isinstance(raw, str):
+            return raw, None
+        return None, "expected string"
+
+    try:
+        return expected_type(raw), None
+    except (TypeError, ValueError):
+        return None, f"expected {expected_type.__name__}"

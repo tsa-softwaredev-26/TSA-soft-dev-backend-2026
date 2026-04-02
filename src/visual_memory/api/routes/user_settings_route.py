@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify
 
 from visual_memory.api.pipelines import get_database, get_scan_pipeline, get_settings, get_user_settings
 from visual_memory.config.user_settings import PerformanceMode, _BUTTON_LAYOUTS
-from ._json_utils import read_json_dict
+from ._json_utils import coerce_json_value, read_json_dict
 
 user_settings_bp = Blueprint("user_settings", __name__)
 
@@ -59,10 +59,9 @@ def patch_user_settings():
         if key not in data:
             continue
         raw = data[key]
-        try:
-            value = expected_type(raw)
-        except (TypeError, ValueError):
-            errors[key] = f"expected {expected_type.__name__}, got {type(raw).__name__}"
+        value, coerce_error = coerce_json_value(raw, expected_type)
+        if coerce_error is not None:
+            errors[key] = f"{coerce_error}, got {type(raw).__name__}"
             continue
 
         if key == "performance_mode":

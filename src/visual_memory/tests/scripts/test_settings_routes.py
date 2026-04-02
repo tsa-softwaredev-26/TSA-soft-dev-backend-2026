@@ -31,7 +31,8 @@ def test_get_settings_fields():
                   "triplet_margin", "triplet_positive_weight", "triplet_negative_weight",
                   "triplet_hard_negative_boost", "similarity_threshold",
                   "similarity_threshold_baseline", "similarity_threshold_personalized",
-                  "similarity_threshold_document",
+                  "similarity_threshold_document", "scan_similarity_margin",
+                  "scan_similarity_margin_document", "remember_max_prototypes_per_label",
                   "head_trained", "triplet_count", "feedback_counts"):
         assert field in data, f"missing field: {field}"
 
@@ -130,11 +131,36 @@ def test_patch_settings_similarity_thresholds():
         assert saved.get(key) == value
 
 
+def test_patch_settings_margin_and_prototype_fields():
+    payload = {
+        "scan_similarity_margin": 0.04,
+        "scan_similarity_margin_document": 0.02,
+        "remember_max_prototypes_per_label": 5,
+    }
+    resp = client.patch("/settings", json=payload)
+    assert_status(resp, 200)
+    data = resp.get_json()
+    for key, value in payload.items():
+        assert data.get(key) == value
+    saved = db.load_ml_settings() or {}
+    for key, value in payload.items():
+        assert saved.get(key) == value
+
+
 def test_patch_settings_invalid_similarity_threshold():
     resp = client.patch("/settings", json={"similarity_threshold_document": 1.1})
     assert_status(resp, 400)
     data = resp.get_json()
     assert "errors" in data
+
+
+def test_patch_settings_invalid_margin_and_prototype_fields():
+    resp = client.patch("/settings", json={"scan_similarity_margin": -0.01})
+    assert_status(resp, 400)
+    resp = client.patch("/settings", json={"scan_similarity_margin_document": -0.1})
+    assert_status(resp, 400)
+    resp = client.patch("/settings", json={"remember_max_prototypes_per_label": 0})
+    assert_status(resp, 400)
 
 
 def test_patch_settings_invalid_json():
@@ -182,6 +208,38 @@ def test_patch_user_settings_valid_voice_speed():
     assert data.get("voice_speed") == 1.5
 
 
+def test_patch_user_settings_learning_enabled():
+    resp = client.patch("/user-settings", json={"learning_enabled": False})
+    assert_status(resp, 200)
+    data = resp.get_json()
+    assert data.get("learning_enabled") is False
+
+
+def test_patch_user_settings_button_layout():
+    resp = client.patch("/user-settings", json={"button_layout": "swapped"})
+    assert_status(resp, 200)
+    data = resp.get_json()
+    assert data.get("button_layout") == "swapped"
+
+
+def test_patch_user_settings_all_fields_and_persistence():
+    payload = {
+        "performance_mode": "accurate",
+        "voice_speed": 1.25,
+        "learning_enabled": False,
+        "button_layout": "swapped",
+    }
+    resp = client.patch("/user-settings", json=payload)
+    assert_status(resp, 200)
+    data = resp.get_json()
+    for key, value in payload.items():
+        assert data.get(key) == value
+
+    saved = db.load_user_settings() or {}
+    for key, value in payload.items():
+        assert saved.get(key) == value
+
+
 def test_patch_user_settings_invalid_json():
     resp = client.patch(
         "/user-settings",
@@ -227,13 +285,18 @@ for name, fn in [
     ("settings:patch_invalid_new_ml_fields", test_patch_settings_invalid_new_ml_fields),
     ("settings:patch_persists_new_ml_fields", test_patch_settings_persists_new_ml_fields),
     ("settings:patch_similarity_thresholds", test_patch_settings_similarity_thresholds),
+    ("settings:patch_margin_and_prototype_fields", test_patch_settings_margin_and_prototype_fields),
     ("settings:patch_invalid_similarity_threshold", test_patch_settings_invalid_similarity_threshold),
+    ("settings:patch_invalid_margin_and_prototype_fields", test_patch_settings_invalid_margin_and_prototype_fields),
     ("settings:patch_invalid_json", test_patch_settings_invalid_json),
     ("user_settings:get_fields", test_get_user_settings_fields),
     ("user_settings:patch_performance_mode", test_patch_user_settings_performance_mode),
     ("user_settings:patch_invalid_performance_mode", test_patch_user_settings_invalid_performance_mode),
     ("user_settings:patch_invalid_voice_speed", test_patch_user_settings_invalid_voice_speed),
     ("user_settings:patch_valid_voice_speed", test_patch_user_settings_valid_voice_speed),
+    ("user_settings:patch_learning_enabled", test_patch_user_settings_learning_enabled),
+    ("user_settings:patch_button_layout", test_patch_user_settings_button_layout),
+    ("user_settings:patch_all_fields_and_persist", test_patch_user_settings_all_fields_and_persistence),
     ("user_settings:patch_invalid_json", test_patch_user_settings_invalid_json),
     ("user_settings:fast_mode_disables_second_pass", test_fast_mode_disables_second_pass),
     ("user_settings:accurate_mode_enables_second_pass", test_accurate_mode_enables_second_pass),

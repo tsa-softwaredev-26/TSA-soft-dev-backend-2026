@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
 
 from visual_memory.api.pipelines import get_database, get_feedback_store, get_scan_pipeline, get_settings
-from ._json_utils import read_json_dict
+from ._json_utils import coerce_json_value, read_json_dict
 
 settings_bp = Blueprint("settings", __name__)
 
@@ -22,6 +22,9 @@ _PATCHABLE = {
     "similarity_threshold_baseline": float,
     "similarity_threshold_personalized": float,
     "similarity_threshold_document": float,
+    "scan_similarity_margin": float,
+    "scan_similarity_margin_document": float,
+    "remember_max_prototypes_per_label": int,
 }
 
 
@@ -45,6 +48,9 @@ def get_settings_route():
             "similarity_threshold_baseline": float,
             "similarity_threshold_personalized": float,
             "similarity_threshold_document": float,
+            "scan_similarity_margin": float,
+            "scan_similarity_margin_document": float,
+            "remember_max_prototypes_per_label": int,
             "head_trained": bool,
             "triplet_count": int,
             "feedback_counts": {"positives": int, "negatives": int, "triplets": int}
@@ -69,6 +75,9 @@ def get_settings_route():
         "similarity_threshold_baseline": s.similarity_threshold_baseline,
         "similarity_threshold_personalized": s.similarity_threshold_personalized,
         "similarity_threshold_document": s.similarity_threshold_document,
+        "scan_similarity_margin": s.scan_similarity_margin,
+        "scan_similarity_margin_document": s.scan_similarity_margin_document,
+        "remember_max_prototypes_per_label": s.remember_max_prototypes_per_label,
         "head_trained": pipeline._head_trained,
         "triplet_count": pipeline._triplet_count,
         "feedback_counts": counts,
@@ -94,6 +103,9 @@ def patch_settings():
         similarity_threshold_baseline float - scan threshold when personalization is inactive (0.0-1.0)
         similarity_threshold_personalized float - scan threshold when personalization is active (0.0-1.0)
         similarity_threshold_document float - override threshold for document-like labels (0.0-1.0)
+        scan_similarity_margin float - min top1-top2 similarity gap for non-document labels (>=0)
+        scan_similarity_margin_document float - min top1-top2 similarity gap for document labels (>=0)
+        remember_max_prototypes_per_label int - keep this many newest teaches per label (>=1)
 
     Unrecognised fields are ignored. Type errors return 400.
 
@@ -110,10 +122,9 @@ def patch_settings():
         if key not in data:
             continue
         raw = data[key]
-        try:
-            value = expected_type(raw)
-        except (TypeError, ValueError):
-            errors[key] = f"expected {expected_type.__name__}, got {type(raw).__name__}"
+        value, coerce_error = coerce_json_value(raw, expected_type)
+        if coerce_error is not None:
+            errors[key] = f"{coerce_error}, got {type(raw).__name__}"
             continue
 
         if key == "projection_head_weight" and not (0.0 <= value <= 1.0):
@@ -134,7 +145,13 @@ def patch_settings():
         if key.startswith("similarity_threshold") and not (0.0 <= value <= 1.0):
             errors[key] = "must be between 0.0 and 1.0"
             continue
+        if key.startswith("scan_similarity_margin") and value < 0.0:
+            errors[key] = "must be >= 0.0"
+            continue
         if key in ("min_feedback_for_training", "projection_head_ramp_at", "projection_head_epochs") and value < 1:
+            errors[key] = "must be >= 1"
+            continue
+        if key == "remember_max_prototypes_per_label" and value < 1:
             errors[key] = "must be >= 1"
             continue
 
@@ -177,6 +194,9 @@ def patch_settings():
         "similarity_threshold_baseline": s.similarity_threshold_baseline,
         "similarity_threshold_personalized": s.similarity_threshold_personalized,
         "similarity_threshold_document": s.similarity_threshold_document,
+        "scan_similarity_margin": s.scan_similarity_margin,
+        "scan_similarity_margin_document": s.scan_similarity_margin_document,
+        "remember_max_prototypes_per_label": s.remember_max_prototypes_per_label,
     })
 
     # return full state after applying changes
