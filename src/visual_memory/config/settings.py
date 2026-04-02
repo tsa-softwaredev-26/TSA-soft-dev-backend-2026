@@ -25,8 +25,10 @@ class Settings:
     similarity_threshold_baseline: Optional[float] = None
     similarity_threshold_personalized: Optional[float] = None
     similarity_threshold_document: Optional[float] = None
-    scan_similarity_margin: float = 0.0
-    scan_similarity_margin_document: Optional[float] = None
+    # Top1-top2 similarity margin gate. Keep this on by default to suppress
+    # false positives from near-tie matches in scan mode.
+    scan_similarity_margin: float = 0.05
+    scan_similarity_margin_document: Optional[float] = 0.05
     dedup_iou_threshold: float = 0.5
 
     # Narration (scan mode)

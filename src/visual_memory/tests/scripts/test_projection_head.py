@@ -78,9 +78,31 @@ def test_feedback_store_roundtrip():
         store.record_negative(anc, q, label="wallet")
         triplets = store.load_triplets()
         counts = store.count()
-        assert len(triplets) == 4, f"triplets={len(triplets)}, expected 4"
+        assert len(triplets) == 2, f"triplets={len(triplets)}, expected 2"
         assert counts["positives"] == 2, f"positives={counts['positives']}, expected 2"
         assert counts["negatives"] == 2, f"negatives={counts['negatives']}, expected 2"
+        assert counts["triplets"] == 2, f"triplets={counts['triplets']}, expected 2"
+
+
+def test_feedback_store_hard_negative_mining_picks_closest_negative():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        from visual_memory.database.store import DatabaseStore
+
+        db = DatabaseStore(str(Path(tmpdir) / "test.db"))
+        store = FeedbackStore(db)
+        anchor = torch.nn.functional.normalize(torch.tensor([[1.0, 0.0, 0.0, 0.0]]), dim=1)
+        positive = torch.nn.functional.normalize(torch.tensor([[0.99, 0.01, 0.0, 0.0]]), dim=1)
+        easy_negative = torch.nn.functional.normalize(torch.tensor([[0.0, 1.0, 0.0, 0.0]]), dim=1)
+        hard_negative = torch.nn.functional.normalize(torch.tensor([[0.98, 0.02, 0.0, 0.0]]), dim=1)
+
+        store.record_positive(anchor, positive, label="wallet")
+        store.record_negative(anchor, easy_negative, label="wallet")
+        store.record_negative(anchor, hard_negative, label="wallet")
+
+        triplets = store.load_triplets()
+        assert len(triplets) == 1
+        mined_negative = triplets[0][2]
+        assert torch.allclose(mined_negative, hard_negative, atol=1e-6)
 
 
 # Test 5: ProjectionTrainer.train_step returns float, loss decreases
@@ -113,6 +135,7 @@ if __name__ == "__main__":
         ("projection:triplet_loss_nonzero", test_triplet_loss_nonzero),
         ("projection:triplet_loss_weighting_and_boost_nonnegative", test_triplet_loss_weighting_and_boost_nonnegative),
         ("projection:feedback_store_roundtrip", test_feedback_store_roundtrip),
+        ("projection:feedback_store_hard_negative_mining", test_feedback_store_hard_negative_mining_picks_closest_negative),
         ("projection:trainer_loss_decreases", test_trainer_loss_decreases),
     ]:
         runner.run(name, fn)

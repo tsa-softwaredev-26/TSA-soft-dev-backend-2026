@@ -156,6 +156,10 @@ class DatabaseStore:
         buf = io.BytesIO(blob)
         return torch.load(buf, map_location="cpu", weights_only=True)
 
+    @staticmethod
+    def _cosine_similarity(anchor: torch.Tensor, candidate: torch.Tensor) -> float:
+        return float(torch.nn.functional.cosine_similarity(anchor, candidate).item())
+
     @_synchronized
     def add_item(
         self,
@@ -444,8 +448,14 @@ class DatabaseStore:
         return cur.lastrowid
 
     @_synchronized
-    def load_feedback_triplets(self) -> list:
-        """Pair each positive with each negative per label -> (anchor, positive, negative)."""
+    def load_feedback_triplets(self, mine_hard_negatives: bool = True) -> list:
+        """Return training triplets from feedback rows.
+
+        When hard-negative mining is enabled, each positive is paired with the
+        single most similar negative for the same label. This keeps retraining
+        focused on the most confusing counterexamples while avoiding the old
+        Cartesian explosion.
+        """
         rows = self._conn.execute(
             "SELECT label, feedback_type, anchor_blob, query_blob, timestamp "
             "FROM feedback ORDER BY timestamp ASC"
@@ -465,13 +475,24 @@ class DatabaseStore:
             negatives = groups["negative"]
             if not positives or not negatives:
                 continue
-            for _, anc_p, q_p in positives:
-                for _, _anc_n, q_n in negatives:
-                    triplets.append((anc_p, q_p, q_n))
+            if mine_hard_negatives:
+                for _, anc_p, q_p in positives:
+                    _ts_n, _anc_n, hard_negative = max(
+                        negatives,
+                        key=lambda item: (
+                            self._cosine_similarity(anc_p, item[2]),
+                            item[0],
+                        ),
+                    )
+                    triplets.append((anc_p, q_p, hard_negative))
+            else:
+                for _, anc_p, q_p in positives:
+                    for _, _anc_n, q_n in negatives:
+                        triplets.append((anc_p, q_p, q_n))
         return triplets
 
     @_synchronized
-    def count_feedback(self) -> dict:
+    def count_feedback(self, mine_hard_negatives: bool = True) -> dict:
         row = self._conn.execute(
             "SELECT "
             "  SUM(CASE WHEN feedback_type = 'positive' THEN 1 ELSE 0 END), "
@@ -484,14 +505,18 @@ class DatabaseStore:
         else:
             positives = row[0] or 0
             negatives = row[1] or 0
-        # triplets = cartesian product of pos x neg per label
+        # Match the default retraining strategy so the reported count reflects
+        # the actual number of mined triplets.
         label_rows = self._conn.execute(
             "SELECT label, "
             "  SUM(CASE WHEN feedback_type = 'positive' THEN 1 ELSE 0 END) AS p, "
             "  SUM(CASE WHEN feedback_type = 'negative' THEN 1 ELSE 0 END) AS n "
             "FROM feedback GROUP BY label"
         ).fetchall()
-        triplets = sum(p * n for _, p, n in label_rows)
+        if mine_hard_negatives:
+            triplets = sum(int(p or 0) for _, p, n in label_rows if (p or 0) and (n or 0))
+        else:
+            triplets = sum(int(p or 0) * int(n or 0) for _, p, n in label_rows)
         return {"positives": positives, "negatives": negatives, "triplets": triplets}
 
     @_synchronized

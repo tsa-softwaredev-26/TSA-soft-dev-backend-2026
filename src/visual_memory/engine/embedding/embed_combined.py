@@ -47,4 +47,5 @@ def make_combined_embedding(
     if image_scale == 0.0 and text_scale == 0.0:
         image_scale = 1.0
 
-    return torch.cat([img_norm * image_scale, text_part * text_scale], dim=1)
+    combined = torch.cat([img_norm * image_scale, text_part * text_scale], dim=1)
+    return F.normalize(combined, dim=1)

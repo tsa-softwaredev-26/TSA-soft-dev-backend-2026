@@ -35,6 +35,8 @@ def test_get_settings_fields():
                   "scan_similarity_margin_document", "remember_max_prototypes_per_label",
                   "head_trained", "triplet_count", "feedback_counts"):
         assert field in data, f"missing field: {field}"
+    assert data.get("scan_similarity_margin", 0.0) > 0.0
+    assert data.get("scan_similarity_margin_document", 0.0) > 0.0
 
 
 def test_patch_settings_enable_learning():

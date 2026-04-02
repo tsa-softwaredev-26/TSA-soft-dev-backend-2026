@@ -31,8 +31,11 @@ class FeedbackStore:
     ) -> None:
         self._db.add_feedback(label, "negative", anchor_emb, query_emb)
 
-    def load_triplets(self) -> List[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
-        return self._db.load_feedback_triplets()
+    def load_triplets(
+        self,
+        mine_hard_negatives: bool = True,
+    ) -> List[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+        return self._db.load_feedback_triplets(mine_hard_negatives=mine_hard_negatives)
 
-    def count(self) -> Dict[str, int]:
-        return self._db.count_feedback()
+    def count(self, mine_hard_negatives: bool = True) -> Dict[str, int]:
+        return self._db.count_feedback(mine_hard_negatives=mine_hard_negatives)

@@ -70,6 +70,13 @@ def _load_results_csv(path: Path) -> List[dict]:
                     "personalized_threshold_used": _to_float(row, "personalized_threshold_used"),
                     "baseline_correct": _to_int(row, "baseline_correct"),
                     "personalized_correct": _to_int(row, "personalized_correct"),
+                    "yoloe_detected": _to_int(row, "yoloe_detected"),
+                    "yoloe_box_count": _to_int(row, "yoloe_box_count"),
+                    "yoloe_max_confidence": _to_float(row, "yoloe_max_confidence"),
+                    "yoloe_mean_confidence": _to_float(row, "yoloe_mean_confidence"),
+                    "yoloe_confidence_threshold": _to_float(row, "yoloe_confidence_threshold"),
+                    "yoloe_iou_threshold": _to_float(row, "yoloe_iou_threshold"),
+                    "yoloe_lat_detect_s": _to_float(row, "yoloe_lat_detect_s"),
                     "dino_detected": _to_int(row, "dino_detected"),
                     "dino_confidence": _to_float(row, "dino_confidence"),
                     "depth_absolute_error": row.get("depth_absolute_error", ""),
@@ -77,6 +84,7 @@ def _load_results_csv(path: Path) -> List[dict]:
                     "lat_embed_img_s": _to_float(row, "lat_embed_img_s"),
                     "lat_ocr_s": _to_float(row, "lat_ocr_s"),
                     "lat_embed_txt_s": _to_float(row, "lat_embed_txt_s"),
+                    "lat_yoloe_s": _to_float(row, "lat_yoloe_s"),
                     "lat_retrieve_bl_s": _to_float(row, "lat_retrieve_bl_s"),
                     "lat_retrieve_pe_s": _to_float(row, "lat_retrieve_pe_s"),
                     "lat_detect_s": _to_float(row, "lat_detect_s"),
@@ -178,6 +186,34 @@ def _per_condition(results: List[dict]) -> Dict[str, dict]:
     return by_cond
 
 
+def _per_yoloe(results: List[dict]) -> Dict[str, Dict[str, dict]]:
+    by_label: Dict[str, dict] = {}
+    by_cond: Dict[str, dict] = {}
+    for r in results:
+        for key, bucket_name in (
+            (r["label"], "by_label"),
+            (r.get("condition_bucket", ""), "by_cond"),
+        ):
+            bucket = by_label if bucket_name == "by_label" else by_cond
+            if key not in bucket:
+                bucket[key] = dict(
+                    n=0,
+                    detected=0,
+                    box_counts=[],
+                    max_conf=[],
+                    mean_conf=[],
+                    latencies=[],
+                )
+            s = bucket[key]
+            s["n"] += 1
+            s["detected"] += r.get("yoloe_detected", 0)
+            s["box_counts"].append(r.get("yoloe_box_count", 0))
+            s["max_conf"].append(r.get("yoloe_max_confidence", 0.0))
+            s["mean_conf"].append(r.get("yoloe_mean_confidence", 0.0))
+            s["latencies"].append(r.get("yoloe_lat_detect_s", 0.0))
+    return {"by_label": by_label, "by_condition": by_cond}
+
+
 def _mean(xs: list) -> Optional[float]:
     if not xs:
         return None
@@ -237,6 +273,13 @@ def generate(results_path: Path, metadata_path: Path, output_path: Path) -> None
         )
     else:
         a(f"**Similarity threshold**: {meta['similarity_threshold']:.2f}")
+    strategy = meta.get("threshold_strategy")
+    if strategy:
+        source = meta.get("threshold_settings_source", "")
+        if source:
+            a(f"**Threshold strategy**: {strategy} ({source})")
+        else:
+            a(f"**Threshold strategy**: {strategy}")
     n_train = meta.get('n_triplet_train', meta.get('n_train', 'N/A'))
     n_test = meta.get('n_test', 'N/A')
     seed = meta.get('seed', 'default')
@@ -364,6 +407,65 @@ def generate(results_path: Path, metadata_path: Path, output_path: Path) -> None
     a("---")
     a("")
 
+    # YOLOE scan detector section
+    yoloe_meta = meta.get("yoloe_summary") or {}
+    yoloe = _per_yoloe(results)
+    yoloe_by_label = yoloe["by_label"]
+    yoloe_by_cond = yoloe["by_condition"]
+    total_yoloe_n = sum(s["n"] for s in yoloe_by_label.values())
+    total_yoloe_detected = sum(s["detected"] for s in yoloe_by_label.values())
+    mean_boxes = _mean([v for s in yoloe_by_label.values() for v in s["box_counts"]]) or 0.0
+    mean_max_conf = _mean([v for s in yoloe_by_label.values() for v in s["max_conf"]]) or 0.0
+    mean_mean_conf = _mean([v for s in yoloe_by_label.values() for v in s["mean_conf"]]) or 0.0
+    mean_lat = _mean([v for s in yoloe_by_label.values() for v in s["latencies"]]) or 0.0
+
+    a("## Detection (YOLOE)")
+    a("")
+    if isinstance(yoloe_meta, dict) and not yoloe_meta.get("available", True):
+        a("YOLOE scan-detector benchmark was skipped.")
+    else:
+        a(_row("Label", "Detected", "Rate", "Mean Boxes", "Mean Max Conf", "Mean Conf", "Mean Latency"))
+        a(_sep(14, 12, 8, 11, 14, 10, 12))
+        for lbl in sorted(yoloe_by_label):
+            s = yoloe_by_label[lbl]
+            n = s["n"]
+            a(_row(
+                lbl,
+                f"{s['detected']}/{n}",
+                _pct(s["detected"], n),
+                f"{(_mean(s['box_counts']) or 0.0):.2f}",
+                f"{(_mean(s['max_conf']) or 0.0):.4f}",
+                f"{(_mean(s['mean_conf']) or 0.0):.4f}",
+                f"{(_mean(s['latencies']) or 0.0):.3f}s",
+            ))
+        a(_row(
+            "**Total**",
+            f"**{total_yoloe_detected}/{total_yoloe_n}**",
+            f"**{_pct(total_yoloe_detected, total_yoloe_n)}**",
+            f"**{mean_boxes:.2f}**",
+            f"**{mean_max_conf:.4f}**",
+            f"**{mean_mean_conf:.4f}**",
+            f"**{mean_lat:.3f}s**",
+        ))
+        a("")
+        a("### YOLOE By Condition")
+        a("")
+        a(_row("Condition", "N", "Detected", "Rate", "Mean Boxes"))
+        a(_sep(18, 4, 12, 8, 11))
+        for cond in sorted(yoloe_by_cond):
+            s = yoloe_by_cond[cond]
+            n = s["n"]
+            a(_row(
+                cond or "(unknown)",
+                str(n),
+                f"{s['detected']}/{n}",
+                _pct(s["detected"], n),
+                f"{(_mean(s['box_counts']) or 0.0):.2f}",
+            ))
+    a("")
+    a("---")
+    a("")
+
     # depth table
     a("## Depth Estimation (detected images with ground truth distance)")
     a("")
@@ -483,6 +585,7 @@ def generate(results_path: Path, metadata_path: Path, output_path: Path) -> None
         ("embed_image",  "lat_embed_img_s"),
         ("ocr",          "lat_ocr_s"),
         ("embed_text",   "lat_embed_txt_s"),
+        ("yoloe",        "lat_yoloe_s"),
         ("detect",       "lat_detect_s"),
         ("retrieve_bl",  "lat_retrieve_bl_s"),
         ("retrieve_pl",  "lat_retrieve_pe_s"),

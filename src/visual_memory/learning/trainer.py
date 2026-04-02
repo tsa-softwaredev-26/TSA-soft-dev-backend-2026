@@ -135,6 +135,11 @@ def _build_parser(settings: Settings) -> argparse.ArgumentParser:
         default=None,
         help="Deprecated option. Use --db-path only.",
     )
+    parser.add_argument(
+        "--no-hard-negative-mining",
+        action="store_true",
+        help="Legacy mode: train on the full positive x negative Cartesian product.",
+    )
     return parser
 
 
@@ -146,10 +151,11 @@ def main() -> int:
         print("error: --feedback-dir has been removed. Use --db-path for feedback storage.")
         return 2
 
+    mine_hard_negatives = not args.no_hard_negative_mining
     db = DatabaseStore(args.db_path)
     store = FeedbackStore(db)
-    triplets = store.load_triplets()
-    counts = store.count()
+    triplets = store.load_triplets(mine_hard_negatives=mine_hard_negatives)
+    counts = store.count(mine_hard_negatives=mine_hard_negatives)
 
     if not triplets:
         print(
@@ -172,7 +178,8 @@ def main() -> int:
 
     print(
         f"trained projection head -> {args.output} "
-        f"(triplets={counts['triplets']}, epochs={args.epochs}, loss={final_loss:.6f})"
+        f"(triplets={counts['triplets']}, epochs={args.epochs}, loss={final_loss:.6f}, "
+        f"hard_negative_mining={mine_hard_negatives})"
     )
     return 0
 

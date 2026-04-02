@@ -12,6 +12,7 @@ import os
 import sys
 import tempfile
 import time
+from collections import OrderedDict
 from pathlib import Path
 
 os.environ["ENABLE_DEPTH"] = "0"
@@ -129,6 +130,39 @@ def test_reload_head_from_db():
     assert loaded is True
     w = pipeline._head.linear.weight.detach().cpu()
     assert torch.allclose(w, torch.full_like(w, 0.01))
+
+
+def test_scan_cache_keeps_raw_embeddings():
+    from visual_memory.pipelines.scan_mode.pipeline import ScanPipeline
+
+    pipeline = ScanPipeline.__new__(ScanPipeline)
+    pipeline._emb_cache = OrderedDict()
+    pipeline._match_cache = OrderedDict()
+    pipeline._crop_cache = OrderedDict()
+    pipeline._scan_cache_meta = OrderedDict()
+
+    anchor = make_embedding(123)
+    raw_query = make_embedding(124)
+    projected_query = make_embedding(125)
+
+    pipeline._cache_feedback_match(
+        "scan-raw",
+        "wallet",
+        anchor,
+        raw_query,
+        text_likelihood=0.12,
+        ocr_ran=True,
+        ocr_confidence=0.88,
+        similarity_margin=0.14,
+        margin_threshold=0.05,
+    )
+
+    cached = pipeline.get_cached_embeddings("scan-raw", "wallet")
+    assert cached is not None
+    cached_anchor, cached_query = cached
+    assert torch.allclose(cached_anchor, anchor, atol=1e-6)
+    assert torch.allclose(cached_query, raw_query, atol=1e-6)
+    assert not torch.allclose(cached_query, projected_query, atol=1e-6)
 
 
 client, db, cleanup = make_test_app([feedback_bp, retrain_bp, settings_bp])

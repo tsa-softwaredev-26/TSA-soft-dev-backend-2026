@@ -93,7 +93,23 @@ def test_sliced_emb_combined():
         assert combined.shape == (1, 1536), f"combined shape {combined.shape} != (1, 1536)"
 
 
-# Test 6: batch_embed called once for N items (not N times)
+# Test 6: combined embeddings stay L2-normalized after weighted concat
+
+def test_combined_embedding_is_l2_normalized():
+    img = F.normalize(torch.tensor([[3.0] + [0.0] * 1023]), dim=1)
+    text = F.normalize(torch.tensor([[4.0] + [0.0] * 511]), dim=1)
+    combined = make_combined_embedding(
+        img,
+        text,
+        text_weight=1.7,
+        image_weight=0.8,
+    )
+    assert combined.shape == (1, 1536)
+    norm = combined.norm(dim=1).item()
+    assert abs(norm - 1.0) < 1e-5, f"combined embedding should be unit norm, got {norm:.6f}"
+
+
+# Test 7: batch_embed called once for N items (not N times)
 
 def test_batch_embed_call_count():
     embedder = _MockEmbedder()
@@ -110,7 +126,7 @@ def test_batch_embed_call_count():
     assert embedder.embed_calls == 0, f"embed() called {embedder.embed_calls} times (should be 0)"
 
 
-# Test 7: crops list length matches boxes list length
+# Test 8: crops list length matches boxes list length
 
 def test_crops_length_matches_boxes():
     query_image = Image.new("RGB", (640, 480))
@@ -125,7 +141,7 @@ def test_crops_length_matches_boxes():
         assert isinstance(c, Image.Image), "crop is not a PIL Image"
 
 
-# Test 8: single-box edge case (N=1 batch)
+# Test 9: single-box edge case (N=1 batch)
 
 def test_single_box_batch():
     embedder = _MockEmbedder()
@@ -148,6 +164,7 @@ if __name__ == "__main__":
         ("scan_batching:zip_unpack_multi", test_zip_unpack_multi),
         ("scan_batching:batch_slice_shape", test_batch_slice_shape),
         ("scan_batching:sliced_emb_combined", test_sliced_emb_combined),
+        ("scan_batching:combined_embedding_l2_normalized", test_combined_embedding_is_l2_normalized),
         ("scan_batching:batch_embed_call_count", test_batch_embed_call_count),
         ("scan_batching:crops_length_matches_boxes", test_crops_length_matches_boxes),
         ("scan_batching:single_box_batch", test_single_box_batch),

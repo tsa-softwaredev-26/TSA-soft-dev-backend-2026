@@ -214,6 +214,39 @@ class ScanPipeline:
             self._projected_db = [(p, self._apply_head(e)) for p, e in self.database_embeddings]
         return self._projected_db
 
+    def _cache_feedback_match(
+        self,
+        scan_id: str,
+        matched_label: str,
+        anchor_emb: torch.Tensor,
+        query_emb: torch.Tensor,
+        *,
+        text_likelihood: float,
+        ocr_ran: bool,
+        ocr_confidence: float,
+        similarity_margin: float,
+        margin_threshold: float,
+    ) -> None:
+        """Persist raw embeddings for feedback so retraining sees pre-projection data."""
+        if scan_id not in self._emb_cache:
+            if len(self._emb_cache) >= _SCAN_CACHE_MAX:
+                old_scan_id, _ = self._emb_cache.popitem(last=False)
+                self._evict_scan_cache_entry(old_scan_id)
+            self._emb_cache[scan_id] = {}
+        self._emb_cache[scan_id][matched_label] = (
+            anchor_emb.detach().cpu(),
+            query_emb.detach().cpu(),
+        )
+        if scan_id not in self._match_cache:
+            self._match_cache[scan_id] = {}
+        self._match_cache[scan_id][matched_label] = {
+            "text_likelihood": round(text_likelihood, 3),
+            "ocr_ran": bool(ocr_ran),
+            "ocr_confidence": round(float(ocr_confidence), 4),
+            "similarity_margin": round(float(similarity_margin), 6),
+            "margin_threshold": round(float(margin_threshold), 6),
+        }
+
     def reload_head(self) -> bool:
         """Re-read projection head weights (DB first, file fallback) after a retrain.
 
@@ -338,7 +371,7 @@ class ScanPipeline:
 
         # project DB embeddings once and cache until DB/head changes
         projected_db = self._project_database_embeddings()
-        projected_db_map = {p: e for p, e in projected_db}
+        raw_db_map = dict(self.database_embeddings)
         timing["embed_ms"] = round((time.monotonic() - stage_start) * 1000)
 
         matches = []
@@ -426,24 +459,20 @@ class ScanPipeline:
                     "ocr_text_length": len(ocr_text),
                 })
                 if scan_id is not None:
-                    anchor_emb = projected_db_map.get(match_path)
+                    anchor_emb = raw_db_map.get(match_path)
                     if anchor_emb is not None:
                         self._store_scan_cache_meta(scan_id)
-                        if scan_id not in self._emb_cache:
-                            if len(self._emb_cache) >= _SCAN_CACHE_MAX:
-                                old_scan_id, _ = self._emb_cache.popitem(last=False)
-                                self._evict_scan_cache_entry(old_scan_id)
-                            self._emb_cache[scan_id] = {}
-                        self._emb_cache[scan_id][matched_label] = (anchor_emb, projected_query)
-                        if scan_id not in self._match_cache:
-                            self._match_cache[scan_id] = {}
-                        self._match_cache[scan_id][matched_label] = {
-                            "text_likelihood": round(text_likelihood, 3),
-                            "ocr_ran": i in ocr_conf_by_index,
-                            "ocr_confidence": round(float(ocr_conf_by_index.get(i, 0.0)), 4),
-                            "similarity_margin": round(float(similarity_margin), 6),
-                            "margin_threshold": round(float(applied_margin), 6),
-                        }
+                        self._cache_feedback_match(
+                            scan_id,
+                            matched_label,
+                            anchor_emb,
+                            combined,
+                            text_likelihood=text_likelihood,
+                            ocr_ran=i in ocr_conf_by_index,
+                            ocr_confidence=float(ocr_conf_by_index.get(i, 0.0)),
+                            similarity_margin=float(similarity_margin),
+                            margin_threshold=float(applied_margin),
+                        )
                 direction_auto = _direction_from_box(box, query_image.width)
                 self.db.add_sighting(
                     label=matched_label,

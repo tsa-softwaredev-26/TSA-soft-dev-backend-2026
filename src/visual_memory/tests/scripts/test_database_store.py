@@ -163,6 +163,24 @@ def test_load_feedback_triplets():
     assert len(triplets) == 1
 
 
+def test_load_feedback_triplets_mines_hard_negative():
+    db, _ = _make_db()
+    anchor = torch.nn.functional.normalize(torch.tensor([[1.0, 0.0, 0.0, 0.0]]), dim=1)
+    positive = torch.nn.functional.normalize(torch.tensor([[0.99, 0.01, 0.0, 0.0]]), dim=1)
+    easy_negative = torch.nn.functional.normalize(torch.tensor([[0.0, 1.0, 0.0, 0.0]]), dim=1)
+    hard_negative = torch.nn.functional.normalize(torch.tensor([[0.98, 0.02, 0.0, 0.0]]), dim=1)
+
+    db.add_feedback("wallet", "positive", anchor, positive)
+    db.add_feedback("wallet", "negative", anchor, easy_negative)
+    db.add_feedback("wallet", "negative", anchor, hard_negative)
+
+    triplets = db.load_feedback_triplets()
+    counts = db.count_feedback()
+    assert len(triplets) == 1
+    assert counts["triplets"] == 1
+    assert torch.allclose(triplets[0][2], hard_negative, atol=1e-6)
+
+
 def test_delete_items_by_label():
     db, _ = _make_db()
     emb = make_embedding(0)

@@ -53,6 +53,7 @@ from visual_memory.engine.embedding import make_combined_embedding
 from visual_memory.engine.model_registry import registry
 from visual_memory.engine.text_recognition import TextRecognizer
 from visual_memory.learning import ProjectionHead, ProjectionTrainer
+from visual_memory.database import DatabaseStore
 from visual_memory.utils.image_utils import load_image
 from visual_memory.utils.memory_monitor import MemoryMonitor
 from visual_memory.utils.quality_utils import mean_luminance, estimate_text_likelihood
@@ -64,6 +65,25 @@ _CHECKPOINT = _PROJECT_ROOT / "checkpoints" / "depth_pro.pt"
 _RESULTS_SCHEMA_VERSION = 2
 
 BLUR_THRESHOLD = 100.0
+_RUNTIME_ML_SETTING_FIELDS = {
+    "enable_learning": bool,
+    "min_feedback_for_training": int,
+    "projection_head_weight": float,
+    "projection_head_ramp_at": int,
+    "projection_head_ramp_power": float,
+    "projection_head_epochs": int,
+    "triplet_margin": float,
+    "triplet_positive_weight": float,
+    "triplet_negative_weight": float,
+    "triplet_hard_negative_boost": float,
+    "similarity_threshold": float,
+    "similarity_threshold_baseline": float,
+    "similarity_threshold_personalized": float,
+    "similarity_threshold_document": float,
+    "scan_similarity_margin": float,
+    "scan_similarity_margin_document": float,
+    "remember_max_prototypes_per_label": int,
+}
 DOCUMENT_LABEL_KEYWORDS = {
     "receipt",
     "ticket",
@@ -105,6 +125,169 @@ def _match_with_runtime_gates(
         lambda lbl: _threshold_for_label(lbl, is_document_sample, thresholds, mode=mode),
         lambda lbl: _margin_for_label(lbl, is_document_sample, settings),
     )
+
+
+def _apply_persisted_ml_settings(settings: Settings) -> dict:
+    """Overlay persisted ML settings onto a local Settings instance when present."""
+    db_path = Path(settings.db_path)
+    if not db_path.exists():
+        return {}
+
+    try:
+        saved = DatabaseStore(db_path).load_ml_settings() or {}
+    except Exception:
+        return {}
+
+    applied: dict = {}
+    for key, expected_type in _RUNTIME_ML_SETTING_FIELDS.items():
+        if key not in saved:
+            continue
+        raw = saved[key]
+        if raw is None:
+            continue
+        try:
+            if expected_type is bool:
+                value = bool(raw)
+            else:
+                value = expected_type(raw)
+        except (TypeError, ValueError):
+            continue
+        setattr(settings, key, value)
+        applied[key] = value
+    return applied
+
+
+def _selected_threshold_metrics(
+    stats: List[dict],
+    thresholds: Dict[str, float],
+) -> dict:
+    metrics = _metrics_at_threshold(
+        stats,
+        baseline_threshold=float(thresholds["baseline"]),
+        personalized_threshold=float(thresholds["personalized"]),
+        document_threshold=float(thresholds["document"]),
+    )
+    return metrics
+
+
+def _resolve_thresholds(
+    args: argparse.Namespace,
+    settings: Settings,
+    similarity_stats: Optional[List[dict]] = None,
+    *,
+    settings_source: str = "code_defaults",
+) -> tuple[Dict[str, float], List[dict], dict]:
+    thresholds: Dict[str, float] = {
+        "baseline": _validate_similarity_threshold(
+            float(settings.get_similarity_threshold_baseline()),
+            "settings baseline similarity threshold",
+        ),
+        "personalized": _validate_similarity_threshold(
+            float(settings.get_similarity_threshold_personalized()),
+            "settings personalized similarity threshold",
+        ),
+        "document": _validate_similarity_threshold(
+            float(settings.get_similarity_threshold_document()),
+            "settings document similarity threshold",
+        ),
+    }
+
+    if args.similarity_threshold is not None:
+        legacy_threshold = _validate_similarity_threshold(
+            float(args.similarity_threshold),
+            "manual similarity threshold",
+        )
+        thresholds = {
+            "baseline": legacy_threshold,
+            "personalized": legacy_threshold,
+            "document": legacy_threshold,
+        }
+        if args.baseline_threshold is not None:
+            thresholds["baseline"] = _validate_similarity_threshold(
+                float(args.baseline_threshold),
+                "manual baseline threshold",
+            )
+        if args.personalized_threshold is not None:
+            thresholds["personalized"] = _validate_similarity_threshold(
+                float(args.personalized_threshold),
+                "manual personalized threshold",
+            )
+        if args.document_threshold is not None:
+            thresholds["document"] = _validate_similarity_threshold(
+                float(args.document_threshold),
+                "manual document threshold",
+            )
+        reason = "manual_override"
+        threshold_tuning = {
+            "selection_reason": reason,
+            "selected_thresholds": {k: float(round(v, 3)) for k, v in thresholds.items()},
+            "manual_override": True,
+            "auto_tune_requested": bool(args.auto_tune_thresholds),
+            "settings_source": settings_source,
+        }
+        if similarity_stats is not None:
+            threshold_tuning["selected_metrics"] = _selected_threshold_metrics(similarity_stats, thresholds)
+            return thresholds, [threshold_tuning["selected_metrics"]], threshold_tuning
+        return thresholds, [], threshold_tuning
+
+    manual_override = any(
+        value is not None
+        for value in (args.baseline_threshold, args.personalized_threshold, args.document_threshold)
+    )
+    if manual_override:
+        if args.baseline_threshold is not None:
+            thresholds["baseline"] = _validate_similarity_threshold(
+                float(args.baseline_threshold),
+                "manual baseline threshold",
+            )
+        if args.personalized_threshold is not None:
+            thresholds["personalized"] = _validate_similarity_threshold(
+                float(args.personalized_threshold),
+                "manual personalized threshold",
+            )
+        if args.document_threshold is not None:
+            thresholds["document"] = _validate_similarity_threshold(
+                float(args.document_threshold),
+                "manual document threshold",
+            )
+        reason = "manual_override"
+    else:
+        reason = "production_settings"
+
+    if args.auto_tune_thresholds and similarity_stats is not None:
+        if float(args.threshold_sweep_step) <= 0:
+            raise ValueError(f"threshold sweep step must be > 0, got {args.threshold_sweep_step}")
+        tuned_thresholds, threshold_sweep, threshold_tuning = _tune_threshold_with_holdout(
+            stats=similarity_stats,
+            floor=_validate_similarity_threshold(float(args.threshold_sweep_min), "threshold sweep minimum"),
+            ceiling=_validate_similarity_threshold(float(args.threshold_sweep_max), "threshold sweep maximum"),
+            step=float(args.threshold_sweep_step),
+            target_holdout_fp=float(args.target_holdout_fp),
+            min_personalized_accuracy=float(args.min_personalized_accuracy),
+        )
+        threshold_tuning["settings_source"] = settings_source
+        threshold_tuning["auto_tune_requested"] = True
+        threshold_tuning.setdefault("manual_override", False)
+        return tuned_thresholds, threshold_sweep, threshold_tuning
+
+    threshold_tuning = {
+        "selection_reason": reason,
+        "selected_thresholds": {k: float(round(v, 3)) for k, v in thresholds.items()},
+        "manual_override": manual_override,
+        "auto_tune_requested": False,
+        "settings_source": settings_source,
+    }
+    if similarity_stats is not None:
+        selected_metrics = _selected_threshold_metrics(similarity_stats, thresholds)
+        threshold_tuning["selected_metrics"] = {
+            "baseline_accuracy": round(selected_metrics["baseline_accuracy"], 6),
+            "personalized_accuracy": round(selected_metrics["personalized_accuracy"], 6),
+            "baseline_holdout_fp_rate": round(selected_metrics["baseline_holdout_fp_rate"], 6),
+            "personalized_holdout_fp_rate": round(selected_metrics["personalized_holdout_fp_rate"], 6),
+            "priority_recall_1to3ft_bright": round(selected_metrics["priority_recall_1to3ft_bright"], 6),
+        }
+        return thresholds, [selected_metrics], threshold_tuning
+    return thresholds, [], threshold_tuning
 
 
 def _set_reproducible(seed: int) -> None:
@@ -181,6 +364,11 @@ def _parse_args() -> argparse.Namespace:
         type=float,
         default=None,
         help="Override retrieval threshold for document-like samples",
+    )
+    p.add_argument(
+        "--auto-tune-thresholds",
+        action="store_true",
+        help="Opt in to holdout-based threshold tuning instead of using production settings",
     )
     p.add_argument(
         "--regression-baseline",
@@ -971,6 +1159,51 @@ def _eval_detection(
     return results
 
 
+def _eval_yoloe_detection(
+    test_set: List[str],
+    embedded: Dict[str, dict],
+    settings: Settings,
+    monitor: Optional[MemoryMonitor] = None,
+) -> Dict[str, dict]:
+    """Benchmark the production YOLOE detector on the scan split."""
+    try:
+        detector = registry.yoloe_detector
+    except Exception as exc:
+        print(f"  [warn] YOLOE detector unavailable; skipping scan-detector benchmark ({exc})")
+        return {}
+
+    results: Dict[str, dict] = {}
+    for i, fname in enumerate(test_set):
+        data = embedded[fname]
+        image = load_image(data["image_path"])
+        t0 = time.perf_counter()
+        try:
+            boxes, scores = detector.detect_all(image)
+        except Exception as exc:
+            print(f"  [warn] YOLOE detection failed for {fname}: {exc}")
+            boxes, scores = None, None
+        lat_detect = time.perf_counter() - t0
+        box_count = len(boxes) if boxes else 0
+        score_list = list(scores or [])
+        max_score = max(score_list) if score_list else 0.0
+        mean_score = (sum(score_list) / len(score_list)) if score_list else 0.0
+        results[fname] = {
+            "detected": int(box_count > 0),
+            "box_count": box_count,
+            "max_confidence": float(max_score),
+            "mean_confidence": float(mean_score),
+            "lat_detect": lat_detect,
+            "confidence_threshold": float(settings.yoloe_confidence),
+            "iou_threshold": float(settings.yoloe_iou),
+        }
+        if monitor is not None and (i + 1) % 20 == 0:
+            if monitor.suggest_throttle():
+                monitor.log_memory_state(level="warning")
+                time.sleep(5)
+                gc.collect()
+    return results
+
+
 # phase 7: depth evaluation
 
 def _load_depth_estimator(depth_checkpoint: Path):
@@ -1197,9 +1430,11 @@ _CSV_FIELDS = [
     "baseline_similarity", "personalized_similarity", "similarity_gap",
     "baseline_threshold_used", "personalized_threshold_used",
     "baseline_correct", "personalized_correct",
+    "yoloe_detected", "yoloe_box_count", "yoloe_max_confidence", "yoloe_mean_confidence",
+    "yoloe_confidence_threshold", "yoloe_iou_threshold", "yoloe_lat_detect_s",
     "dino_detected", "dino_confidence", "dino_second_pass_prompt",
     "predicted_distance_ft", "depth_absolute_error", "depth_percentage_error",
-    "lat_embed_img_s", "lat_ocr_s", "lat_embed_txt_s",
+    "lat_embed_img_s", "lat_ocr_s", "lat_embed_txt_s", "lat_yoloe_s",
     "lat_retrieve_bl_s", "lat_retrieve_pe_s", "lat_detect_s", "lat_depth_s",
     "lat_pipeline_prepare_s", "lat_pipeline_detect_s", "lat_pipeline_embed_s",
     "lat_pipeline_ocr_s", "lat_pipeline_match_s", "lat_pipeline_dedup_s",
@@ -1216,6 +1451,7 @@ _CSV_FIELDS = [
 
 def _merge_rows(
     retrieval: List[dict],
+    yoloe: Dict[str, dict],
     dino: Dict[str, dict],
     depth: Dict[str, dict],
     fp_holdout: Optional[List[dict]] = None,
@@ -1226,6 +1462,23 @@ def _merge_rows(
     rows = []
     for r in retrieval:
         fname = r["image"]
+        y = yoloe.get(fname, {
+            "detected": 0,
+            "box_count": 0,
+            "max_confidence": 0.0,
+            "mean_confidence": 0.0,
+            "lat_detect": 0.0,
+            "confidence_threshold": 0.0,
+            "iou_threshold": 0.0,
+        }) if isinstance(yoloe, dict) else {
+            "detected": 0,
+            "box_count": 0,
+            "max_confidence": 0.0,
+            "mean_confidence": 0.0,
+            "lat_detect": 0.0,
+            "confidence_threshold": 0.0,
+            "iou_threshold": 0.0,
+        }
         d = dino.get(fname, {"detected": 0, "confidence": 0.0, "lat_detect": 0.0, "second_pass_prompt": None})
         dep = depth.get(fname, {"predicted_ft": None, "abs_error": None,
                                  "pct_error": None, "lat_depth": 0.0})
@@ -1247,6 +1500,13 @@ def _merge_rows(
             "personalized_threshold_used": round(float(r.get("personalized_threshold_used", 0.0)), 6),
             "baseline_correct": r["baseline_correct"],
             "personalized_correct": r["personalized_correct"],
+            "yoloe_detected": int(y.get("detected", 0)),
+            "yoloe_box_count": int(y.get("box_count", 0)),
+            "yoloe_max_confidence": round(float(y.get("max_confidence", 0.0)), 6),
+            "yoloe_mean_confidence": round(float(y.get("mean_confidence", 0.0)), 6),
+            "yoloe_confidence_threshold": round(float(y.get("confidence_threshold", 0.0)), 6),
+            "yoloe_iou_threshold": round(float(y.get("iou_threshold", 0.0)), 6),
+            "yoloe_lat_detect_s": round(float(y.get("lat_detect", 0.0)), 4),
             "dino_detected": d["detected"],
             "dino_confidence": round(d["confidence"], 6),
             "dino_second_pass_prompt": d.get("second_pass_prompt") or "",
@@ -1259,6 +1519,7 @@ def _merge_rows(
             "lat_embed_img_s": round(r["lat_embed_img"], 4),
             "lat_ocr_s": round(r["lat_ocr"], 4),
             "lat_embed_txt_s": round(r["lat_embed_txt"], 4),
+            "lat_yoloe_s": round(float(y.get("lat_detect", 0.0)), 4),
             "lat_retrieve_bl_s": round(r["lat_retrieve_bl"], 6),
             "lat_retrieve_pe_s": round(r["lat_retrieve_pe"], 6),
             "lat_detect_s": round(d["lat_detect"], 4),
@@ -1307,6 +1568,84 @@ def _merge_rows(
     return rows
 
 
+def _summarize_yoloe_results(
+    yoloe_results: Dict[str, dict],
+    embedded: Dict[str, dict],
+) -> dict:
+    if not yoloe_results:
+        return {
+            "available": False,
+            "evaluated": 0,
+            "detected": 0,
+            "detection_rate": 0.0,
+            "mean_box_count": 0.0,
+            "mean_max_confidence": 0.0,
+            "mean_mean_confidence": 0.0,
+            "mean_latency_s": 0.0,
+            "by_label": {},
+            "by_condition": {},
+        }
+
+    total = len(yoloe_results)
+    detected = sum(int(r.get("detected", 0)) for r in yoloe_results.values())
+    box_counts = [int(r.get("box_count", 0)) for r in yoloe_results.values()]
+    max_conf = [float(r.get("max_confidence", 0.0)) for r in yoloe_results.values()]
+    mean_conf = [float(r.get("mean_confidence", 0.0)) for r in yoloe_results.values()]
+    latency = [float(r.get("lat_detect", 0.0)) for r in yoloe_results.values()]
+
+    by_label: Dict[str, dict] = {}
+    by_condition: Dict[str, dict] = {}
+    for image_name, row in yoloe_results.items():
+        meta = embedded.get(image_name, {})
+        label = str(meta.get("label", ""))
+        condition = str(meta.get("condition_bucket", ""))
+        for bucket_name, bucket_key in (("by_label", label), ("by_condition", condition)):
+            bucket = by_label if bucket_name == "by_label" else by_condition
+            if bucket_key not in bucket:
+                bucket[bucket_key] = {
+                    "n": 0,
+                    "detected": 0,
+                    "box_counts": [],
+                    "max_confidence": [],
+                    "mean_confidence": [],
+                    "latencies": [],
+                }
+            bucket[bucket_key]["n"] += 1
+            bucket[bucket_key]["detected"] += int(row.get("detected", 0))
+            bucket[bucket_key]["box_counts"].append(int(row.get("box_count", 0)))
+            bucket[bucket_key]["max_confidence"].append(float(row.get("max_confidence", 0.0)))
+            bucket[bucket_key]["mean_confidence"].append(float(row.get("mean_confidence", 0.0)))
+            bucket[bucket_key]["latencies"].append(float(row.get("lat_detect", 0.0)))
+
+    def _finalize(bucket: Dict[str, dict]) -> Dict[str, dict]:
+        finalized: Dict[str, dict] = {}
+        for key, values in bucket.items():
+            n = max(int(values.get("n", 0)), 1)
+            finalized[key] = {
+                "n": int(values.get("n", 0)),
+                "detected": int(values.get("detected", 0)),
+                "detection_rate": int(values.get("detected", 0)) / n,
+                "mean_box_count": sum(values["box_counts"]) / n if values["box_counts"] else 0.0,
+                "mean_max_confidence": sum(values["max_confidence"]) / n if values["max_confidence"] else 0.0,
+                "mean_mean_confidence": sum(values["mean_confidence"]) / n if values["mean_confidence"] else 0.0,
+                "mean_latency_s": sum(values["latencies"]) / n if values["latencies"] else 0.0,
+            }
+        return finalized
+
+    return {
+        "available": True,
+        "evaluated": total,
+        "detected": detected,
+        "detection_rate": detected / total if total else 0.0,
+        "mean_box_count": sum(box_counts) / total if box_counts else 0.0,
+        "mean_max_confidence": sum(max_conf) / total if max_conf else 0.0,
+        "mean_mean_confidence": sum(mean_conf) / total if mean_conf else 0.0,
+        "mean_latency_s": sum(latency) / total if latency else 0.0,
+        "by_label": _finalize(by_label),
+        "by_condition": _finalize(by_condition),
+    }
+
+
 def _latency_stats(values: List[float], label_col: Optional[List[str]] = None):
     """Return (mean, min, max, outliers) where outliers are >2x mean."""
     if not values:
@@ -1333,6 +1672,7 @@ def _write_output(
     benchmark_guard: dict,
     fp_holdout_results: List[dict],
     fp_expanded_results: List[dict],
+    yoloe_summary: dict,
     threshold_sweep: List[dict],
     threshold_tuning: dict,
 ) -> None:
@@ -1358,6 +1698,9 @@ def _write_output(
             "personalized": float(round(thresholds["personalized"], 3)),
             "document": float(round(thresholds["document"], 3)),
         },
+        "threshold_strategy": threshold_tuning.get("selection_reason", "production_settings"),
+        "threshold_settings_source": threshold_tuning.get("settings_source", "code_defaults"),
+        "threshold_auto_tune_requested": bool(threshold_tuning.get("auto_tune_requested", False)),
         "threshold_overrides": {
             "similarity_threshold": args.similarity_threshold,
             "baseline_threshold": args.baseline_threshold,
@@ -1374,6 +1717,7 @@ def _write_output(
         "n_test": len(rows),
         "n_fp_holdout": len(fp_holdout_results),
         "n_fp_expanded": len(fp_expanded_results),
+        "yoloe_summary": yoloe_summary,
         "final_triplet_loss": round(final_loss, 6),
         "split_integrity": split_integrity,
         "benchmark_guard": benchmark_guard,
@@ -1672,6 +2016,7 @@ def _enforce_memory_guard(monitor: MemoryMonitor, phase_name: str) -> None:
 
 def _print_summary(
     retrieval: List[dict],
+    yoloe_results: Dict[str, dict],
     dino: Dict[str, dict],
     depth: Dict[str, dict],
     final_loss: float,
@@ -1724,6 +2069,19 @@ def _print_summary(
     print(f"Mean sim gap:         {gap_sign}{mean_gap:.4f}")
     print(f"Triplet final loss:   {final_loss:.4f}")
     print()
+    yoloe_summary = _summarize_yoloe_results(yoloe_results, {r["image"]: r for r in retrieval})
+    print("--- Detection (YOLOE) ---")
+    if not yoloe_summary.get("available", False):
+        print("YOLOE detector unavailable; skipped.")
+    else:
+        print(
+            f"Detection rate:       {yoloe_summary['detected']} / {yoloe_summary['evaluated']}  "
+            f"({100*yoloe_summary['detection_rate']:.1f}%)"
+        )
+        print(f"Mean boxes/image:     {yoloe_summary['mean_box_count']:.2f}")
+        print(f"Mean max confidence:  {yoloe_summary['mean_max_confidence']:.4f}")
+        print(f"Mean latency:         {yoloe_summary['mean_latency_s']:.3f}s")
+    print()
     print("--- Detection (GroundingDINO) ---")
     print(f"Detection rate:       {det_count} / {det_total}  ({100*det_count/max(det_total,1):.1f}%)")
     print()
@@ -1769,6 +2127,7 @@ def _print_summary(
         ("embed_image", [r["lat_embed_img"] for r in retrieval]),
         ("ocr",         [r["lat_ocr"] for r in retrieval if r["lat_ocr"] > 0]),
         ("embed_text",  [r["lat_embed_txt"] for r in retrieval if r["lat_embed_txt"] > 0]),
+        ("yoloe",       [v["lat_detect"] for v in yoloe_results.values() if v["lat_detect"] > 0]),
         ("detect",      [v["lat_detect"] for v in dino.values() if v["lat_detect"] > 0]),
         ("retrieve_bl", [r["lat_retrieve_bl"] for r in retrieval]),
         ("retrieve_pl", [r["lat_retrieve_pe"] for r in retrieval]),
@@ -1806,45 +2165,19 @@ def main() -> None:
     args = _parse_args()
     _set_reproducible(args.seed)
     settings = Settings()
+    persisted_settings = _apply_persisted_ml_settings(settings)
     depth_checkpoint = _resolve_depth_checkpoint(args)
-    sweep_min = _validate_similarity_threshold(float(args.threshold_sweep_min), "threshold sweep minimum")
-    sweep_max = _validate_similarity_threshold(float(args.threshold_sweep_max), "threshold sweep maximum")
-    if float(args.threshold_sweep_step) <= 0:
-        raise ValueError(f"threshold sweep step must be > 0, got {args.threshold_sweep_step}")
-    if args.similarity_threshold is not None:
-        legacy_threshold = _validate_similarity_threshold(
-            float(args.similarity_threshold),
-            "manual similarity threshold",
-        )
-        thresholds: Dict[str, float] = {
-            "baseline": legacy_threshold,
-            "personalized": legacy_threshold,
-            "document": legacy_threshold,
-        }
-    else:
-        thresholds = {
-            "baseline": _validate_similarity_threshold(
-                float(settings.get_similarity_threshold_baseline()),
-                "settings baseline similarity threshold",
-            ),
-            "personalized": _validate_similarity_threshold(
-                float(settings.get_similarity_threshold_personalized()),
-                "settings personalized similarity threshold",
-            ),
-            "document": _validate_similarity_threshold(
-                float(settings.get_similarity_threshold_document()),
-                "settings document similarity threshold",
-            ),
-        }
     monitor = MemoryMonitor()
 
     print(f"Dataset: {args.dataset}")
     print(f"Images:  {args.images}")
     print(f"Depth checkpoint: {depth_checkpoint}")
-    print(f"Thresholds: baseline={thresholds['baseline']:.3f}, personalized={thresholds['personalized']:.3f}, "
-          f"document={thresholds['document']:.3f}, darkness={settings.darkness_threshold:.1f}, "
+    print(f"Thresholds: baseline={settings.get_similarity_threshold_baseline():.3f}, personalized={settings.get_similarity_threshold_personalized():.3f}, "
+          f"document={settings.get_similarity_threshold_document():.3f}, darkness={settings.darkness_threshold:.1f}, "
           f"ocr_text_likelihood={settings.ocr_text_likelihood_threshold:.2f}, "
           f"blur={BLUR_THRESHOLD:.1f}")
+    if persisted_settings:
+        print(f"  applied persisted ML settings: {len(persisted_settings)} fields")
 
     # Phase 1: Embed
     _enforce_memory_guard(monitor, "phase 1")
@@ -1976,42 +2309,21 @@ def main() -> None:
     threshold_sweep: List[dict] = []
     threshold_tuning: dict = {}
     similarity_stats = _build_similarity_stats(test_set, embedded, database, head)
-    if (
-        args.similarity_threshold is not None
-        or args.baseline_threshold is not None
-        or args.personalized_threshold is not None
-        or args.document_threshold is not None
-    ):
-        if args.baseline_threshold is not None:
-            thresholds["baseline"] = _validate_similarity_threshold(float(args.baseline_threshold), "manual baseline threshold")
-        if args.personalized_threshold is not None:
-            thresholds["personalized"] = _validate_similarity_threshold(
-                float(args.personalized_threshold), "manual personalized threshold"
-            )
-        if args.document_threshold is not None:
-            thresholds["document"] = _validate_similarity_threshold(float(args.document_threshold), "manual document threshold")
-        threshold_tuning = {
-            "selection_reason": "manual_override",
-            "selected_thresholds": {
-                "baseline": float(round(thresholds["baseline"], 3)),
-                "personalized": float(round(thresholds["personalized"], 3)),
-                "document": float(round(thresholds["document"], 3)),
-            },
-            "manual_override": True,
-        }
-        candidates = [
-            _validate_similarity_threshold(float(round(v, 3)), "threshold sweep candidate")
-            for v in np.arange(sweep_min, sweep_max + 1e-9, args.threshold_sweep_step)
-        ]
-        threshold_sweep = [
-            _metrics_at_threshold(
-                stats=similarity_stats,
-                baseline_threshold=t,
-                personalized_threshold=t,
-                document_threshold=t,
-            )
-            for t in candidates
-        ]
+    thresholds, threshold_sweep, threshold_tuning = _resolve_thresholds(
+        args,
+        settings,
+        similarity_stats=similarity_stats,
+        settings_source="persisted_db" if persisted_settings else "code_defaults",
+    )
+    if threshold_tuning.get("auto_tune_requested"):
+        print(
+            "  tuned thresholds from sweep: "
+            f"baseline={thresholds['baseline']:.3f}, "
+            f"personalized={thresholds['personalized']:.3f}, "
+            f"document={thresholds['document']:.3f} "
+            f"(reason={threshold_tuning.get('selection_reason', 'unknown')})"
+        )
+    elif threshold_tuning.get("manual_override"):
         print(
             "  using manual threshold override: "
             f"baseline={thresholds['baseline']:.3f}, "
@@ -2019,20 +2331,11 @@ def main() -> None:
             f"document={thresholds['document']:.3f}"
         )
     else:
-        thresholds, threshold_sweep, threshold_tuning = _tune_threshold_with_holdout(
-            stats=similarity_stats,
-            floor=sweep_min,
-            ceiling=sweep_max,
-            step=float(args.threshold_sweep_step),
-            target_holdout_fp=float(args.target_holdout_fp),
-            min_personalized_accuracy=float(args.min_personalized_accuracy),
-        )
         print(
-            "  tuned thresholds from sweep: "
+            "  using production thresholds: "
             f"baseline={thresholds['baseline']:.3f}, "
             f"personalized={thresholds['personalized']:.3f}, "
-            f"document={thresholds['document']:.3f} "
-            f"(reason={threshold_tuning.get('selection_reason', 'unknown')})"
+            f"document={thresholds['document']:.3f}"
         )
 
     # Phase 5: Retrieval
@@ -2042,7 +2345,8 @@ def main() -> None:
 
     # Phase 6: Detection
     _enforce_memory_guard(monitor, "phase 6")
-    print("\n[6/7] Evaluating GroundingDINO detection (with full fallback chain)...")
+    print("\n[6/7] Evaluating YOLOE scan detector and GroundingDINO detection...")
+    yoloe_results = _eval_yoloe_detection(test_set, embedded, settings, monitor=monitor)
     dino_results = _eval_detection(test_set, embedded, settings, monitor=monitor)
 
     # Phase 7: Depth
@@ -2078,11 +2382,13 @@ def main() -> None:
     # Output
     merged = _merge_rows(
         retrieval_results,
+        yoloe_results,
         dino_results,
         depth_results,
         fp_holdout=fp_holdout_results,
         fp_expanded=fp_expanded_results,
     )
+    yoloe_summary = _summarize_yoloe_results(yoloe_results, embedded)
     benchmark_guard = _regression_guard(
         rows=merged,
         fp_holdout_results=fp_holdout_results,
@@ -2092,7 +2398,7 @@ def main() -> None:
         max_fp_increase_pp=args.max_fp_increase_pp,
         max_fn_increase_pp=args.max_fn_increase_pp,
     )
-    _print_summary(retrieval_results, dino_results, depth_results,
+    _print_summary(retrieval_results, yoloe_results, dino_results, depth_results,
                    final_loss, thresholds, args.no_depth, fp_holdout_results, fp_expanded_results)
     _write_output(
         merged,
@@ -2106,6 +2412,7 @@ def main() -> None:
         benchmark_guard=benchmark_guard,
         fp_holdout_results=fp_holdout_results,
         fp_expanded_results=fp_expanded_results,
+        yoloe_summary=yoloe_summary,
         threshold_sweep=threshold_sweep,
         threshold_tuning=threshold_tuning,
     )

@@ -45,6 +45,7 @@ env/
 # Claude Code (local dev instructions — not part of the package)
 .claude/
 CLAUDE.md
+AGENTS.md
 
 # Model weights / checkpoints
 *.pt

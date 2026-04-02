@@ -41,6 +41,7 @@ _UNIT_TESTS = [
     ("test_projection_head",  "unit", ["learning"]),
     ("test_learning_pipeline","unit", ["learning", "api"]),
     ("test_scan_batching",    "unit", ["scan", "embedding"]),
+    ("test_full_benchmark",   "unit", ["benchmark", "settings"]),
 ]
 
 _API_TESTS = [
