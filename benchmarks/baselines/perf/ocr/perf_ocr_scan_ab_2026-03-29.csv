@@ -1,2 +1,0 @@
-temporary,run_id,timestamp_utc,environment,host,repo_path,suite,iterations,seq_p50_ms,seq_p95_ms,batch_p50_ms,batch_p95_ms,p95_improvement_pct,winner,recommended_ocr_batch_concurrency,decision_rule
-true,ocr-scan-ab-2026-03-29,2026-03-30T00:24:01Z,remote-ssh,Spaitra,/opt/spaitra/TSA-soft-dev-backend-2026,scan_latency_ab,30,4009.4,4605.2,6881.6,7413.1,-61.0,sequential,0,keep batch only if batch p95 >=10% faster

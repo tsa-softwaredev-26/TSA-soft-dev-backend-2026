@@ -1,4 +1,4 @@
-# Full system benchmark — 10 objects x 12 conditions = 120 images
+# Full system benchmark - 10 objects x 12 conditions = 120 images
 # Naming: {object}_{distance}ft_{lighting}_{background}.jpg
 # Place images in benchmarks/images/ before running full_benchmark.py
 # Receipts: run redact_receipt.py first.

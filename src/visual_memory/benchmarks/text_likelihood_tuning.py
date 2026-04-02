@@ -102,11 +102,11 @@ def main():
     # Find best threshold: minimize FP while keeping recall reasonable
     best = min(results, key=lambda r: (r["FP"], -r["recall"]))
     
-    print(f"\n✓ BEST THRESHOLD: {best['threshold']:.2f}")
+    print(f"\nBEST THRESHOLD: {best['threshold']:.2f}")
     print(f"  Confusion Matrix: TP={best['TP']}, FP={best['FP']}, TN={best['TN']}, FN={best['FN']}")
     print(f"  Metrics: Precision={best['precision']:.4f}, Recall={best['recall']:.4f}")
     print(f"  FP_Rate={best['fp_rate']:.4f} (Specificity={best['specificity']:.4f})")
-    print(f"  ↳ Minimizes false positives on textless images")
+    print("  Minimizes false positives on textless images")
     
     # Save detailed results
     output_file = PROJECT_ROOT / "benchmarks" / "text_likelihood_sweep.json"

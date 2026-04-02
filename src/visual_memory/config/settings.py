@@ -21,7 +21,7 @@ class Settings:
     embedder_model: str = "openai/clip-vit-base-patch32"
 
     # Similarity matching (scan mode)
-    similarity_threshold: float = 0.79
+    similarity_threshold: float = 0.27
     similarity_threshold_baseline: Optional[float] = None
     similarity_threshold_personalized: Optional[float] = None
     similarity_threshold_document: Optional[float] = None

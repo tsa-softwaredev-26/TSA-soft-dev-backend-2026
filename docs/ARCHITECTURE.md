@@ -575,9 +575,6 @@ python -m visual_memory.tests.scripts.run_all
 # Integration/system checks (real models; optional depth)
 python -m visual_memory.tests.scripts.run_tests
 DEPTH=1 python -m visual_memory.tests.scripts.run_tests
-
-# OCR benchmark
-python -m visual_memory.tests.scripts.test_ocr_benchmark
 ```
 
 ---
@@ -680,7 +677,7 @@ Before merging tuning changes:
   - `combined_text_weight=1.10`, `combined_text_weight_high_confidence_boost=0.10`
   - **Why:** improve retrieval on text-heavy objects without fully dominating image signal.
 
-### In-progress tuning placeholders
+### Tuning status
 
 - **Scan similarity thresholds:** benchmark runs compare against production settings by default. Holdout auto-tuning is opt-in via `--auto-tune-thresholds` so benchmark reports stay comparable to live thresholds.
 - **Scan margin gate:** stays enabled by default for false-positive control in production and benchmark runs.

@@ -395,7 +395,7 @@ class _RemoteClient:
 
     @staticmethod
     def _encode_multipart(data: dict) -> tuple[bytes, str]:
-        boundary = f"----copilot-{uuid.uuid4().hex}"
+        boundary = f"----multipart-{uuid.uuid4().hex}"
         parts: list[bytes] = []
 
         for key, value in (data or {}).items():

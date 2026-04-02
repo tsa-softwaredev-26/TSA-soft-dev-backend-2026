@@ -42,11 +42,6 @@ env/
 *.swo
 .cursor/
 
-# Claude Code (local dev instructions — not part of the package)
-.claude/
-CLAUDE.md
-AGENTS.md
-
 # Model weights / checkpoints
 *.pt
 *.pth
@@ -68,26 +63,54 @@ logs/
 # Depth Pro (cloned locally for testing, installed as package via pip)
 depth_demo/ml-depth-pro/
 
-# Benchmark data (images, generated outputs, personal process files)
-benchmarks/images/
-benchmarks/results*
-benchmarks/threshold_comparison.csv
-benchmarks/baslines/
-benchmarks/projection_head_bench.pt
-benchmarks/CAPTURE_GUIDE.md
-benchmarks/ground_truth/
-BENCHMARKS.md
-src/visual_memory/benchmarks/redact_receipt.py
-src/visual_memory/benchmarks/query_sets/
-benchmarks/baselines/stress_tests/
-src/visual_memory/tests/input_audio/
-
-# Local benchmark/eval artifacts (temporary)
-benchmarks/baselines/*.csv
-benchmarks/baselines/*.json
-benchmarks/baselines/*.log
-benchmarks/baselines/full_benchmark/
+# Benchmarks: ignore all artifacts by default, keep only canonical inputs/docs
+benchmarks/**
+!benchmarks/
+!benchmarks/PHASE6_DEGRADATION.md
+!benchmarks/dataset.csv
+!benchmarks/dataset_degraded.csv
+!benchmarks/negative_dataset.csv
+benchmarks/figures/
+benchmarks/baselines/
 benchmarks/fast_eval/
+benchmarks/results*
+benchmarks/text_likelihood_sweep.json
+benchmarks/projection_head_bench.pt
+
+# Optional local benchmark/docs/input sets
+BENCHMARKS.md
+src/visual_memory/benchmarks/query_sets/
+src/visual_memory/tests/input_audio/
 
 # Experimental prototype workspace (temporary)
 src/visual_memory/benchmarks/experiments/
+
+# Temporary/heavy test scripts and one-off probes
+src/visual_memory/tests/scripts/benchmark_embedder.py
+src/visual_memory/tests/scripts/ocr_microbench.py
+src/visual_memory/tests/scripts/probe_detector.py
+src/visual_memory/tests/scripts/stress_artifacts.py
+src/visual_memory/tests/scripts/test_benchmark_validation.py
+src/visual_memory/tests/scripts/test_full_benchmark.py
+src/visual_memory/tests/scripts/test_full_db_audio_query_eval.py
+src/visual_memory/tests/scripts/test_ocr_benchmark.py
+src/visual_memory/tests/scripts/test_ollama_prompt_eval_dataset.py
+src/visual_memory/tests/scripts/test_ollama_prompts.py
+src/visual_memory/tests/scripts/test_whisper_context_bias_eval.py
+src/visual_memory/tests/scripts/test_vlm_qa_improvements.py
+src/visual_memory/tests/scripts/test_stress_*.py
+
+# Test media: keep only a small uncompressed core set, archive the rest
+src/visual_memory/tests/input_images/*
+!src/visual_memory/tests/input_images/wallet_1ft_table.jpg
+!src/visual_memory/tests/input_images/wallet_3ft_table.jpg
+!src/visual_memory/tests/input_images/magnesium.heic
+src/visual_memory/tests/text_demo/*.jpeg
+src/visual_memory/tests/validation_images/text/*.jpeg
+src/visual_memory/tests/validation_images/textless/*.jpeg
+
+# Compressed media bundles kept in repo
+!src/visual_memory/tests/media_archives/
+!src/visual_memory/tests/media_archives/input_images_extra_part*.zip
+!src/visual_memory/tests/media_archives/text_demo_images.zip
+!src/visual_memory/tests/media_archives/validation_images_part*.zip

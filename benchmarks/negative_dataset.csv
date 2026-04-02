@@ -1,4 +1,4 @@
-# Negative test images — should return NO match from the benchmark database.
+# Negative test images - should return NO match from the benchmark database.
 # Files are in src/visual_memory/tests/input_images/ (preexisting, no new photos needed).
 # category: true_negative = not remotely in database; hard_negative = same class but different instance
 image,category,note

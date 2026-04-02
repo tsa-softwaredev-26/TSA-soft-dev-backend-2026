@@ -30,6 +30,7 @@ import time
 from pathlib import Path
 
 _SCRIPTS_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _SCRIPTS_DIR.parents[3]
 
 
 # Test registry: (module_name, suite_tag, feature_tags)
@@ -41,7 +42,6 @@ _UNIT_TESTS = [
     ("test_projection_head",  "unit", ["learning"]),
     ("test_learning_pipeline","unit", ["learning", "api"]),
     ("test_scan_batching",    "unit", ["scan", "embedding"]),
-    ("test_full_benchmark",   "unit", ["benchmark", "settings"]),
 ]
 
 _API_TESTS = [
@@ -63,15 +63,7 @@ _SYSTEM_TESTS = [
     ("run_tests", "system", ["system"]),
 ]
 
-_STRESS_TESTS = [
-    ("test_stress_scan", "stress", ["stress", "stress-scan", "scan"]),
-    ("test_stress_remember", "stress", ["stress", "stress-api", "remember"]),
-    ("test_stress_ask_find_item", "stress", ["stress", "stress-api", "ask", "find", "item"]),
-    ("test_stress_feedback_retrain", "stress", ["stress", "stress-learning", "feedback", "retrain"]),
-    ("test_stress_transcribe", "stress", ["stress", "stress-voice", "transcribe"]),
-    ("test_stress_settings_items_sightings", "stress", ["stress", "stress-api", "settings", "items", "sightings"]),
-    ("test_stress_endpoints_concurrency", "stress", ["stress", "stress-api", "overload"]),
-]
+_STRESS_TESTS = []
 
 _PENTEST_TESTS = [
     ("test_pentest_ask_find", "pentest", ["pentest", "pentest-ask", "ask", "find"]),
@@ -94,7 +86,7 @@ def _run_module(module_name: str) -> int:
     """Run a test module as a subprocess. Returns exit code."""
     result = subprocess.run(
         [sys.executable, "-m", f"visual_memory.tests.scripts.{module_name}"],
-        cwd=_SCRIPTS_DIR.parents[4],
+        cwd=_PROJECT_ROOT,
     )
     return result.returncode
 

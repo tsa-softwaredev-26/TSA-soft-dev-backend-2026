@@ -1,5 +1,17 @@
 # Testing Guide
 
+## Test media layout
+
+- A compact uncompressed core set remains in `src/visual_memory/tests/input_images/`:
+  - `wallet_1ft_table.jpg`
+  - `wallet_3ft_table.jpg`
+  - `magnesium.heic`
+- The remaining demo/validation media is stored as zip bundles in:
+  - `src/visual_memory/tests/media_archives/input_images_extra_part*.zip`
+  - `src/visual_memory/tests/media_archives/text_demo_images.zip`
+  - `src/visual_memory/tests/media_archives/validation_images_part*.zip`
+- To restore full local media, unzip from `src/visual_memory/tests/` so paths match test defaults.
+
 ## Fast test suite (no models, < 30s)
 
 ```bash
@@ -118,24 +130,6 @@ python -m visual_memory.tests.scripts.test_estimator
 python -m visual_memory.tests.scripts.test_text_recognition
 ```
 
-### probe_detector.py - single image or batch detection probe
-```bash
-# Single image with GroundingDINO
-python -m visual_memory.tests.scripts.probe_detector <img> --prompt "<label>"
-
-# Open visualization
-python -m visual_memory.tests.scripts.probe_detector <img> --prompt "<label>" --open
-
-# Batch distance sweep
-python -m visual_memory.tests.scripts.probe_detector --batch wallet
-
-# Use YOLOE instead
-python -m visual_memory.tests.scripts.probe_detector <img> --detector yoloe
-
-# Verbose log output
-python -m visual_memory.tests.scripts.probe_detector <img> --prompt "<label>" -v
-```
-
 ---
 
 ## HuggingFace auth
@@ -164,7 +158,7 @@ Log file: `logs/app.log` (project root, JSON Lines, gitignored).
 
 ---
 
-## Voice evaluation dataset (Whisper + Ollama)
+## Voice evaluation dataset
 
 Use one shared dataset file:
 - `src/visual_memory/tests/input_data/voice_eval_dataset.json`
@@ -175,25 +169,4 @@ Place recordings here (gitignored):
 Supported audio extensions by case id (case-insensitive stem match):
 - `.m4a`, `.ogg`, `.webm`, `.wav`, `.mp3`
 
-Run Ollama extraction reliability:
-
-```bash
-python -m visual_memory.tests.scripts.test_ollama_prompt_eval_dataset \
-  --dataset src/visual_memory/tests/input_data/voice_eval_dataset.json
-```
-
-Run Whisper context-bias A/B over HTTP:
-
-```bash
-TEST_BASE_URL=https://<your-srv-us-url> \
-API_KEY=<key> \
-python -m visual_memory.tests.scripts.test_whisper_context_bias_eval \
-  --dataset src/visual_memory/tests/input_data/voice_eval_dataset.json
-```
-
-Run core-only subset:
-
-```bash
-python -m visual_memory.tests.scripts.test_ollama_prompt_eval_dataset \
-  --dataset src/visual_memory/tests/input_data/voice_eval_dataset.json --core-only
-```
+The dataset is maintained for voice route and websocket coverage in the tracked suite.
