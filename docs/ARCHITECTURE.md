@@ -249,27 +249,20 @@ Speech-to-text itself belongs in the backend, not the mobile client:
 
 ## VRAM Management (`SAVE_VRAM`)
 
-All model wrappers (`ImageEmbedder`, `CLIPTextEmbedder`, `GroundingDinoDetector`,
-`YoloeDetector`, `DepthEstimator`) expose `to_cpu()` / `to_gpu()` methods that move
-weights between GPU VRAM and system RAM without reloading from disk.
+`SAVE_VRAM` controls model parking between GPU and CPU RAM.
 
-`ModelRegistry` coordinates swapping via two methods called at the start of every
-pipeline `run()` invocation:
+- Wrappers (`ImageEmbedder`, `CLIPTextEmbedder`, `GroundingDinoDetector`, `YoloeDetector`, `DepthEstimator`) support `to_cpu()` / `to_gpu()` so weights can move without reloading from disk.
+- `ModelRegistry` swaps layouts at the start of pipeline `run()` calls:
 
 | Method | GPU (active) | CPU (parked) |
 |---|---|---|
 | `prepare_for_remember()` | GDino + DINOv3 + CLIP | YOLOE + Depth Pro |
 | `prepare_for_scan()` | YOLOE + Depth Pro + DINOv3 + CLIP | GDino |
 
-DINOv3 and CLIP stay on GPU in both modes (shared, small, ~480 MB combined).
-
-**When to enable:** set `SAVE_VRAM=1` in `.env` for GPUs with < 8 GB VRAM.
-Requires ~16 GB system RAM. Transfer cost per swap: ~1-2 s (GDino) / ~3-5 s (Depth Pro).
-On GPUs ≥ 8 GB, leave `SAVE_VRAM=0` (default); all models stay warm on GPU with no
-per-request overhead.
-
-At startup (`warm_all()`), the registry settles into scan-mode layout so the most
-common operation (scan) has no initial swap overhead.
+- DINOv3 and CLIP stay on GPU in both modes (~480 MB combined).
+- Use `SAVE_VRAM=1` for GPUs with `< 8 GB` VRAM (needs ~16 GB system RAM; swap cost: GDino ~1-2 s, Depth Pro ~3-5 s).
+- Keep `SAVE_VRAM=0` on GPUs with `>= 8 GB` VRAM to avoid per-request swap overhead.
+- `warm_all()` starts in scan layout so first scan has no swap penalty.
 
 ---
 
@@ -474,52 +467,25 @@ Multi-image (POST /remember with `images[]`):
 ## Pipeline Flows
 
 ### Remember Mode
-```
-image_path + text prompt
-    -> load_image()
-    -> mean_luminance(image)                    -> darkness check; return early if dark
-    -> _blur_score(image)                       -> blur_score, is_blurry
-    -> GroundingDinoDetector.detect_batch([image], [prompt]) or detect(image, prompt)
-        [if None] -> retry with _SECOND_PASS_TEMPLATES  -> detection or None
-    -> [if still None] return failure + blur info
-    -> crop_object(image, box)
-    -> db.get_label_avg_confidence(prompt)      -> avg_conf (historical baseline)
-    -> estimate_text_likelihood(crop)           -> text_likelihood (skip OCR if < threshold)
-    -> TextRecognizer.recognize(crop)           -> OCR text  (skipped if text_likelihood low)
-    -> ImageEmbedder.embed(crop)                -> image embedding (1024-dim)
-    -> CLIPTextEmbedder.embed_text(ocr_text)    -> text embedding (512-dim)
-    -> make_combined_embedding()                -> combined (1536-dim)
-    -> add_to_database()
-    -> _score_quality(score, avg_conf)          -> "low" | "medium" | "high"
-    -> _quality_hint(quality, is_blurry)        -> hint string
-    -> return {"success": bool, "result": {...}}
 
-Multi-image path (POST /remember with images[]):
-    -> detect_score_batch(images, prompt)       -> rank by score (no embed/DB)
-    -> pick best
-    -> run(best image)                          -> single DB write
-```
+- Load image, then run darkness and blur checks.
+- Run GroundingDINO detection (batch path when available).
+- If initial detection fails, retry with `_SECOND_PASS_TEMPLATES`; if still no hit, return failure with quality metadata.
+- Crop the detected object and compute historical confidence baseline for the label.
+- Run text-likelihood gating; call OCR only when the crop looks text-bearing.
+- Build combined embedding (`DINOv3 1024 + CLIP text 512 = 1536`).
+- Write to DB and return success plus quality tier/hint.
+- Multi-image `/remember` ranks candidates with `detect_score_batch`, then runs full pipeline once on the best image.
 
 ### Scan Mode
-```
-init:
-    db.get_all_items() -> database_embeddings[]     (SQLite; raw combined embeddings)
-    _load_head() -> _head_trained (True/False)      (DB first, file fallback)
 
-run(query_image):
-    -> mean_luminance(query_image) > darkness check; return early if dark
-    -> YoloeDetector.detect_all_batch([query_image]) or detect_all(query_image)
-    -> PASS 1: for each box -> crop -> embed (combined 1536-dim)
-        -> if _head_trained: project query + all DB embeddings via ProjectionHead
-        -> find_match() -> collect matches
-    -> deduplicate_matches()
-    -> PASS 2: DepthEstimator.estimate(image) -> depth_map  (once, only if matches found)
-    -> for each match:
-        -> get_depth_at_bbox() -> distance_ft
-        -> get_direction()     -> direction
-        -> build_narration()   -> narration string
-    -> return {"matches": [...], "count": int}
-```
+- Init loads DB embeddings and projection head state (DB first, file fallback).
+- Run darkness check; return early for dark frames.
+- Detect candidate boxes with YOLOE.
+- Pass 1: crop each box, embed, optionally project via `ProjectionHead`, and score with `find_match()`.
+- Deduplicate overlapping/duplicate matches.
+- Pass 2 (only if matches exist): run depth once, then annotate each match with distance, direction, and narration.
+- Return `{"matches": [...], "count": int}`.
 
 ---
 
@@ -594,127 +560,24 @@ python -m visual_memory.benchmarks.full_benchmark \
 
 # Format into BENCHMARKS.md
 python -m visual_memory.benchmarks.format_results
-
-# Build degradation curves (CSV + figures)
-PYTHONPATH=src python3 -m visual_memory.benchmarks.degradation_curves
 ```
-
-### Degradation curves
-
-Degradation curve artifacts are generated under:
-
-- `benchmarks/results/blur_curve.csv`
-- `benchmarks/results/brightness_curve.csv`
-- `benchmarks/results/noise_curve.csv`
-- `benchmarks/results/degradation_zones.csv`
-- `benchmarks/figures/*_degradation_curve.svg`
-
-Curves include measured retrieval/detection metrics by degradation level only when
-`benchmarks/results.csv` contains entries matching degraded-variant image names.
-Otherwise the script emits proxy-only curves with `data_status=proxy_only` and
-records fallback zones.
-
-Current practical fallback guidance (until measured degraded benchmark results
-are available):
-
-- Blur safe/danger: `<= 4` / `>= 8`
-- Brightness safe/danger: `>= 0.8` / `<= 0.4`
-- Noise safe/danger: `<= 20` / `>= 40`
-
-### Metrics
-
-| Metric | What it measures |
-|--------|-----------------|
-| Baseline accuracy | Retrieval using raw DINOv3+CLIP embeddings at production threshold |
-| Personalized accuracy | Retrieval after ProjectionHead trained on benchmark train set |
-| Accuracy delta (pp) | Improvement from projection head; positive = head helps |
-| Mean sim gap | Per-image average improvement in cosine similarity score |
-| Triplet final loss | Training convergence; lower = more distinct embedding clusters |
-| Detection rate | GroundingDINO hit rate per object and per condition |
-| Mean depth abs error (ft) | Depth Pro accuracy on detected objects with known ground truth |
-| Mean depth % error | Same as above normalized by ground truth distance |
 
 ---
 
-## Test Scripts
+## Tests
 
-Run from project root (`python -m visual_memory.tests.scripts.<name>`).
-
-### Fast test suite (no model loading, ~20-25s)
-
-Covers all API endpoints and core utilities via Flask test client + stubs. 
+Run from project root:
 
 ```bash
-# All unit + API tests
+# Fast API + unit coverage (default suite)
 python -m visual_memory.tests.scripts.run_all
 
-# Unit only (pure logic, DB, utils)
-python -m visual_memory.tests.scripts.run_all --suite unit
-
-# API only (every endpoint via Flask test client)
-python -m visual_memory.tests.scripts.run_all --suite api
-
-# Filter by tag
-python -m visual_memory.tests.scripts.run_all --tag remember,scan
-
-# Verbose (show response bodies on failure)
-TEST_VERBOSITY=2 python -m visual_memory.tests.scripts.run_all
-
-# Stop on first failure
-python -m visual_memory.tests.scripts.run_all --fail-fast
-```
-
-Test modules:
-
-| Module | Coverage |
-|---|---|
-| `test_remember_route` | POST /remember - all branches including multi-image, dark, blur |
-| `test_scan_route` | POST /scan + GET /crop |
-| `test_feedback_retrain` | POST /feedback, POST /retrain, GET /retrain/status |
-| `test_items_crud` | GET /items, DELETE /items/<label>, POST /items/<label>/rename |
-| `test_sightings_route` | POST /sightings |
-| `test_settings_routes` | GET/PATCH /settings, GET/PATCH /user-settings |
-| `test_health_debug` | GET /health, POST /debug/wipe, PATCH /debug/config |
-| `test_ask_mode` | POST /ask, POST /item/ask |
-| `test_quality_utils` | mean_luminance, estimate_text_likelihood (synthetic images) |
-| `test_similarity_utils` | cosine_similarity, find_match, iou, deduplicate_matches |
-| `test_database_store` | All DatabaseStore methods with temp SQLite |
-| `test_ollama_utils` | Circuit breaker state machine (mocked HTTP) |
-| `test_projection_head` | ProjectionHead forward pass, save/load |
-| `test_scan_batching` | Batch embedding shape and similarity consistency |
-
-### System tests (real models, ~5-30 min)
-
-```bash
-# Integration test runner - DEPTH=0 (default) skips Depth Pro; DEPTH=1 includes it (~2GB, memory-heavy)
+# Integration/system checks (real models; optional depth)
 python -m visual_memory.tests.scripts.run_tests
 DEPTH=1 python -m visual_memory.tests.scripts.run_tests
-VERBOSE=1 python -m visual_memory.tests.scripts.run_tests   # show OCR text diff
 
-# OCR benchmark - extract text from text_demo/ images, check accuracy
+# OCR benchmark
 python -m visual_memory.tests.scripts.test_ocr_benchmark
-```
-
-### Probe and diagnostic scripts
-
-```bash
-# Standalone pipeline scripts
-python -m visual_memory.tests.scripts.test_remember <image_path> "<prompt>"
-python -m visual_memory.tests.scripts.test_scan <image_path> [--db <dir>] [--focal <f_px>]
-python -m visual_memory.tests.scripts.test_text_recognition [image_path]
-python -m visual_memory.tests.scripts.test_estimator
-
-# Detector probe
-python -m visual_memory.tests.scripts.probe_detector <image_path> --prompt "<prompt>"
-python -m visual_memory.tests.scripts.probe_detector --batch wallet
-python -m visual_memory.tests.scripts.probe_detector <image_path> --detector yoloe
-```
-
-### Projection head training
-
-```bash
-python -m visual_memory.learning.trainer
-python -m visual_memory.learning.trainer --epochs 50 --lr 5e-5
 ```
 
 ---
@@ -748,88 +611,20 @@ See `UX.md` for current onboarding narration and state-driven UX behavior.
 
 ## Current Capabilities
 
-- Core engine complete and tested (depth, detection, embedding, OCR)
-- Both pipelines produce structured JSON dicts; combined 1536-dim embeddings (DINOv3 + CLIP text)
-- `run_tests.py` passes: remember:detect, scan:match, text_recognition x2 (DEPTH=0 skips estimator)
-- `learning/` module complete: ProjectionHead, ProjectionTrainer, FeedbackStore (SQLite) - all tested CPU-only
-- `test_projection_head.py` passes: identity-at-init, triplet loss, store roundtrip, training convergence
-- ProjectionHead wired into ScanPipeline with auto-scaling blend (`_apply_head`); no-op until weights exist
-- Flask API: all endpoints live (remember, scan, feedback, retrain, settings, user-settings, find, crop, items, sightings, debug)
-- /retrain is async (threading.Thread); GET /retrain/status for polling
-- /settings and ML setting overrides survive restarts (persisted to `user_state.ml_settings`, restored by `warm_all()`)
-- FeedbackStore migrated to SQLite feedback table; flat .pt file approach removed
-- Database: SQLite via DatabaseStore; items, sightings, feedback, user_state, ml_settings all in one file
-- OCR pre-check: `estimate_text_likelihood()` skips OCR service calls for plain-color crops
-- OCR backend: external HTTP service (`ocr_backend = "http"`, `ocr_health_url` settable via `OCR_HEALTH_URL`)
-- Image embedder: DINOv3 ViT-L/16 (`facebook/dinov3-vitl16-pretrain-lvd1689m`, gated on HuggingFace)
-- Text embedder: CLIP text encoder only (`openai/clip-vit-base-patch32`, 512-dim, ~180MB)
-- Deployment: `deploy/install.sh` installs systemd units from templates; primary units are `deploy/spaitra-core.service` and `deploy/spaitra-ocr.service`
- - Debug endpoints: /debug/state, /debug/echo, /debug/image, /debug/db, /debug/logs, /debug/perf, /debug/test-remember, /debug/test-scan, /debug/wipe (selective), /debug/config (live settings patch)
- - Ask Mode: POST /ask now uses query-strategy routing with document detection, ordered retrieval strategies, and explicit `strategies_tried` telemetry in responses
- - Voice transcription: POST /transcribe (Whisper Turbo) with unified state-aware context policy (`voice_state_policy`) layered on known item labels and room names; response includes diagnostics (`context_policy`, `context_state_id`)
- - Ollama integration: llama3.2:1b via `ollama_utils.py`; structured JSON output (format="json"); circuit breaker (3-strike, 60 s cooldown); configurable timeout via OLLAMA_TIMEOUT_SECONDS; OLLAMA_HOST env for non-localhost daemon; prompts include state-policy hints from the normalized state contract
- - Jailbreak resistance: `/ask` now applies an unsafe-query gate before retrieval. Queries with prompt-injection or harmful markers are blocked with `400` (`blocked: true`, `reason: "unsafe_query"`) instead of running fuzzy search.
-- OCR pre-embedding: `add_to_database()` embeds OCR text at teach time and stores in `items.ocr_embedding`; `/ask` OCR content match uses stored embedding, re-embeds only for legacy items
- - Query strategy routing: `/ask` sets `document_query` and routes primary strategy by query type (`ocr_semantic` first for document-like queries, `fuzzy_label` first otherwise) with cross-strategy fallback
- - Stateful voice WebSocket: `voice_ws.py` is backend-authoritative for mode transitions (`idle`, onboarding states, `awaiting_*`, `focused_on_item`), includes focused-mode guidance for out-of-flow teach commands ("return home to teach"), emits `control.request_image` with context for camera-required branches (`scan`, `describe`, generic teach capture), enforces strict onboarding order via `onboarding_phase` (`teach_1` -> `teach_2` -> `await_scan` -> `ask` -> `ask_prompted`), and supports shortcut contracts (`shortcut_start`, `shortcut_submit`, `shortcut_cancel`) with standardized shortcut responses (`shortcut_listening`, `shortcut_ack`, `shortcut_error`) while keeping `tts` + `session_state` authoritative.
- - Canonical voice state contract: `build_state_contract()` + `resolve_voice_policy()` provide a single source of truth for mode/pending-action policy IDs used by WebSocket dispatch, Whisper context biasing, and Ollama prompt hints
+- Production API supports teach (`/remember`), scan (`/scan`), ask (`/ask`, `/item/ask`), find (`/find`), feedback/retrain, item management, settings, and voice endpoints.
+- Core stack is in place: GroundingDINO (teach), YOLOE (scan), DINOv3+CLIP combined embeddings, OCR microservice integration, and optional Depth Pro distance estimation.
+- Scan uses optional personalization via ProjectionHead; training and feedback are persisted in SQLite.
+- Runtime/user settings are patchable via API and persist across restarts.
+- Voice path is backend-authoritative with state-aware routing and Whisper-based transcription.
+- Deploy path is systemd-based (`spaitra-core` + `spaitra-ocr`) with model warmup at startup.
 
 ---
-## Production Readiness Roadmap
+## Production Priorities
 
-### 1. Blind-first frontend completion
-
-- Finish the voice-first home surface in the frontend app with only the essential primary controls: `Settings`, `Spaitra`, and large `Scan`.
-- Audit all mobile touch targets to ensure controls are easy to hit one-handed and are stable in position across states.
-- Add platform haptics for press, listening start, recording start, cancel, and send in the frontend platform voice controllers.
-- Keep visual styling simple; do not spend release time on decorative visual differentiation. Spend it on hit area, spacing, and spoken state clarity.
-- Make `button_layout` real rather than a stub so users can swap handedness without changing the semantic flow.
-
-### 2. Voice and STT hardening
-
-- Keep STT in `src/visual_memory/engine/speech_recognition/whisper_recognizer.py` and route all voice requests through `src/visual_memory/api/routes/transcribe.py` and `src/visual_memory/api/routes/voice_ws.py`.
-- Add production logging and alert thresholds for transcription latency, decode failures, empty transcripts, and context-bias usage.
-- Harden `audio_utils.py` and `transcribe.py` against malformed, silent, clipped, and very short audio with explicit user-facing error responses.
-- Finalize voice-state routing in `voice_ws.py` so every state transition emits both `tts` and `session_state` consistently.
-- Add load-testing for concurrent voice sessions and confirm Whisper warm/cold behavior under GPU contention.
-
-### 3. Scan / teach / ask product completion
-
-- Complete the end-to-end onboarding flow and verify it closes back to `idle` after the guided teach/scan/ask sequence.
-- Finish focused-item follow-up behavior so item-scoped asks, OCR actions, wrong/correct feedback, and navigation all work from the same focused scan context.
-- Tighten teach overwrite behavior, duplicate handling, and user-facing narration so memory updates are understandable and safe.
-- Validate scan crop caching, `/crop` lookup, and follow-up query context across reconnects and session restarts.
-- Decide which "future plan" items are pre-launch vs post-launch:
-  - duplicate/bloat prevention is pre-launch if current overwrite behavior is too risky
-  - HNSW indexing is post-launch unless memory scale proves the current scan/search path too slow
-
-### 4. Model quality and evaluation
-
-- Run full voice eval, OCR eval, scan retrieval eval, and depth eval on the latest production-intended models and thresholds.
-- Lock release thresholds for similarity, OCR gating, and detection quality based on benchmark data, not ad hoc tuning.
-- Expand test coverage for blind-user-relevant failure cases: noisy room audio, partial button presses, cluttered scan scenes, dim lighting, and document-heavy rooms.
-- Add acceptance criteria for production readiness:
-  - teach succeeds reliably on target household objects
-  - scan returns stable left/right ordering
-  - ask/find returns useful answers from saved memory
-  - focused-item follow-up stays in context
-  - voice latency is acceptable on deployed hardware
-
-### 5. Operational hardening
-
-- Add dashboards and alerts for core health, OCR health, GPU memory pressure, STT latency, socket disconnect rate, and request failure rate.
-- Confirm backup, restore, and corruption-recovery procedures for `data/memory.db`.
-- Finalize API key management, rotation procedure, and deploy-time secret handling.
-- Verify service boot order and recovery behavior for `spaitra-core` and `spaitra-ocr` after reboot, crash, or transient network failure.
-- Define release rollback steps and a reproducible deploy checklist tied to benchmark results.
-
-### 6. Release gates before first production launch
-
-- Android and iOS frontend builds pass from a clean environment.
-- WebSocket end-to-end tests pass for teach, scan, navigate, ask, describe, reconnect, and malformed payload cases.
-- Production-like server benchmark run is captured and documented for the exact release candidate.
-- Manual accessibility pass is completed on-device with a blind-first rubric focused on button discoverability, press reliability, spoken guidance, and recovery from mistakes.
-- Documentation is updated together: `ARCHITECTURE.md`, `UX.md`, `FRONTEND_GUIDE.md`, deploy docs, and the release checklist.
+- Keep benchmark harness behavior aligned with runtime paths and thresholds before tuning releases.
+- Finish frontend blind-first polish (stable controls, haptics, clear spoken state guidance, handedness layout).
+- Harden operational readiness: monitoring/alerts, backup and restore procedures, secret rotation, and rollback checklist.
+- Lock release gates on measured quality (voice, OCR, retrieval, depth) and accessibility pass results.
 
 ---
 
@@ -887,4 +682,5 @@ Before merging tuning changes:
 
 ### In-progress tuning placeholders
 
-- **Scan similarity thresholds:** actively being tuned against current benchmark runs; final values intentionally not locked in this document yet.
+- **Scan similarity thresholds:** benchmark runs compare against production settings by default. Holdout auto-tuning is opt-in via `--auto-tune-thresholds` so benchmark reports stay comparable to live thresholds.
+- **Scan margin gate:** stays enabled by default for false-positive control in production and benchmark runs.
