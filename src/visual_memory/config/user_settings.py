@@ -78,9 +78,11 @@ class UserSettings:
     button_layout: str = "default"
 
     def get_performance_config(self) -> PerformanceConfig:
+        """Resolve the runtime performance parameters for the selected mode."""
         return PerformanceConfig.for_mode(self.performance_mode)
 
     def save(self, db: DatabaseStore) -> None:
+        """Persist user-visible settings to the shared database store."""
         db.save_user_settings({
             "performance_mode": self.performance_mode.value,
             "voice_speed": self.voice_speed,
@@ -90,6 +92,7 @@ class UserSettings:
 
     @classmethod
     def load(cls, db: DatabaseStore) -> UserSettings:
+        """Load persisted settings and fall back to defaults on invalid mode values."""
         data = db.load_user_settings() or {}
         try:
             return cls(
@@ -102,6 +105,7 @@ class UserSettings:
             return cls()
 
     def to_dict(self) -> dict:
+        """Serialize settings for API responses including derived read-only config."""
         cfg = self.get_performance_config()
         return {
             "performance_mode": self.performance_mode.value,

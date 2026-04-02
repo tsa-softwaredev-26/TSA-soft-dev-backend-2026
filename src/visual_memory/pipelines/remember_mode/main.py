@@ -17,6 +17,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """Run remember mode once from the CLI and return a process exit code."""
     args = _build_parser().parse_args()
     pipeline = RememberPipeline()
     result = pipeline.run(Path(args.image), args.prompt)

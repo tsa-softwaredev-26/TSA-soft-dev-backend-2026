@@ -30,6 +30,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """Run scan mode once from the CLI and return a process exit code."""
     args = _build_parser().parse_args()
     settings = Settings()
     pipeline = ScanPipeline(

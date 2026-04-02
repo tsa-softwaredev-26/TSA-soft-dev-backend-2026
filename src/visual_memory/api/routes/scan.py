@@ -11,6 +11,7 @@ _SCANS_DIR = Path(__file__).resolve().parents[4] / "scans"
 
 
 def process_scan_request(image_file, focal_length_raw: str = "") -> tuple[dict, int]:
+    """Validate input, run scan pipeline, persist sightings, and return API payload."""
     if image_file is None:
         return {"error": "missing field: image"}, 400
 
@@ -39,6 +40,7 @@ def process_scan_request(image_file, focal_length_raw: str = "") -> tuple[dict, 
         crop_path = None
         crop = pipeline.get_cached_crop(scan_id, i)
         if crop is not None:
+            # Save matched crops for later sightings review in the app.
             _SCANS_DIR.mkdir(exist_ok=True)
             crop_path = str(_SCANS_DIR / f"{scan_id}_{i}.jpg")
             crop.save(crop_path, format="JPEG", quality=85)
@@ -56,6 +58,7 @@ def process_scan_request(image_file, focal_length_raw: str = "") -> tuple[dict, 
 
 @scan_bp.post("/scan")
 def scan():
+    """HTTP endpoint wrapper for process_scan_request."""
     result, status = process_scan_request(
         image_file=request.files.get("image"),
         focal_length_raw=request.form.get("focal_length_px", ""),
